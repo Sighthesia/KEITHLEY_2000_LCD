@@ -1,0 +1,3 @@
+Version V15 to V15: 
+- changed Reset Line of Graphics Acceleration Control Board to Open Drain
+
