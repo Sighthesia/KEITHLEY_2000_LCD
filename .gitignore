@@ -1,5 +1,7 @@
 # Build outputs
 KEITHLEY_2000_LCD/build/
+build/
+build-check/
 firmware/build/
 
 # Compiled object/ELF
