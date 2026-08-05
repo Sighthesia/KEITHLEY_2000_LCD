@@ -44,12 +44,16 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    Core/Src/hal_board.c
+    Core/Src/lt7680_bus.c
+    Core/Src/lt7680_gfx.c
+    Core/Src/k2000_proto.c
+    Core/Src/ui_model.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    Core/Inc
 )
 
 # Add project symbols (macros)

@@ -1,0 +1,8 @@
+# Build outputs
+KEITHLEY_2000_LCD/build/
+firmware/build/
+
+# Compiled object/ELF
+*.o
+*.elf
+*.map

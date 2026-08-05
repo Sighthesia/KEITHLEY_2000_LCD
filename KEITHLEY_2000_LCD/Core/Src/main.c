@@ -21,7 +21,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "hal_board.h"
+#include "k2000_proto.h"
+#include "lt7680_gfx.h"
+#include "ui_model.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -53,6 +56,36 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static ui_model_t s_ui;
+
+static void proto_on_event(const k2000_event_t *evt)
+{
+    if (evt == 0) {
+        return;
+    }
+    switch (evt->type) {
+    case K2000_EVT_FIELD:
+        ui_model_apply_field(&s_ui, evt->field.tag, evt->field.value,
+                             evt->field.value_len);
+        break;
+    case K2000_EVT_CURSOR:
+        ui_model_apply_cursor(&s_ui, evt->pos);
+        break;
+    case K2000_EVT_BLINK_START:
+        ui_model_apply_blink(&s_ui, true);
+        break;
+    case K2000_EVT_BLINK_END:
+        ui_model_apply_blink(&s_ui, false);
+        break;
+    default:
+        break;
+    }
+}
+
+static void proto_on_unknown(uint8_t byte)
+{
+    (void)byte;
+}
 
 /* USER CODE END 0 */
 
@@ -64,6 +97,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  ui_model_init(&s_ui);
 
   /* USER CODE END 1 */
 
@@ -85,13 +119,27 @@ int main(void)
 
   /* Initialize all configured peripherals */
   /* USER CODE BEGIN 2 */
+  {
+    const lt7680_panel_t panel = {480u, 272u, 16u};
+    const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
 
+    hal_board_init();
+    k2000_proto_init(&proto_cb);
+    lt7680_reset();
+    lt7680_wait_ready(1000);
+    lt7680_gfx_init(&panel);
+    lt7680_gfx_clear(0x0000);
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    int ch = hal_uart_receive_byte();
+    if (ch >= 0) {
+      k2000_proto_feed((uint8_t)ch);
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
