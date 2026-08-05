@@ -12,12 +12,13 @@
 ## 分析与重建
 
 - 先以带型号网表建立硬件抽象和引脚表，再分析固件镜像；当前可采用 `STM32F103C8`、`LT7680A-R`、`W25Q128JV` 作为分析起点，但仍需实物/原理图验证时钟、封装和工作模式。
-- 网表确认：`PA9/PA10` 为经 `BSS138` 电平转换的 `USART_TX/RX`；`PB12..PB15` 为 `SPI2_SS/SCK/MISO/MOSI`；`PA0..PA7` 连接 LCM/LT7680 控制、串行数据和中断；`PB0..PB7` 连接 8 个键盘列；LT7680 通过 `FLASH_*` 连接 `W25Q128JV`，并使用缓冲后的 `LCM_SCK/LCM_SDO`。
-- ODS 的 `TX` 表记录按键字符和 `PA0..PA3` 行选、`PB0..PB7` 列选；这与 V20 网表把 `PA0..PA7` 接到 LCM 的记录相互矛盾。实现键盘扫描前必须用原理图、PCB 连通性或示波器/逻辑分析仪确认版本和信号归属，不得合并推测。
+- 网表确认：`PA9/PA10` 为经 `BSS138` 电平转换的 `USART_TX/RX`；`PB12..PB15` 为 `SPI2_SS/SCK/MISO/MOSI`；`PA0=LCD_CS`、`PA1=LCD_SCLK`、`PA2=LCD_SDI`、`PA3=LCM_RES`、`PA4=LCM_SS`、`PA5=LCM_SCK`、`PA6=LCM_SDO`、`PA7=LCM_INT`；`PB0..PB7` 连接 `KEY_COL1..8`，`PC13/PC14/PC15/PB10` 连接 `KEY_ROW1..4`；LT7680 通过 `FLASH_*` 连接 `W25Q128JV`，并使用缓冲后的 `LCM_SCK/LCM_SDO` 与面板 `X6` 的 RGB/控制信号。
+- 旧版 ODS 里的 `TX` 行选记录可以作为历史参考，但和最新网表相比已经过时；实现键盘扫描时以最新网表为准，不要再按 `PA0..PA3` 写死。
 - ODS 的 `RX`/`Notes` 记录了 `TAG + value`、`0x0D` 消息起始、显示标签、光标定位 `POS`、闪烁和 VFD 指示器字段；这些可作为协议逆向线索，不能据此断言所有消息边界、未实现按键或标签含义。
 - 任何新固件先做离线构建和静态检查，再在限流电源、断开仪器高压测量路径的条件下验证；首次烧录保留原始 V15/V16 镜像和可恢复的 SWD 接线。
 - 目前没有可执行的 build/test 命令。建立 STM32 工程后，必须把确切工具链、目标 MCU、链接脚本、烧录命令和最小硬件验收步骤补充到本文件。
 - 可用 `arm-none-eabi-objcopy -I ihex -O binary <firmware.hex> <firmware.bin>` 将 HEX 转为二进制供静态分析；转换不会恢复源代码或协议语义。
+- `firmware/src/` 已建立驱动骨架（`lt7680_bus`、`lt7680_gfx`、`k2000_proto`、`ui_model`、HAL stub、示例 `main.c`），可在 `firmware/` 下用 `make` 离线编译验证，使用 `arm-none-eabi-gcc`（`-mcpu=cortex-m3 -mthumb`）。当前链接为示例/裸机骨架，尚未包含真实 STM32 启动代码、链接脚本、外设寄存器驱动和烧录流程；`lt7680_gfx.c` 中的寄存器地址为占位符，需按 LT7680A-R 数据手册核对。
 
 ## 版本与许可
 
