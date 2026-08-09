@@ -12,6 +12,8 @@ typedef enum {
     K2000_STATE_IDLE,
     K2000_STATE_VALUE,
     K2000_STATE_BLINK_ARG,
+    K2000_STATE_STATUS_ARG,
+    K2000_STATE_POS_ARG,
 } k2000_state_t;
 
 static const k2000_proto_cb_t *s_cb;
@@ -59,9 +61,13 @@ void k2000_proto_feed(uint8_t byte)
     case K2000_STATE_IDLE:
         if (byte == K2000_TAG_POS) {
             s_evt.type = K2000_EVT_CURSOR;
-            s_state = K2000_STATE_VALUE;
+            s_state = K2000_STATE_POS_ARG;
         } else if (byte == K2000_TAG_BLINK_BEGIN) {
             s_state = K2000_STATE_BLINK_ARG;
+        } else if (k2000_is_status_tag(byte)) {
+            s_evt.type = K2000_EVT_STATUS;
+            s_evt.status_tag = byte;
+            s_state = K2000_STATE_STATUS_ARG;
         } else {
             s_evt_tag = byte;
             s_evt.type = K2000_EVT_FIELD;
@@ -72,13 +78,20 @@ void k2000_proto_feed(uint8_t byte)
 
     case K2000_STATE_VALUE:
         if (byte == K2000_TAG_POS) {
+            emit(&s_evt);
+            memset(&s_evt, 0, sizeof(s_evt));
             s_evt.type = K2000_EVT_CURSOR;
-            memset(&s_evt.field, 0, sizeof(s_evt.field));
-            s_state = K2000_STATE_VALUE;
+            s_state = K2000_STATE_POS_ARG;
         } else if (byte == K2000_TAG_BLINK_BEGIN) {
             emit(&s_evt);
             memset(&s_evt, 0, sizeof(s_evt));
             s_state = K2000_STATE_BLINK_ARG;
+        } else if (k2000_is_status_tag(byte)) {
+            emit(&s_evt);
+            memset(&s_evt, 0, sizeof(s_evt));
+            s_evt.type = K2000_EVT_STATUS;
+            s_evt.status_tag = byte;
+            s_state = K2000_STATE_STATUS_ARG;
         } else if (byte >= 0x80u) {
             emit(&s_evt);
             memset(&s_evt, 0, sizeof(s_evt));
@@ -105,6 +118,23 @@ void k2000_proto_feed(uint8_t byte)
         emit(&s_evt);
         memset(&s_evt, 0, sizeof(s_evt));
         s_state = K2000_STATE_IDLE;
+        break;
+
+    case K2000_STATE_STATUS_ARG:
+        s_evt.status_value = byte;
+        emit(&s_evt);
+        memset(&s_evt, 0, sizeof(s_evt));
+        s_state = K2000_STATE_IDLE;
+        break;
+
+    case K2000_STATE_POS_ARG:
+        if (byte >= '0' && byte <= '9') {
+            s_evt.pos = (uint16_t)(s_evt.pos * 10u + (uint8_t)(byte - '0'));
+        } else {
+            emit(&s_evt);
+            memset(&s_evt, 0, sizeof(s_evt));
+            s_state = K2000_STATE_IDLE;
+        }
         break;
 
     default:
