@@ -191,7 +191,7 @@ static void init_gpio(void)
 static void init_uart(void)
 {
     uint32_t pclk2 = HAL_RCC_GetPCLK2Freq();
-    uint32_t brr = ((pclk2 * 16u) + (UART_BAUD / 2u)) / UART_BAUD;
+    uint32_t brr = (pclk2 + (UART_BAUD / 2u)) / UART_BAUD;
 
     __HAL_RCC_USART1_CLK_ENABLE();
     USART1->CR1 = 0;
