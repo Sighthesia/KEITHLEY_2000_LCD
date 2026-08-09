@@ -5,6 +5,11 @@
 
 #define UART_BAUD 115200u
 
+/* LT7680 SPI transport: 1 = SPI1 hardware (PA4 CS, PA5 SCK, PA6 MISO,
+ * PA7 MOSI), 0 = software bit-bang fallback. Hardware SPI is ~25-30x faster;
+ * keep the bit-bang path for on-target diagnosis. */
+#define LT7680_SPI_HW 1u
+
 #define LCD_CS_GPIO_PORT GPIOA
 #define LCD_CS_PIN GPIO_PIN_0
 #define LCD_SCLK_GPIO_PORT GPIOA
@@ -56,6 +61,14 @@ static void hal_delay_ms(uint32_t ms)
 
 static uint8_t hal_spi_xfer(uint8_t byte)
 {
+#if LT7680_SPI_HW
+    while ((SPI1->SR & SPI_SR_TXE) == 0u) {
+    }
+    SPI1->DR = byte;
+    while ((SPI1->SR & SPI_SR_RXNE) == 0u) {
+    }
+    return (uint8_t)SPI1->DR;
+#else
     uint8_t in = 0;
     for (int i = 7; i >= 0; i--) {
         HAL_GPIO_WritePin(LCM_SCK_GPIO_PORT, LCM_SCK_PIN, GPIO_PIN_RESET);
@@ -68,6 +81,7 @@ static uint8_t hal_spi_xfer(uint8_t byte)
         HAL_GPIO_WritePin(LCM_SCK_GPIO_PORT, LCM_SCK_PIN, GPIO_PIN_RESET);
     }
     return in;
+#endif
 }
 
 static void panel_write_9bit(bool data, uint8_t value)
@@ -114,8 +128,25 @@ static void init_gpio(void)
     gpio.Pull = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_HIGH;
     gpio.Pin = LCD_CS_PIN | LCD_SCLK_PIN | LCD_SDI_PIN | LCM_RES_PIN |
-               LT7680_CS_PIN | LCM_SCK_PIN | LT7680_SDI_PIN;
+               LT7680_CS_PIN;
     HAL_GPIO_Init(GPIOA, &gpio);
+
+#if LT7680_SPI_HW
+    /* SPI1 hardware: PA5 (SCK) and PA7 (MOSI) are alternate-function
+     * push-pull. CS (PA4) stays a plain GPIO so the bit-bang and hardware
+     * paths share the same chip-select handling. */
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin = LCM_SCK_PIN | LT7680_SDI_PIN;
+    HAL_GPIO_Init(GPIOA, &gpio);
+#else
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin = LCM_SCK_PIN | LT7680_SDI_PIN;
+    HAL_GPIO_Init(GPIOA, &gpio);
+#endif
 
     /* LT7680 SDO is PA6 and INT is PA8. Do not drive either line. */
     gpio.Mode = GPIO_MODE_INPUT;
@@ -168,6 +199,20 @@ static void init_uart(void)
     USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
 }
 
+#if LT7680_SPI_HW
+static void init_spi1(void)
+{
+    __HAL_RCC_SPI1_CLK_ENABLE();
+    SPI1->CR1 = 0;
+    /* Mode 0 (CPOL=0, CPHA=0), master, 8-bit, MSB first, /2 prescaler.
+     * PCLK2 = 8 MHz -> SPI clock = 4 MHz.  Mode 0 matches the verified
+     * bit-bang signalling the LT7680 color-bars milestone used. */
+    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM | SPI_CR1_BR_0;
+    SPI1->CR2 = 0;
+    SPI1->CR1 |= SPI_CR1_SPE;
+}
+#endif
+
 static void uart_put_byte(uint8_t b)
 {
     while ((USART1->SR & USART_SR_TXE) == 0u) {
@@ -179,6 +224,9 @@ void hal_board_init(void)
 {
     init_gpio();
     init_uart();
+#if LT7680_SPI_HW
+    init_spi1();
+#endif
     lt7680_bus_init(&s_lt7680_io);
 }
 
