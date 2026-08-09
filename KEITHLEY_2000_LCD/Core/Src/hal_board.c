@@ -302,9 +302,6 @@ void hal_panel_init(void)
                                                   0x3Fu, 0x1Fu}, 6u);
     panel_write_command(0xFFu, page_00, sizeof(page_00));
     panel_write_command(0x11u, 0, 0u);
-    HAL_Delay(120u);
-    panel_write_command(0x35u, (const uint8_t[]){0x00u}, 1u);
-    panel_write_command(0x3Au, (const uint8_t[]){0x66u}, 1u);
 #if PANEL_LANDSCAPE
     /* Landscape: ST7701S MADCTL (0x36) row/column exchange so each 960-wide
      * LT7680 scan line lands on the panel's long (960 px) axis. 0x60 = MX|MV
@@ -314,6 +311,9 @@ void hal_panel_init(void)
      * (LT7680 PLL C1/C2) may need retuning for the swapped 960x320 timing. */
     panel_write_command(0x36u, (const uint8_t[]){0x60u}, 1u);
 #endif
+    HAL_Delay(120u);
+    panel_write_command(0x35u, (const uint8_t[]){0x00u}, 1u);
+    panel_write_command(0x3Au, (const uint8_t[]){0x66u}, 1u);
     panel_write_command(0x29u, 0, 0u);
 }
 

@@ -79,7 +79,6 @@
  * non-fill circle/ellipse = 0x80, fill circle = 0xC0,
  * non-fill square = 0xA0, fill square = 0xE0 (bit7 start, bit6 fill). */
 #define DCR1_DRAW_EN    (0x01u << 7)
-#define DCR1_DRAW_FILL  (0x01u << 6)
 
 /* Fixed PLL targets. MCLK must match the SDRAM refresh reference
  * (REG[E3h:E2h] = 0x061A is given for MCLK = 100 MHz). */
@@ -580,8 +579,11 @@ lt7680_status_t lt7680_gfx_draw_circle(int16_t xc, int16_t yc, int16_t r,
     if (xc < 0 || yc < 0 || r < 0) {
         return LT7680_ERR_PARAM;
     }
-    if ((uint32_t)xc + (uint32_t)r > s_panel.width ||
-        (uint32_t)yc + (uint32_t)r > s_panel.height) {
+    /* Circle spans [xc-r, xc+r] x [yc-r, yc+r] inclusive, so both edges
+     * must fit in [0, width-1] x [0, height-1]. */
+    if (xc - r < 0 || yc - r < 0 ||
+        (uint32_t)xc + (uint32_t)r >= s_panel.width ||
+        (uint32_t)yc + (uint32_t)r >= s_panel.height) {
         return LT7680_ERR_PARAM;
     }
 

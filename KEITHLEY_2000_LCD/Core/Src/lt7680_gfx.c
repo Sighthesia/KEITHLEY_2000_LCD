@@ -347,8 +347,11 @@ lt7680_status_t lt7680_gfx_draw_circle(int16_t xc, int16_t yc, int16_t r,
     if (xc < 0 || yc < 0 || r < 0) {
         return LT7680_ERR_PARAM;
     }
-    if ((uint32_t)xc + (uint32_t)r > s_panel.width ||
-        (uint32_t)yc + (uint32_t)r > s_panel.height) {
+    /* Circle spans [xc-r, xc+r] x [yc-r, yc+r] inclusive, so both edges
+     * must fit in [0, width-1] x [0, height-1]. */
+    if (xc - r < 0 || yc - r < 0 ||
+        (uint32_t)xc + (uint32_t)r >= s_panel.width ||
+        (uint32_t)yc + (uint32_t)r >= s_panel.height) {
         return LT7680_ERR_PARAM;
     }
 

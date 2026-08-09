@@ -88,7 +88,7 @@ P0-1/P0-2 改动 hal_board.c;P0-3 改动 k2000_proto.c/h(两工程同步)。三�
 
 ### 旋转处理
 
-横放 960×320,`hal_panel_init()` 阶段配置 ST7701S 扫描方向 + LT7680 内存方向(实现时按 DS 核对,独立验证点;备选 ST7701S MADCTL)。
+横放 960×320。首选 ST7701S MADCTL:在 `hal_panel_init()` page_00 序列 0x11 附近发 `0x36=0x60`(备选 0xE0 反向),同时把 LT7680 面板时序换成 960×320(main.c `PANEL_LANDSCAPE` 宏)。MADCTL 值、RGB 接口下是否生效、PCLK 是否需重调均为真机验证点;若 MADCTL 无效,回退为 LT7680 内存方向(MACR REG[02h] bit[2:1])。
 
 ## 数据流与刷新策略
 
@@ -190,7 +190,7 @@ UART(主机) → k2000_proto 解析
 |---|---|
 | SPI1 @2MHz 下大数字逐写仍慢 | P2 实测,预留 BTE 优化接口 `lt7680_gfx_bitblt()` |
 | LT7680 字库通道寄存器细节(RA8876 vs LT7680 差异) | 本轮不使用字库通道(Q9 已规避);P5 中文走自绘子集 |
-| 横放旋转寄存器不确定 | P1 首项即验证,备选 ST7701S MADCTL |
+| 横放旋转寄存器不确定 | P1 首选 ST7701S MADCTL(0x36,真机验证 0x60/0xE0),备选 LT7680 MACR REG[02h] |
 | 64KB Flash 容量吃紧 | 数字数组 1bpp 压缩;中文子集仅固定标签 |
 | P0-3 解析器改动影响既有协议 | P0 验收含彩条回归 + 协议单测 |
 | UART 波特率与主机不匹配 | P0 真机 loopback/示波器实测确认 |
