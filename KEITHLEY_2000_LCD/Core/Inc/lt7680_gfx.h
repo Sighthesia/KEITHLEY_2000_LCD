@@ -18,6 +18,7 @@ typedef struct {
 } lt7680_rect_t;
 
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
+lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);
 lt7680_status_t lt7680_gfx_draw_rect(const lt7680_rect_t *rect, uint16_t rgb565);

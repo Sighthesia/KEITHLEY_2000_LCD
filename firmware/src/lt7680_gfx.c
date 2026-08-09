@@ -1,23 +1,394 @@
 #include "lt7680_gfx.h"
 
+/* LT768x register map (datasheet V4.2). All register addresses are 8-bit. */
+#define REG_SRR      0x00u  /* Software Reset Register */
+#define REG_CCR      0x01u  /* Chip Configuration Register */
+#define REG_MACR     0x02u  /* Memory Access Control Register */
+#define REG_ICR      0x03u  /* Input Control Register */
+#define REG_MRWDP    0x04u  /* Memory Data R/W Port */
+#define REG_PPLLC1   0x05u  /* PCLK PLL Control 1 */
+#define REG_PPLLC2   0x06u  /* PCLK PLL Control 2 */
+#define REG_MPLLC1   0x07u  /* MCLK PLL Control 1 */
+#define REG_MPLLC2   0x08u  /* MCLK PLL Control 2 */
+#define REG_CPLLC1   0x09u  /* CCLK PLL Control 1 */
+#define REG_CPLLC2   0x0Au  /* CCLK PLL Control 2 */
+#define REG_MPWCTR   0x10u  /* Main/PIP Window Control */
+#define REG_DPCR     0x12u  /* Display Configuration Register */
+#define REG_PCSR     0x13u  /* Panel Scan Clock & Data Setting */
+#define REG_HDWR     0x14u  /* Horizontal Display Width */
+#define REG_HDWFTR   0x15u  /* Horizontal Display Width Fine Tune */
+#define REG_HNDR     0x16u  /* Horizontal Non-Display Period */
+#define REG_HNDFTR   0x17u  /* Horizontal Non-Display Period Fine Tune */
+#define REG_HSTR     0x18u  /* HSYNC Start Position */
+#define REG_HPWR     0x19u  /* HSYNC Pulse Width */
+#define REG_VDHR     0x1Au  /* Vertical Display Height */
+#define REG_VNDR     0x1Cu  /* Vertical Non-Display Period */
+#define REG_VSTR     0x1Eu  /* VSYNC Start Position */
+#define REG_VPWR     0x1Fu  /* VSYNC Pulse Width */
+#define REG_MISA     0x20u  /* Main Image Start Address */
+#define REG_MIW      0x24u  /* Main Image Width */
+#define REG_MWULX    0x26u  /* Main Window Upper-Left X */
+#define REG_MWULY    0x28u  /* Main Window Upper-Left Y */
+#define REG_CVSSA    0x50u  /* Canvas Start Address */
+#define REG_CVSIMWTH 0x54u  /* Canvas Image Width */
+#define REG_AWULX    0x56u  /* Active Window Upper-Left X */
+#define REG_AWULY    0x58u  /* Active Window Upper-Left Y */
+#define REG_AWWTH    0x5Au  /* Active Window Width */
+#define REG_AWHT     0x5Cu  /* Active Window Height */
+#define REG_AWCOLOR  0x5Eu  /* Canvas & Active Window Color Depth */
+#define REG_CURH     0x5Fu  /* Graphic R/W X Coordinate */
+#define REG_CURV     0x61u  /* Graphic R/W Y Coordinate */
+#define REG_CURHW    0x63u  /* Text Write X Coordinates */
+#define REG_CURVW    0x65u  /* Text Write Y Coordinates */
+#define REG_DCR0     0x67u  /* Draw Line/Triangle Control Register 0 */
+#define REG_GE_SPT   0x68u  /* Geometry Engine Start Point (4 bytes) */
+#define REG_GE_EPT   0x6Cu  /* Geometry Engine End Point (4 bytes) */
+#define REG_FGCR     0xD2u  /* Foreground Color - Red */
+#define REG_FGCG     0xD3u  /* Foreground Color - Green */
+#define REG_FGCB     0xD4u  /* Foreground Color - Blue */
+#define REG_SDRAR    0xE0u  /* SDRAM Attribute Register */
+#define REG_SDRMD    0xE1u  /* SDRAM Mode Register */
+#define REG_SDRREF   0xE2u  /* SDRAM Auto Refresh Interval (E2=low, E3=high) */
+#define REG_SDRCR    0xE4u  /* SDRAM Control Register */
+
+/* Chip configuration bits (REG[01h]). */
+#define CCR_TFT_16BIT   (0x02u << 3)  /* bit[4:3] = 10b: 16-bit TFT output */
+#define CCR_SPI_MASTER  (0x01u << 1)  /* bit1: serial Flash/SPI master */
+
+/* Main/PIP window control (REG[10h]). */
+#define MPWCTR_MAIN_16BPP (0x01u << 2) /* bit[3:2] = 01b: 16bpp main image */
+#define MPWCTR_SYNC_MODE  0x00u        /* bit0 = 0: DE + HSYNC + VSYNC */
+
+/* Display configuration (REG[12h]). */
+#define DPCR_DISPLAY_ON   (0x01u << 6)
+#define DPCR_PCLK_INVERT  (0x01u << 7)
+
+/* Canvas & active window color depth (REG[5Eh]). */
+#define AWCOLOR_BLOCK (0x00u << 2)  /* bit2 = 0: block (X-Y) addressing */
+#define AWCOLOR_16BPP 0x01u         /* bit[1:0] = 01b: 16bpp */
+
+/* Line/triangle control 0 (REG[67h]). */
+#define DCR0_DRAW_FILL (0x01u << 5)  /* bit5: fill */
+#define DCR0_DRAW_RECT (0x02u << 1)  /* bit[4:1] = 0010b: rectangle */
+#define DCR0_DRAW_EN   (0x01u << 7)  /* bit7: start drawing */
+
+/* Fixed PLL targets. MCLK must match the SDRAM refresh reference
+ * (REG[E3h:E2h] = 0x061A is given for MCLK = 100 MHz). */
+#define PLL_CCLK_MHZ 100u
+#define PLL_MCLK_MHZ 100u
+
 static lt7680_panel_t s_panel;
 
-/* Placeholder register addresses - resolve from LT7680A-R datasheet V4.2. */
-#define LT7680_REG_MAIN_WIN_START_X 0x0300u
-#define LT7680_REG_MAIN_WIN_END_X 0x0302u
-#define LT7680_REG_MAIN_WIN_START_Y 0x0304u
-#define LT7680_REG_MAIN_WIN_END_Y 0x0306u
-#define LT7680_REG_MAIN_WIN_BASE_ADDR 0x0308u
-#define LT7680_REG_MEMORY_WRITE_X 0x030Cu
-#define LT7680_REG_MEMORY_WRITE_Y 0x030Eu
-#define LT7680_REG_MEMORY_WRITE_XY 0x0310u
+static lt7680_status_t wr(uint8_t reg, uint8_t val)
+{
+    return lt7680_write_reg(reg, val);
+}
+
+/* Write a 13-bit value (coordinate or width) to a register pair, LSB first. */
+static lt7680_status_t wr13(uint8_t reg, uint16_t val)
+{
+    lt7680_status_t st = wr(reg, (uint8_t)(val & 0xFFu));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wr((uint8_t)(reg + 1u), (uint8_t)((val >> 8) & 0x1Fu));
+}
+
+/* Write a 32-bit little-endian value to 4 consecutive registers. */
+static lt7680_status_t wr32le(uint8_t reg, uint32_t val)
+{
+    uint8_t i;
+    for (i = 0; i < 4; i++) {
+        lt7680_status_t st = wr((uint8_t)(reg + i),
+                                (uint8_t)(val >> (8 * i)));
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    return LT7680_OK;
+}
+
+/* Program one PLL.  FOUT = XI * (N / R) / OD  with XI = 10 MHz.
+ * We pick R = 10 and OD = 1 (00b), so N = fout[MHz]. */
+static lt7680_status_t pll_program(uint32_t fout_mhz, uint8_t c1reg,
+                                   uint8_t c2reg)
+{
+    uint32_t n = fout_mhz;
+    uint8_t r = 10u;
+    uint8_t od = 0u;   /* 00b: divide by 1 */
+    uint8_t c1;
+
+    if (n < 2u) {
+        n = 2u;
+    }
+    if (n > 511u) {
+        n = 511u;
+    }
+    /* C1: bit[7:6] = OD, bit[5:1] = R, bit0 = N[8]. */
+    c1 = (uint8_t)((od << 6) | (r << 1) | ((n >> 8) & 0x01u));
+    {
+        lt7680_status_t st = wr(c1reg, c1);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        return wr(c2reg, (uint8_t)(n & 0xFFu));
+    }
+}
+
+static lt7680_status_t wait_pll_ready(void)
+{
+    uint8_t ccr = 0;
+    uint16_t i;
+    for (i = 0; i < 2000u; i++) {
+        lt7680_status_t st = lt7680_read_reg(REG_CCR, &ccr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((ccr & 0x80u) != 0u) { /* bit7: PLL clock ready */
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+static lt7680_status_t wait_sdram_ready(void)
+{
+    uint8_t status = 0;
+    uint16_t i;
+    for (i = 0; i < 1000u; i++) {
+        lt7680_status_t st = lt7680_read_status(&status);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((status & LT7680_STATUS_DPRAM_READY) != 0u) {
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+static lt7680_status_t set_active_window(const lt7680_rect_t *rect)
+{
+    lt7680_status_t st;
+
+    st = wr13(REG_AWULX, rect->x);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_AWULY, rect->y);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_AWWTH, rect->w);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wr13(REG_AWHT, rect->h);
+}
+
+static uint32_t panel_pclk(const lt7680_panel_t *p)
+{
+    uint32_t total_h = (uint32_t)p->width + p->hsw + p->hbp + p->hfp;
+    uint32_t total_v = (uint32_t)p->height + p->vsw + p->vbp + p->vfp;
+    return total_h * total_v * p->refresh_hz;
+}
 
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel)
 {
+    lt7680_status_t st;
+
     if (panel == 0) {
         return LT7680_ERR_PARAM;
     }
     s_panel = *panel;
+
+    /* --- 1. PLL: CCLK & MCLK at 100 MHz, PCLK from panel timing. --- */
+    st = pll_program(PLL_CCLK_MHZ, REG_CPLLC1, REG_CPLLC2);
+
+    st = pll_program(PLL_MCLK_MHZ, REG_MPLLC1, REG_MPLLC2);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = pll_program((panel_pclk(panel) + 500000u) / 1000000u,
+                     REG_PPLLC1, REG_PPLLC2);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_SRR, 0x80u);   /* bit7: apply new PLL settings */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wait_pll_ready();
+    if (st != LT7680_OK) {
+        return st;
+    }
+
+    /* --- 2. Display RAM (SDRAM) init for LT7680A-R (128 Mb). --- */
+    st = wr(REG_SDRAR, 0x29u);  /* 4 banks, 4K rows, 512 cols (Table 19-6) */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_SDRMD, 0x03u);  /* CAS latency 3 */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    /* Refresh interval for MCLK = 100 MHz, rows = 4096: 0x061A. */
+    st = wr(REG_SDRREF, 0x1Au);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_SDRREF + 1u, 0x06u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_SDRCR, 0x01u);  /* bit0: start SDRAM init sequence */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wait_sdram_ready();
+    if (st != LT7680_OK) {
+        return st;
+    }
+
+    /* --- 3. Chip configuration & memory access control. --- */
+    st = wr(REG_CCR, CCR_TFT_16BIT);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_MACR, 0x00u);  /* direct write, left->right, top->bottom */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_ICR, 0x00u);   /* graphic mode, R/W destination = image buffer */
+    if (st != LT7680_OK) {
+        return st;
+    }
+
+    /* --- 4. Panel timing. --- */
+    {
+        uint8_t hdwr   = (uint8_t)((s_panel.width - 1u) >> 3); /* (HDWR+1)*8+F */
+        uint8_t hdwftr = (uint8_t)((s_panel.width - 1u) & 0x07u);
+        uint8_t hndr   = (uint8_t)((s_panel.hbp - 1u) >> 3);
+        uint8_t hndftr = (uint8_t)((s_panel.hbp - 1u) & 0x07u);
+        uint8_t hstr   = (uint8_t)((s_panel.hfp - 1u) >> 3);  /* (HSTR+1)*8 */
+        uint8_t hpwr   = (uint8_t)((s_panel.hsw - 1u) >> 3);  /* (HPWR+1)*8 */
+
+        st = wr(REG_HDWR, hdwr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_HDWFTR, hdwftr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_HNDR, hndr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_HNDFTR, hndftr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_HSTR, hstr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_HPWR, hpwr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+
+        /* Vertical registers use value-1 encoding (VDHR+1, VNDR+1, ...). */
+        st = wr13(REG_VDHR, (uint16_t)(s_panel.height - 1u));
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr13(REG_VNDR, (uint16_t)(s_panel.vbp - 1u));
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr13(REG_VSTR, (uint16_t)(s_panel.vfp - 1u));
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr13(REG_VPWR, (uint16_t)(s_panel.vsw - 1u));
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+
+    /* --- 5. Main window: full panel, start of display RAM. --- */
+    st = wr(REG_MPWCTR, MPWCTR_MAIN_16BPP | MPWCTR_SYNC_MODE);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_MISA, 0x00u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_MIW, s_panel.width);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_MWULX, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_MWULY, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+
+    /* --- 6. Canvas: same area as the main window. --- */
+    st = wr32le(REG_CVSSA, 0x00u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_CVSIMWTH, s_panel.width);
+    if (st != LT7680_OK) {
+        return st;
+    }
+
+    /* --- 7. Active window = whole panel, 16bpp block addressing. --- */
+    {
+        lt7680_rect_t full;
+        full.x = 0;
+        full.y = 0;
+        full.w = s_panel.width;
+        full.h = s_panel.height;
+        st = set_active_window(&full);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        st = wr(REG_AWCOLOR, AWCOLOR_BLOCK | AWCOLOR_16BPP);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+
+    /* --- 8. Panel scan / sync polarity. --- */
+    {
+        uint8_t pcsr = 0u;
+        if (s_panel.hsync_active_high) {
+            pcsr |= 0x80u;
+        }
+        if (s_panel.vsync_active_high) {
+            pcsr |= 0x40u;
+        }
+        st = wr(REG_PCSR, pcsr);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+
+    /* --- 9. Display on. --- */
+    st = wr(REG_DPCR, DPCR_DISPLAY_ON |
+                          (s_panel.pclk_invert ? DPCR_PCLK_INVERT : 0u) |
+                          (uint8_t)(s_panel.rgb_order & 0x07u));
+    if (st != LT7680_OK) {
+        return st;
+    }
+
     return LT7680_OK;
 }
 
@@ -31,116 +402,80 @@ lt7680_status_t lt7680_gfx_clear(uint16_t rgb565)
     return lt7680_gfx_fill_rect(&full, rgb565);
 }
 
+/* RGB565 -> LT7680 16bpp foreground color. LT7680 "65K colors" layout:
+ * R = FGCR[7:3], G = FGCG[7:2], B = FGCB[7:3] (datasheet V4.2). */
+static lt7680_status_t set_fg_color16(uint16_t rgb565)
+{
+    lt7680_status_t st;
+    uint8_t r = (uint8_t)((rgb565 >> 11) & 0x1Fu);
+    uint8_t g = (uint8_t)((rgb565 >> 5)  & 0x3Fu);
+    uint8_t b = (uint8_t)(rgb565          & 0x1Fu);
+
+    st = wr(REG_FGCR, (uint8_t)(r << 3));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_FGCG, (uint8_t)(g << 2));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wr(REG_FGCB, (uint8_t)(b << 3));
+}
+
+/* Rectangle fill via the geometry engine:
+ * - DCR0 = 0xE4  -> bit7 draw, bit5 fill, bit[4:1] = 0010b (rectangle)
+ * - (D0h,D1h) = draw rectangle color select = 00b (foreground)
+ * - Start/end points are exclusive: end = (x+w, y+h). */
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
 {
-    uint8_t color_lo;
-    uint8_t color_hi;
-    uint32_t pixels;
     lt7680_status_t st;
+    uint16_t end_x;
+    uint16_t end_y;
 
     if (rect == 0) {
         return LT7680_ERR_PARAM;
     }
-    if (rect->w == 0 || rect->h == 0) {
-        return LT7680_OK;
-    }
 
-    st = lt7680_write_reg(LT7680_REG_MEMORY_WRITE_X, rect->x);
+    st = set_fg_color16(rgb565);
     if (st != LT7680_OK) {
         return st;
     }
-    st = lt7680_write_reg(LT7680_REG_MEMORY_WRITE_Y, rect->y);
+    st = wr(REG_DCR0, 0x00u);  /* select draw rectangle command */
     if (st != LT7680_OK) {
         return st;
     }
 
-    /* 16bpp: two bytes per pixel, RGB565. */
-    pixels = (uint32_t)rect->w * rect->h;
-    color_lo = (uint8_t)(rgb565 & 0xFFu);
-    color_hi = (uint8_t)((rgb565 >> 8) & 0xFFu);
-
-    {
-        uint32_t i;
-        for (i = 0; i < pixels; i++) {
-            lt7680_status_t st2 = lt7680_write_data(&color_lo, 1);
-            if (st2 != LT7680_OK) {
-                return st2;
-            }
-            st2 = lt7680_write_data(&color_hi, 1);
-            if (st2 != LT7680_OK) {
-                return st2;
-            }
-        }
+    end_x = (uint16_t)(rect->x + rect->w);
+    end_y = (uint16_t)(rect->y + rect->h);
+    st = wr32le(REG_GE_SPT, ((uint32_t)rect->x & 0x1FFFu) |
+                            (((uint32_t)rect->y & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_GE_EPT, ((uint32_t)end_x & 0x1FFFu) |
+                            (((uint32_t)end_y & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
     }
 
-    return LT7680_OK;
+    return wr(REG_DCR0, DCR0_DRAW_FILL | DCR0_DRAW_RECT | DCR0_DRAW_EN);
 }
 
-lt7680_status_t lt7680_gfx_draw_rect(const lt7680_rect_t *rect, uint16_t rgb565)
+/* Direct pixel write. The active window must be set first. */
+lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
 {
-    lt7680_rect_t top;
-    lt7680_rect_t bottom;
-    lt7680_rect_t left;
-    lt7680_rect_t right;
     lt7680_status_t st;
+    uint16_t pixel;
 
-    if (rect == 0) {
-        return LT7680_ERR_PARAM;
-    }
-    if (rect->w < 2 || rect->h < 2) {
-        return lt7680_gfx_fill_rect(rect, rgb565);
-    }
-
-    top.x = rect->x;
-    top.y = rect->y;
-    top.w = rect->w;
-    top.h = 1;
-
-    bottom.x = rect->x;
-    bottom.y = rect->y + rect->h - 1;
-    bottom.w = rect->w;
-    bottom.h = 1;
-
-    left.x = rect->x;
-    left.y = rect->y;
-    left.w = 1;
-    left.h = rect->h;
-
-    right.x = rect->x + rect->w - 1;
-    right.y = rect->y;
-    right.w = 1;
-    right.h = rect->h;
-
-    st = lt7680_gfx_fill_rect(&top, rgb565);
+    st = wr13(REG_CURH, x);
     if (st != LT7680_OK) {
         return st;
     }
-    st = lt7680_gfx_fill_rect(&bottom, rgb565);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    st = lt7680_gfx_fill_rect(&left, rgb565);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    st = lt7680_gfx_fill_rect(&right, rgb565);
+    st = wr13(REG_CURV, y);
     if (st != LT7680_OK) {
         return st;
     }
 
-    return LT7680_OK;
-}
-
-lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
-                                     uint16_t fg, uint16_t bg)
-{
-    if (text == 0) {
-        return LT7680_ERR_PARAM;
-    }
-    /* Text engine requires CGROM / UCG setup; add after basic bus bring-up. */
-    (void)x;
-    (void)y;
-    (void)fg;
-    (void)bg;
-    return LT7680_OK;
+    pixel = rgb565;
+    return lt7680_write_data((uint8_t *)&pixel, 2u);
 }

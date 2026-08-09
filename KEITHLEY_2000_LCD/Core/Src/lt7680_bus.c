@@ -7,12 +7,25 @@ void lt7680_bus_init(const lt7680_bus_io_t *io)
     s_io = io;
 }
 
+lt7680_status_t lt7680_delay_ms(uint32_t ms)
+{
+    if (s_io == 0 || s_io->delay_ms == 0) {
+        return LT7680_ERR_BUS;
+    }
+    s_io->delay_ms(ms);
+    return LT7680_OK;
+}
+
 static lt7680_status_t xfer_byte(uint8_t out, uint8_t *in)
 {
     if (s_io == 0 || s_io->spi_xfer == 0) {
         return LT7680_ERR_BUS;
     }
-    *in = s_io->spi_xfer(out);
+    if (in != 0) {
+        *in = s_io->spi_xfer(out);
+    } else {
+        (void)s_io->spi_xfer(out);
+    }
     return LT7680_OK;
 }
 
@@ -37,8 +50,11 @@ lt7680_status_t lt7680_wait_ready(uint32_t timeout_ms)
     }
     for (;;) {
         s_io->cs(false);
-        (void)xfer_byte(LT7680_SPI_CMD_READ_STATUS, &status);
-        (void)xfer_byte(0xFFu, &status);
+        if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
+            xfer_byte(0xFFu, &status) != LT7680_OK) {
+            s_io->cs(true);
+            return LT7680_ERR_BUS;
+        }
         s_io->cs(true);
         if ((status & LT7680_STATUS_BUSY) == 0u) {
             return LT7680_OK;
@@ -57,42 +73,50 @@ lt7680_status_t lt7680_read_status(uint8_t *status)
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_READ_STATUS, status);
-    (void)xfer_byte(0xFFu, status);
+    if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
+        xfer_byte(0xFFu, status) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
     s_io->cs(true);
     return LT7680_OK;
 }
 
-lt7680_status_t lt7680_write_reg(uint16_t reg, uint16_t value)
+lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value)
 {
     if (s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_BUS;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_REG, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)reg, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)(reg >> 8), &(uint8_t){0});
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)value, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)(value >> 8), &(uint8_t){0});
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
     s_io->cs(true);
-    return LT7680_OK;
+    return lt7680_write_data(&value, 1u);
 }
 
-lt7680_status_t lt7680_read_reg(uint16_t reg, uint16_t *value)
+lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
 {
     if (value == 0 || s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_READ_REG, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)reg, &(uint8_t){0});
-    (void)xfer_byte((uint8_t)(reg >> 8), &(uint8_t){0});
-    (void)xfer_byte(0xFFu, &(uint8_t){0});
-    (void)xfer_byte(0xFFu, &(uint8_t){0});
-    (void)xfer_byte(0xFFu, &(uint8_t){0});
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
     s_io->cs(true);
-    *value = 0;
+
+    s_io->cs(false);
+    if (xfer_byte(LT7680_SPI_CMD_READ_REG, 0) != LT7680_OK ||
+        xfer_byte(0xFFu, value) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
+    s_io->cs(true);
     return LT7680_OK;
 }
 
@@ -102,9 +126,15 @@ lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA, &(uint8_t){0});
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_DATA, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
     for (uint32_t i = 0; i < len; i++) {
-        (void)xfer_byte(data[i], &(uint8_t){0});
+        if (xfer_byte(data[i], 0) != LT7680_OK) {
+            s_io->cs(true);
+            return LT7680_ERR_BUS;
+        }
     }
     s_io->cs(true);
     return LT7680_OK;

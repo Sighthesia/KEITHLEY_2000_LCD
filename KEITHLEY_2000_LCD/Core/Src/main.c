@@ -23,6 +23,7 @@
 /* USER CODE BEGIN Includes */
 #include "hal_board.h"
 #include "k2000_proto.h"
+#include "lt7680_bus.h"
 #include "lt7680_gfx.h"
 #include "ui_model.h"
 /* USER CODE END Includes */
@@ -34,6 +35,12 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+/* SPI self-test: reset LT7680 then repeatedly write one register so that a
+ * logic analyzer on PA5 (SCK) / PA7 (SDI) shows continuous SPI frames. It
+ * deliberately skips panel init so the question "is LT7680 SPI reachable?" is
+ * answered in isolation. Set to 1 to enable. */
+#define LT7680_SPI_SELFTEST 0U
 
 /* USER CODE END PD */
 
@@ -118,18 +125,73 @@ int main(void)
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  /* USER CODE BEGIN 2 */
+/* USER CODE BEGIN 2 */
+#if LT7680_SPI_SELFTEST
+  hal_board_init();
+  hal_uart_send_text("\r\nSPI SELFTEST\r\n");
+  (void)lt7680_reset();
+  for (;;) {
+    /* Write reg 0x01 = 0x08, then read it back, then read status. Returning
+     * data on PA6 (MISO) proves LT7680 is alive and receiving. */
+    uint8_t rd = 0u;
+    (void)lt7680_write_reg(0x01u, 0x08u);
+    (void)lt7680_read_reg(0x01u, &rd);
+    (void)lt7680_wait_ready(10u);
+    (void)lt7680_delay_ms(1u);
+  }
+#else
   {
-    const lt7680_panel_t panel = {480u, 272u, 16u};
+    const lt7680_panel_t panel = {320u, 960u, 16u};
     const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
+    lt7680_status_t st;
+    uint8_t status = 0u;
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    lt7680_reset();
-    lt7680_wait_ready(1000);
-    lt7680_gfx_init(&panel);
-    lt7680_gfx_clear(0x0000);
+    hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
+
+    st = lt7680_reset();
+    if (st != LT7680_OK) {
+      hal_uart_send_text("FAIL reset=");
+      hal_uart_send_hex8((uint8_t)st);
+      hal_uart_send_text("\r\n");
+    } else {
+      st = lt7680_read_status(&status);
+      if (st != LT7680_OK) {
+        hal_uart_send_text("FAIL status-read=");
+        hal_uart_send_hex8((uint8_t)st);
+        hal_uart_send_text("\r\n");
+      } else {
+        hal_uart_send_text("STATUS=0x");
+        hal_uart_send_hex8(status);
+        hal_uart_send_text("\r\n");
+        st = lt7680_wait_ready(1000u);
+        if (st != LT7680_OK) {
+          hal_uart_send_text("FAIL ready=");
+          hal_uart_send_hex8((uint8_t)st);
+          hal_uart_send_text("\r\n");
+        } else {
+          hal_panel_init();
+          st = lt7680_gfx_init(&panel);
+          if (st != LT7680_OK) {
+            hal_uart_send_text("FAIL init=");
+            hal_uart_send_hex8((uint8_t)st);
+            hal_uart_send_text("\r\n");
+          } else {
+            st = lt7680_gfx_show_color_bars();
+            if (st != LT7680_OK) {
+              hal_uart_send_text("FAIL test-bars=");
+              hal_uart_send_hex8((uint8_t)st);
+              hal_uart_send_text("\r\n");
+            } else {
+              hal_uart_send_text("PASS color-bars enabled\r\n");
+            }
+          }
+        }
+      }
+    }
   }
+#endif /* LT7680_SPI_SELFTEST */
   /* USER CODE END 2 */
 
   /* Infinite loop */
