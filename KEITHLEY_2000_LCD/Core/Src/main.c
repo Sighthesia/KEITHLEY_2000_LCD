@@ -141,7 +141,11 @@ int main(void)
   }
 #else
   {
+#if PANEL_LANDSCAPE
+    const lt7680_panel_t panel = {960u, 320u, 16u};
+#else
     const lt7680_panel_t panel = {320u, 960u, 16u};
+#endif
     const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
     lt7680_status_t st;
     uint8_t status = 0u;

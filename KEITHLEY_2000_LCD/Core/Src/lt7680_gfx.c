@@ -34,6 +34,15 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_SDRAM_REFRESH0 0xE2u
 #define LT7680_REG_SDRAM_REFRESH1 0xE3u
 #define LT7680_REG_SDRAM_CTRL 0xE4u
+#define LT7680_REG_DCR0 0x67u
+#define LT7680_REG_GE_SPT 0x68u
+#define LT7680_REG_GE_EPT 0x6Cu
+#define LT7680_REG_DCR1 0x76u
+#define LT7680_REG_GE_RAD 0x77u
+#define LT7680_REG_GE_CPT 0x7Bu
+#define LT7680_REG_FGCR 0xD2u
+#define LT7680_REG_FGCG 0xD3u
+#define LT7680_REG_FGCB 0xD4u
 
 /* 4.58" bar panel: 320x960. V16-derived RGB timings (REG[14]-[1F]):
  * H_BACK=80, H_FRONT=16, H_SYNC=16, V_BACK=10, V_FRONT=12, V_SYNC=3.
@@ -232,4 +241,134 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
     (void)fg;
     (void)bg;
     return LT7680_ERR_PARAM;
+}
+
+/* RGB565 -> LT7680 16bpp foreground color: R = FGCR[7:3], G = FGCG[7:2],
+ * B = FGCB[7:3] (datasheet V4.2). */
+static lt7680_status_t set_fg_color16(uint16_t rgb565)
+{
+    uint8_t r = (uint8_t)((rgb565 >> 11) & 0x1Fu);
+    uint8_t g = (uint8_t)((rgb565 >> 5)  & 0x3Fu);
+    uint8_t b = (uint8_t)(rgb565          & 0x1Fu);
+    lt7680_status_t st = write_reg(LT7680_REG_FGCR, (uint8_t)(r << 3));
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_FGCG, (uint8_t)(g << 2));
+    if (st != LT7680_OK) return st;
+    return write_reg(LT7680_REG_FGCB, (uint8_t)(b << 3));
+}
+
+/* Write a 32-bit little-endian value to 4 consecutive registers. */
+static lt7680_status_t wr32le(uint8_t reg, uint32_t val)
+{
+    for (uint8_t i = 0u; i < 4u; i++) {
+        lt7680_status_t st = write_reg((uint8_t)(reg + i),
+                                       (uint8_t)(val >> (8u * i)));
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    return LT7680_OK;
+}
+
+/* Wait for the geometry engine to finish (status bit 0x08 = CORE_BUSY). */
+static lt7680_status_t wait_2d_idle(void)
+{
+    uint8_t status = 0;
+    for (uint16_t i = 0u; i < 1000u; i++) {
+        lt7680_status_t st = lt7680_read_status(&status);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((status & LT7680_STATUS_CORE_BUSY) == 0u) {
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+lt7680_status_t lt7680_gfx_draw_line(int16_t x0, int16_t y0, int16_t x1,
+                                     int16_t y1, uint16_t rgb565)
+{
+    lt7680_status_t st;
+
+    if (x0 < 0 || y0 < 0 || x1 < 0 || y1 < 0) {
+        return LT7680_ERR_PARAM;
+    }
+    if ((uint32_t)x0 >= s_panel.width || (uint32_t)x1 >= s_panel.width ||
+        (uint32_t)y0 >= s_panel.height || (uint32_t)y1 >= s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(LT7680_REG_GE_SPT, ((uint32_t)x0 & 0x1FFFu) |
+                                   (((uint32_t)y0 & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(LT7680_REG_GE_EPT, ((uint32_t)x1 & 0x1FFFu) |
+                                   (((uint32_t)y1 & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_DCR0, 0x80u);  /* bit7 start, line, no fill */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wait_2d_idle();
+}
+
+lt7680_status_t lt7680_gfx_draw_polyline(const int16_t *xy, uint16_t n_points,
+                                         uint16_t rgb565)
+{
+    if (xy == 0 || n_points < 2u) {
+        return LT7680_ERR_PARAM;
+    }
+    for (uint16_t i = 0u; i + 1u < n_points; i++) {
+        lt7680_status_t st = lt7680_gfx_draw_line(xy[2u * i],
+                                                  xy[2u * i + 1u],
+                                                  xy[2u * i + 2u],
+                                                  xy[2u * i + 3u],
+                                                  rgb565);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    return LT7680_OK;
+}
+
+lt7680_status_t lt7680_gfx_draw_circle(int16_t xc, int16_t yc, int16_t r,
+                                       uint16_t rgb565)
+{
+    lt7680_status_t st;
+
+    if (xc < 0 || yc < 0 || r < 0) {
+        return LT7680_ERR_PARAM;
+    }
+    if ((uint32_t)xc + (uint32_t)r > s_panel.width ||
+        (uint32_t)yc + (uint32_t)r > s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(LT7680_REG_GE_RAD, ((uint32_t)r & 0x1FFFu) |
+                                   (((uint32_t)r & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(LT7680_REG_GE_CPT, ((uint32_t)xc & 0x1FFFu) |
+                                   (((uint32_t)yc & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_DCR1, 0x80u);  /* bit7 start, circle, no fill */
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wait_2d_idle();
 }

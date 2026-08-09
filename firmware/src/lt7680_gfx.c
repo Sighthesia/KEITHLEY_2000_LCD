@@ -43,6 +43,9 @@
 #define REG_DCR0     0x67u  /* Draw Line/Triangle Control Register 0 */
 #define REG_GE_SPT   0x68u  /* Geometry Engine Start Point (4 bytes) */
 #define REG_GE_EPT   0x6Cu  /* Geometry Engine End Point (4 bytes) */
+#define REG_DCR1     0x76u  /* Draw Square/Circle Control Register 1 */
+#define REG_GE_RAD   0x77u  /* Geometry Engine Radius: major (lo/hi), minor */
+#define REG_GE_CPT   0x7Bu  /* Geometry Engine Circle Center Point (4 bytes) */
 #define REG_FGCR     0xD2u  /* Foreground Color - Red */
 #define REG_FGCG     0xD3u  /* Foreground Color - Green */
 #define REG_FGCB     0xD4u  /* Foreground Color - Blue */
@@ -71,6 +74,12 @@
 #define DCR0_DRAW_FILL (0x01u << 5)  /* bit5: fill */
 #define DCR0_DRAW_RECT (0x02u << 1)  /* bit[4:1] = 0010b: rectangle */
 #define DCR0_DRAW_EN   (0x01u << 7)  /* bit7: start drawing */
+
+/* Square/circle control 1 (REG[76h]). From Levetop LT768x AP-Note:
+ * non-fill circle/ellipse = 0x80, fill circle = 0xC0,
+ * non-fill square = 0xA0, fill square = 0xE0 (bit7 start, bit6 fill). */
+#define DCR1_DRAW_EN    (0x01u << 7)
+#define DCR1_DRAW_FILL  (0x01u << 6)
 
 /* Fixed PLL targets. MCLK must match the SDRAM refresh reference
  * (REG[E3h:E2h] = 0x061A is given for MCLK = 100 MHz). */
@@ -478,4 +487,121 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
 
     pixel = rgb565;
     return lt7680_write_data((uint8_t *)&pixel, 2u);
+}
+
+/* Wait for the geometry engine to finish the current draw. The 2D engine
+ * sets status bit 0x08 (CORE_BUSY) while rasterizing; the Levetop AP-Note
+ * polls the same bit after every draw start. */
+static lt7680_status_t wait_2d_idle(void)
+{
+    uint8_t status = 0;
+    uint16_t i;
+    for (i = 0; i < 1000u; i++) {
+        lt7680_status_t st = lt7680_read_status(&status);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((status & LT7680_STATUS_CORE_BUSY) == 0u) {
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+/* Draw a line through the geometry engine (Levetop AP-Note):
+ * - REG[68h..6Bh] = start point (13-bit x, 13-bit y, LSB first)
+ * - REG[6Ch..6Fh] = end point
+ * - DCR0 REG[67h] = 0x80: bit7 start, no fill, line command (bits[4:1]=0). */
+lt7680_status_t lt7680_gfx_draw_line(int16_t x0, int16_t y0, int16_t x1,
+                                     int16_t y1, uint16_t rgb565)
+{
+    lt7680_status_t st;
+
+    if (x0 < 0 || y0 < 0 || x1 < 0 || y1 < 0) {
+        return LT7680_ERR_PARAM;
+    }
+    if ((uint32_t)x0 >= s_panel.width || (uint32_t)x1 >= s_panel.width ||
+        (uint32_t)y0 >= s_panel.height || (uint32_t)y1 >= s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_GE_SPT, ((uint32_t)x0 & 0x1FFFu) |
+                            (((uint32_t)y0 & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_GE_EPT, ((uint32_t)x1 & 0x1FFFu) |
+                            (((uint32_t)y1 & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_DCR0, DCR0_DRAW_EN);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wait_2d_idle();
+}
+
+/* Draw connected line segments; xy holds n_points pairs (x, y). */
+lt7680_status_t lt7680_gfx_draw_polyline(const int16_t *xy, uint16_t n_points,
+                                         uint16_t rgb565)
+{
+    uint16_t i;
+
+    if (xy == 0 || n_points < 2u) {
+        return LT7680_ERR_PARAM;
+    }
+    for (i = 0; i + 1u < n_points; i++) {
+        lt7680_status_t st = lt7680_gfx_draw_line(xy[2u * i],
+                                                  xy[2u * i + 1u],
+                                                  xy[2u * i + 2u],
+                                                  xy[2u * i + 3u],
+                                                  rgb565);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    return LT7680_OK;
+}
+
+/* Draw a circle through the geometry engine (Levetop AP-Note):
+ * - REG[77h..7Ah] = radius (major lo/hi then minor lo/hi, both = r)
+ * - REG[7Bh..7Eh] = center point
+ * - DCR1 REG[76h] = 0x80: bit7 start, non-fill circle/ellipse. */
+lt7680_status_t lt7680_gfx_draw_circle(int16_t xc, int16_t yc, int16_t r,
+                                       uint16_t rgb565)
+{
+    lt7680_status_t st;
+
+    if (xc < 0 || yc < 0 || r < 0) {
+        return LT7680_ERR_PARAM;
+    }
+    if ((uint32_t)xc + (uint32_t)r > s_panel.width ||
+        (uint32_t)yc + (uint32_t)r > s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_GE_RAD, ((uint32_t)r & 0x1FFFu) |
+                            (((uint32_t)r & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(REG_GE_CPT, ((uint32_t)xc & 0x1FFFu) |
+                            (((uint32_t)yc & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_DCR1, DCR1_DRAW_EN);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wait_2d_idle();
 }
