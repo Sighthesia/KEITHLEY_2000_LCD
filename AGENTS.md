@@ -21,12 +21,12 @@
 ## 已验证的构建/烧录/验收流程（2026-08-08 彩条成功）
 
 - 工程：`KEITHLEY_2000_LCD/`（STM32CubeMX + CMake/Ninja，`firmware/` 为离线骨架，两者 lt7680 驱动保持同步）。目标 MCU `STM32F103C8T6`，链接脚本见 `KEITHLEY_2000_LCD/STM32F103C8TX_FLASH.ld`。
-- 构建：`cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`（生成 `.elf`，烧录用它）。
+- 构建：`cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`（生成的 `.elf` 在 **子目录** `KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD/KEITHLEY_2000_LCD.elf`，烧录路径必须带子目录，否则 OpenOCD 找不到文件、烧录静默失败）。
 - 烧录（ST-Link V2 SWD，`openocd.cfg` 为 `reset_config none`，务必用 halt 先行序列，不要用 `program ... reset exit`）：
   ```
   openocd -f openocd.cfg \
     -c "init" -c "halt" \
-    -c "program KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD.elf verify" \
+    -c "program KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD/KEITHLEY_2000_LCD.elf verify" \
     -c "reset" -c "shutdown"
   ```
   若最后 reset 报错，写入其实已成功，按板上复位键启动即可；软件复位不可靠时手动按复位。
