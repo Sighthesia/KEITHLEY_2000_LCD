@@ -47,6 +47,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/hal_board.c
     Core/Src/lt7680_bus.c
     Core/Src/lt7680_gfx.c
+    Core/Src/font_digits.c
     Core/Src/k2000_proto.c
     Core/Src/ui_model.c
 )

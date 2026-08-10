@@ -40,6 +40,8 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_DCR1 0x76u
 #define LT7680_REG_GE_RAD 0x77u
 #define LT7680_REG_GE_CPT 0x7Bu
+#define LT7680_REG_CURH 0x5Fu  /* Graphic R/W X coordinate (13-bit, lo then hi) */
+#define LT7680_REG_CURV 0x61u  /* Graphic R/W Y coordinate (13-bit, lo then hi) */
 #define LT7680_REG_FGCR 0xD2u
 #define LT7680_REG_FGCG 0xD3u
 #define LT7680_REG_FGCB 0xD4u
@@ -268,6 +270,40 @@ static lt7680_status_t wr32le(uint8_t reg, uint32_t val)
         }
     }
     return LT7680_OK;
+}
+
+/* Write a 13-bit value to a coordinate register pair (lo at reg, hi at
+ * reg+1), as used by the graphic R/W cursor. */
+static lt7680_status_t wr13(uint8_t reg, uint16_t value)
+{
+    lt7680_status_t st = write_reg(reg, (uint8_t)(value & 0xFFu));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return write_reg((uint8_t)(reg + 1u), (uint8_t)(value >> 8));
+}
+
+/* Direct pixel write: position the graphic R/W cursor, then push one 16bpp
+ * pixel through the memory data port. The active window must be set first
+ * (gfx_init leaves it at the full panel). */
+lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
+{
+    lt7680_status_t st;
+    uint16_t pixel;
+
+    if (x >= s_panel.width || y >= s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+    st = wr13(LT7680_REG_CURH, x);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(LT7680_REG_CURV, y);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    pixel = rgb565;
+    return lt7680_write_data((uint8_t *)&pixel, 2u);
 }
 
 /* Wait for the geometry engine to finish (status bit 0x08 = CORE_BUSY). */

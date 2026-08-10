@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "hal_board.h"
+#include "font_digits.h"
 #include "k2000_proto.h"
 #include "lt7680_bus.h"
 #include "lt7680_gfx.h"
@@ -42,6 +43,11 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
+/* Task 5 demo: after the color-bars acceptance, clear the test pattern and
+ * draw the JetBrains Mono big digits to the real panel, printing the draw
+ * time over UART. Set to 0 to restore the plain color-bars behaviour. */
+#define FONT_DIGIT_DEMO 1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,6 +64,7 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+static void uart_print_u32(uint32_t value);
 
 /* USER CODE END PFP */
 
@@ -194,6 +201,63 @@ int main(void)
         }
       }
     }
+#if FONT_DIGIT_DEMO
+    {
+      /* Task 5 demo. Bit5 of REG[12h] enables the color-bar test pattern,
+       * which overrides the SDRAM image; clear it so the big digits drawn
+       * below are visible. 7 digits only fit the 960-wide landscape layout
+       * (Panel_Landscape=1); on the verified 320-wide portrait we render 6. */
+      uint8_t disp = 0u;
+      uint32_t t0;
+      uint16_t demo_len;
+      uint16_t demo_w;
+      uint16_t x;
+      static const char demo_digits[] =
+#if PANEL_LANDSCAPE
+          "1234567";
+#else
+          "123456";
+#endif
+      /* Clear bit5 (color-bar test pattern) only if the read succeeded, so
+       * a failed read cannot write 0x12=0 and blank the display. */
+      if (lt7680_read_reg(0x12u, &disp) == LT7680_OK) {
+        (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x20u));
+      }
+
+      demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
+      demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);
+      x = (uint16_t)((panel.width - demo_w) / 2u);
+      t0 = HAL_GetTick();
+      {
+        const char *p = demo_digits;
+        while (*p != '\0') {
+          const uint8_t *bmp = font_digit_bitmap(*p);
+          if (bmp != 0) {
+            uint16_t dy;
+            for (dy = 0u; dy < FONT_DIGIT_HEIGHT; dy++) {
+              const uint8_t *row =
+                  bmp + (uint16_t)(dy * FONT_DIGIT_BYTES_PER_ROW);
+              uint16_t dx;
+              for (dx = 0u; dx < FONT_DIGIT_WIDTH; dx++) {
+                if ((row[dx >> 3] & (0x80u >> (dx & 7u))) != 0u) {
+                  uint16_t px = (uint16_t)(x + dx);
+                  if (px < panel.width) {
+                    (void)lt7680_gfx_set_pixel(px, (uint16_t)(16u + dy),
+                                               0xFFFFu);
+                  }
+                }
+              }
+            }
+          }
+          x += FONT_DIGIT_WIDTH;
+          p++;
+        }
+      }
+      hal_uart_send_text("digits-ms=");
+      uart_print_u32(HAL_GetTick() - t0);
+      hal_uart_send_text("\r\n");
+    }
+#endif /* FONT_DIGIT_DEMO */
   }
 #endif /* LT7680_SPI_SELFTEST */
   /* USER CODE END 2 */
@@ -250,6 +314,17 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+static void uart_print_u32(uint32_t value)
+{
+    char buf[10];
+    uint8_t i = (uint8_t)sizeof(buf);
+    do {
+        buf[--i] = (char)('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u);
+    hal_uart_send((const uint8_t *)&buf[i], (uint16_t)(sizeof(buf) - i));
+}
 
 /* USER CODE END 4 */
 

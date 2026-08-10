@@ -5,7 +5,7 @@ set -e
 cd "$(dirname "$0")/.."
 mkdir -p build
 
-SRCS="src/k2000_proto.c src/ui_model.c src/lt7680_gfx.c src/lt7680_bus.c"
+SRCS="src/k2000_proto.c src/ui_model.c src/lt7680_gfx.c src/lt7680_bus.c src/font_digits.c"
 
 for t in tests/test_*.c; do
     name=$(basename "$t" .c)
