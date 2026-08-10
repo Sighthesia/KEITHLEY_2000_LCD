@@ -66,6 +66,34 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 static void uart_print_u32(uint32_t value);
 
+static void dump_reg(const char *label, uint8_t reg)
+{
+    uint8_t v = 0u;
+    if (lt7680_read_reg(reg, &v) == LT7680_OK) {
+        hal_uart_send_text(label);
+        hal_uart_send_hex8(v);
+    } else {
+        hal_uart_send_text(label);
+        hal_uart_send_text("ERR");
+    }
+    hal_uart_send_text("\r\n");
+}
+
+static void dump_reg16(const char *label, uint8_t reg)
+{
+    uint8_t lo = 0u, hi = 0u;
+    if (lt7680_read_reg(reg, &lo) == LT7680_OK &&
+        lt7680_read_reg((uint8_t)(reg + 1u), &hi) == LT7680_OK) {
+        hal_uart_send_text(label);
+        hal_uart_send_hex8(hi);
+        hal_uart_send_hex8(lo);
+    } else {
+        hal_uart_send_text(label);
+        hal_uart_send_text("ERR");
+    }
+    hal_uart_send_text("\r\n");
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -226,6 +254,21 @@ int main(void)
         (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x20u));
       }
       (void)lt7680_gfx_clear(0x0000u);
+
+      /* Telemetry: confirm the windows and test-pattern state read back as
+       * configured.  If MIW/CVSIMWTH/AW_* read back 0 the register write
+       * path is at fault; if R12 still has bit5 set the test pattern never
+       * turned off. */
+      hal_uart_send_text("R12=0x");
+      hal_uart_send_hex8(disp);
+      hal_uart_send_text("\r\n");
+      dump_reg16("MIW=", 0x24u);
+      dump_reg16("CVSW=", 0x54u);
+      dump_reg16("AW_W=", 0x5Au);
+      dump_reg16("AW_H=", 0x5Cu);
+      dump_reg("AWCOL=", 0x5Eu);
+      dump_reg("P10=", 0x10u);
+      dump_reg("P5E=", 0x5Eu);
 
       demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);
