@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build3 window+telemetry\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build4 landscape-madctl60\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
