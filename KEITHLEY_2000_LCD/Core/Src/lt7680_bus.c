@@ -82,6 +82,21 @@ lt7680_status_t lt7680_read_status(uint8_t *status)
     return LT7680_OK;
 }
 
+lt7680_status_t lt7680_select_reg(uint8_t reg)
+{
+    if (s_io == 0 || s_io->cs == 0) {
+        return LT7680_ERR_BUS;
+    }
+    s_io->cs(false);
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_BUS;
+    }
+    s_io->cs(true);
+    return LT7680_OK;
+}
+
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value)
 {
     if (s_io == 0 || s_io->cs == 0) {

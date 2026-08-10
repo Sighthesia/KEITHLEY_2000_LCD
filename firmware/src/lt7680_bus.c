@@ -81,6 +81,13 @@ static lt7680_status_t cmd_write(uint8_t reg)
     return LT7680_OK;
 }
 
+/* Select a register address without writing data.  Used to point the data
+ * port at Display RAM (REG[04h] MRWDP) before a memory-write burst. */
+lt7680_status_t lt7680_select_reg(uint8_t reg)
+{
+    return cmd_write(reg);
+}
+
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value)
 {
     lt7680_status_t st;

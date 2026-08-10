@@ -152,3 +152,30 @@ UART 115200 prints `STATUS=0x..` / `PASS color-bars enabled`, screen shows
 color bars. Build: `cmake --build KEITHLEY_2000_LCD/build/Release --target
 KEITHLEY_2000_LCD.elf`; flash via halt-then-verify OpenOCD (see
 `openocd-stm32-flash` skill).
+
+## Displaying real image data (windows + memory-write port)
+
+The color-bar test pattern is an **internal generator that bypasses the
+window system** — it fills the panel even with every window register at 0.
+Real image data from Display RAM requires three windows plus the memory
+data port (LT768x DS V4.2 §7.1.3, §10.2):
+
+- **Main image**: `MISA` REG[20h..23h]=0, `MIW` REG[24h..25h]=panel width,
+  `MWULX/MWULY` REG[26h..29h]=0.  Default `MIW=0` ⇒ turning the test
+  pattern off collapses the picture to a single row of bars.
+- **Canvas**: `CVSSA` REG[50h..53h]=0, `CVSIMWTH` REG[54h..55h]=panel
+  width.  Ignored only in linear addressing mode.
+- **Active window** (host-writable region): `AWUL_X/Y` REG[56h..59h]=0,
+  `AW_WTH/HT` REG[5Ah..5Dh]=panel size.
+- **Color depth**: `AW_COLOR` REG[5Eh]=0x01 (block X-Y addressing, 16bpp;
+  default 0 = 8bpp).
+- **Memory write procedure**: set active window → write Graphic R/W cursor
+  `CURH` REG[5Fh..60h], `CURV` REG[61h..62h] → **address-write the Memory
+  Data R/W Port `MRWDP` REG[04h]** → push 16bpp pixels LSB-first.  Skipping
+  the MRWDP address write sends the two data bytes into the last-addressed
+  register (CURV) instead of Display RAM — a silent no-op on screen.
+
+These are applied in `lt7680_gfx_init()` (`configure_windows()`) and used by
+`lt7680_gfx_set_pixel()` / `lt7680_gfx_clear()`; both trees (KEITHLEY and
+`firmware/`) must stay in sync.  `lt7680_select_reg()` (bus) selects a
+register without writing data so a burst can target MRWDP.

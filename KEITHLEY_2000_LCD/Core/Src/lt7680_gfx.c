@@ -42,6 +42,18 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_GE_CPT 0x7Bu
 #define LT7680_REG_CURH 0x5Fu  /* Graphic R/W X coordinate (13-bit, lo then hi) */
 #define LT7680_REG_CURV 0x61u  /* Graphic R/W Y coordinate (13-bit, lo then hi) */
+#define LT7680_REG_MRWDP 0x04u /* Memory Data R/W Port: pixel writes go here */
+#define LT7680_REG_MISA0 0x20u /* Main Image Start Address (4 bytes) */
+#define LT7680_REG_MIW0 0x24u  /* Main Image Width (14-bit, lo then hi) */
+#define LT7680_REG_MWULX0 0x26u /* Main Window Upper-Left X (13-bit) */
+#define LT7680_REG_MWULY0 0x28u /* Main Window Upper-Left Y (13-bit) */
+#define LT7680_REG_CVSSA0 0x50u /* Canvas Start Address (4 bytes) */
+#define LT7680_REG_CVS_IMWTH0 0x54u /* Canvas Image Width (14-bit) */
+#define LT7680_REG_AWUL_X0 0x56u /* Active Window Upper-Left X (13-bit) */
+#define LT7680_REG_AWUL_Y0 0x58u /* Active Window Upper-Left Y (13-bit) */
+#define LT7680_REG_AW_WTH0 0x5Au /* Active Window Width (14-bit) */
+#define LT7680_REG_AW_HT0 0x5Cu  /* Active Window Height (14-bit) */
+#define LT7680_REG_AW_COLOR 0x5Eu /* Canvas addressing mode + color depth */
 #define LT7680_REG_FGCR 0xD2u
 #define LT7680_REG_FGCG 0xD3u
 #define LT7680_REG_FGCB 0xD4u
@@ -190,6 +202,49 @@ static lt7680_status_t configure_panel(void)
     return rmw_reg(LT7680_REG_DISPLAY_CTRL, 0x08u, 0x97u);
 }
 
+/* Configure the Main / Canvas / Active windows for image output from Display
+ * RAM (datasheet V4.2, memory-write procedure and section 10.2).  The color
+ * bar test pattern is an internal generator that bypasses these registers, so
+ * turning bit5 of REG[12h] off shows the canvas through the main window;
+ * with all of them at their default 0 the picture collapses to a sliver.
+ * Block (X-Y) addressing, 16bpp canvas, windows covering the whole panel. */
+static lt7680_status_t wr32le(uint8_t reg, uint32_t val);
+static lt7680_status_t wr13(uint8_t reg, uint16_t value);
+static lt7680_status_t configure_windows(void)
+{
+    lt7680_status_t st;
+
+    /* Main image: starts at Display RAM address 0, one panel-wide row,
+     * displayed at panel origin (0,0). */
+    st = wr32le(LT7680_REG_MISA0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_MIW0, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_MWULX0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_MWULY0, 0u);
+    if (st != LT7680_OK) return st;
+
+    /* Canvas: same region as the main image (row stride = panel width). */
+    st = wr32le(LT7680_REG_CVSSA0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_CVS_IMWTH0, s_panel.width);
+    if (st != LT7680_OK) return st;
+
+    /* Active window = whole panel (region the host may write). */
+    st = wr13(LT7680_REG_AWUL_X0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AWUL_Y0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AW_WTH0, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AW_HT0, s_panel.height);
+    if (st != LT7680_OK) return st;
+
+    /* Canvas addressing: block (X-Y) mode, 16bpp memory R/W. */
+    return write_reg(LT7680_REG_AW_COLOR, 0x01u);
+}
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel)
 {
     lt7680_status_t st;
@@ -204,7 +259,9 @@ lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel)
     if (st != LT7680_OK) return st;
     st = configure_sdram();
     if (st != LT7680_OK) return st;
-    return configure_panel();
+    st = configure_panel();
+    if (st != LT7680_OK) return st;
+    return configure_windows();
 }
 
 lt7680_status_t lt7680_gfx_show_color_bars(void)
@@ -216,8 +273,41 @@ lt7680_status_t lt7680_gfx_show_color_bars(void)
 
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565)
 {
-    (void)rgb565;
-    return LT7680_ERR_PARAM;
+    uint8_t buf[256];
+    uint32_t total;
+    lt7680_status_t st;
+
+    if (s_panel.width == 0u || s_panel.height == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    for (uint32_t i = 0u; i < sizeof(buf); i++) {
+        buf[i] = ((i & 1u) != 0u) ? (uint8_t)(rgb565 >> 8)
+                                  : (uint8_t)(rgb565 & 0xFFu);
+    }
+    st = wr13(LT7680_REG_CURH, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(LT7680_REG_CURV, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_select_reg(LT7680_REG_MRWDP);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    /* Each MRWDP write auto-increments, so one burst fills the whole panel
+     * in row-major order within the active window. */
+    total = (uint32_t)s_panel.width * (uint32_t)s_panel.height * 2u;
+    while (total > 0u) {
+        uint32_t n = (total > sizeof(buf)) ? (uint32_t)sizeof(buf) : total;
+        st = lt7680_write_data(buf, n);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        total -= n;
+    }
+    return LT7680_OK;
 }
 
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
@@ -283,13 +373,13 @@ static lt7680_status_t wr13(uint8_t reg, uint16_t value)
     return write_reg((uint8_t)(reg + 1u), (uint8_t)(value >> 8));
 }
 
-/* Direct pixel write: position the graphic R/W cursor, then push one 16bpp
- * pixel through the memory data port. The active window must be set first
- * (gfx_init leaves it at the full panel). */
+/* Direct pixel write: position the graphic R/W cursor, point the data port
+ * at Display RAM (REG[04h]), then push one 16bpp pixel (low byte first) to
+ * the cursor address.  Skipping the MRWDP address write would send the two
+ * bytes into the last-addressed register (CURV) instead of memory. */
 lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
 {
     lt7680_status_t st;
-    uint16_t pixel;
 
     if (x >= s_panel.width || y >= s_panel.height) {
         return LT7680_ERR_PARAM;
@@ -302,8 +392,16 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
     if (st != LT7680_OK) {
         return st;
     }
-    pixel = rgb565;
-    return lt7680_write_data((uint8_t *)&pixel, 2u);
+    st = lt7680_select_reg(LT7680_REG_MRWDP);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    {
+        uint8_t pixel[2];
+        pixel[0] = (uint8_t)(rgb565 & 0xFFu);
+        pixel[1] = (uint8_t)(rgb565 >> 8);
+        return lt7680_write_data(pixel, 2u);
+    }
 }
 
 /* Wait for the geometry engine to finish (status bit 0x08 = CORE_BUSY). */

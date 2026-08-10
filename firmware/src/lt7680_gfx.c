@@ -469,11 +469,14 @@ lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
     return wr(REG_DCR0, DCR0_DRAW_FILL | DCR0_DRAW_RECT | DCR0_DRAW_EN);
 }
 
-/* Direct pixel write. The active window must be set first. */
+/* Direct pixel write.  The active window must be set first.  Point the data
+ * port at Display RAM (REG[04h], memory-write step 4) before pushing the
+ * 16bpp pixel LSB first; otherwise the bytes land in the last-addressed
+ * register (CURV) instead of memory. */
 lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
 {
     lt7680_status_t st;
-    uint16_t pixel;
+    uint8_t pixel[2];
 
     st = wr13(REG_CURH, x);
     if (st != LT7680_OK) {
@@ -483,9 +486,13 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
     if (st != LT7680_OK) {
         return st;
     }
-
-    pixel = rgb565;
-    return lt7680_write_data((uint8_t *)&pixel, 2u);
+    st = lt7680_select_reg(REG_MRWDP);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    pixel[0] = (uint8_t)(rgb565 & 0xFFu);
+    pixel[1] = (uint8_t)(rgb565 >> 8);
+    return lt7680_write_data(pixel, 2u);
 }
 
 /* Wait for the geometry engine to finish the current draw. The 2D engine

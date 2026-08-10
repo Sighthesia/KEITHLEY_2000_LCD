@@ -46,6 +46,7 @@ void lt7680_bus_init(const lt7680_bus_io_t *io);
 lt7680_status_t lt7680_reset(void);
 lt7680_status_t lt7680_wait_ready(uint32_t timeout_ms);
 lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value);
+lt7680_status_t lt7680_select_reg(uint8_t reg);
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value);
 lt7680_status_t lt7680_write_reg_bytes(uint8_t reg, const uint8_t *data,
                                        uint8_t len);

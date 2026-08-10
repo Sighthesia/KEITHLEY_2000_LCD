@@ -219,10 +219,13 @@ int main(void)
           "123456";
 #endif
       /* Clear bit5 (color-bar test pattern) only if the read succeeded, so
-       * a failed read cannot write 0x12=0 and blank the display. */
+       * a failed read cannot write 0x12=0 and blank the display.  Then wipe
+       * the frame buffer: the canvas defaults to an 8bpp block window, so
+       * turning the test pattern off alone would show a single-row sliver. */
       if (lt7680_read_reg(0x12u, &disp) == LT7680_OK) {
         (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x20u));
       }
+      (void)lt7680_gfx_clear(0x0000u);
 
       demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);

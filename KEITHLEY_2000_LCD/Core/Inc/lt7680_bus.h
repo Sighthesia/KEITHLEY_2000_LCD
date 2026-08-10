@@ -32,6 +32,7 @@ lt7680_status_t lt7680_delay_ms(uint32_t ms);
 lt7680_status_t lt7680_reset(void);
 lt7680_status_t lt7680_wait_ready(uint32_t timeout_ms);
 lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value);
+lt7680_status_t lt7680_select_reg(uint8_t reg);
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value);
 lt7680_status_t lt7680_read_status(uint8_t *status);
 lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len);
