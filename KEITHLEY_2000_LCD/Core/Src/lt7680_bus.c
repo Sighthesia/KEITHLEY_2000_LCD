@@ -141,12 +141,9 @@ lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    if (xfer_byte(LT7680_SPI_CMD_WRITE_DATA, 0) != LT7680_OK) {
-        s_io->cs(true);
-        return LT7680_ERR_BUS;
-    }
     for (uint32_t i = 0; i < len; i++) {
-        if (xfer_byte(data[i], 0) != LT7680_OK) {
+        if (xfer_byte(LT7680_SPI_CMD_WRITE_DATA, 0) != LT7680_OK ||
+            xfer_byte(data[i], 0) != LT7680_OK) {
             s_io->cs(true);
             return LT7680_ERR_BUS;
         }
