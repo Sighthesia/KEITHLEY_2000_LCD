@@ -109,6 +109,8 @@ static ui_model_t s_ui;
 static keypad_t s_keypad;
 static bool s_display_ready;
 static bool s_ui_dirty;
+static bool s_blink_visible = true;
+static uint32_t s_blink_tick;
 
 static void proto_on_event(const k2000_event_t *evt)
 {
@@ -209,7 +211,7 @@ static lt7680_status_t ui_draw_text(uint16_t x, uint16_t y, const char *text,
         uint16_t col;
 
         if (bitmap == 0) {
-            return LT7680_ERR_PARAM;
+            bitmap = font_text_bitmap('?');
         }
         for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
             const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
@@ -272,8 +274,18 @@ static void reading_scene_render(void)
     s_ui_dirty = false;
     main_display_format(&s_ui, &frame);
 
-    (void)ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH,
-                       MAIN_DISPLAY_UI_HEIGHT, 0x0000u);
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_STATUS_BAR_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_BAR_H,
+                       0x0000u);
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_UNIT_ROW_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UNIT_ROW_H,
+                       0x0000u);
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_READING_H,
+                       0x0000u);
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_CURSOR_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CURSOR_H,
+                       0x0000u);
     sx = 0u;
     for (i = 0u; i < frame.status_count; i++) {
         (void)ui_draw_text(sx, frame.status_y, frame.status_text[i],
@@ -293,7 +305,7 @@ static void reading_scene_render(void)
         (void)ui_draw_digits(frame.start_x, frame.reading_y, frame.value,
                              frame.value_color, 0x0000u);
     }
-    if (frame.cursor_visible) {
+    if (frame.cursor_visible && s_blink_visible) {
         (void)ui_fill_rect(frame.cursor_x, frame.cursor_y, FONT_DIGIT_WIDTH,
                            MAIN_DISPLAY_CURSOR_H, frame.value_color);
     }
@@ -304,6 +316,22 @@ static const scene_t s_reading_scene = {
     reading_scene_exit,
     reading_scene_render,
 };
+
+static void update_blink(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!s_ui.blink) {
+        s_blink_visible = true;
+        s_blink_tick = now;
+        return;
+    }
+    if ((now - s_blink_tick) >= 250u) {
+        s_blink_tick = now;
+        s_blink_visible = !s_blink_visible;
+        s_ui_dirty = true;
+    }
+}
 
 /* USER CODE END 0 */
 
@@ -319,7 +347,8 @@ int main(void)
   keypad_init(&s_keypad);
   scene_mgr_init();
   scene_mgr_register(0, &s_reading_scene);
-  scene_mgr_enter(0);
+    scene_mgr_enter(0);
+    s_ui_dirty = true;
 
   /* USER CODE END 1 */
 
@@ -545,7 +574,7 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
+    while (1)
   {
     int ch = hal_uart_receive_byte();
     if (ch >= 0) {
@@ -564,6 +593,7 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       }
     }
 
+    update_blink();
     scene_mgr_render();
     /* USER CODE END WHILE */
 

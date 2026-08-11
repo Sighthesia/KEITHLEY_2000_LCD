@@ -540,7 +540,7 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
         uint16_t col;
 
         if (bitmap == 0) {
-            return LT7680_ERR_PARAM;
+            bitmap = font_text_bitmap('?');
         }
         for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
             for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
