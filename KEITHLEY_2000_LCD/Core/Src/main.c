@@ -261,12 +261,13 @@ static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
 static lt7680_status_t ui_draw_placeholders(uint16_t x, uint16_t y,
                                              uint8_t count, uint16_t color)
 {
+    const uint16_t line_width = FONT_DIGIT_WIDTH - 16u;
     uint8_t i;
 
     for (i = 0u; i < count; i++) {
         lt7680_status_t st = ui_fill_rect(
-            (uint16_t)(x + (uint16_t)i * FONT_DIGIT_WIDTH),
-            (uint16_t)(y + FONT_DIGIT_HEIGHT - 8u), FONT_DIGIT_WIDTH, 4u,
+            (uint16_t)(x + (uint16_t)i * FONT_DIGIT_WIDTH + 8u),
+            (uint16_t)(y + FONT_DIGIT_HEIGHT - 8u), line_width, 4u,
             color);
         if (st != LT7680_OK) {
             return st;

@@ -113,6 +113,14 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
                                     FONT_DIGIT_WIDTH)
                        : MAIN_DISPLAY_READING_X,
         f->placeholder ? MAIN_DISPLAY_PLACEHOLDER_SLOTS : MAIN_DISPLAY_MAX_SLOTS);
+    if (f->placeholder) {
+        layout.start_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH -
+                                     MAIN_DISPLAY_PLACEHOLDER_SLOTS *
+                                     FONT_DIGIT_WIDTH) / 2u);
+        layout.end_x = (uint16_t)(layout.start_x +
+                                  MAIN_DISPLAY_PLACEHOLDER_SLOTS *
+                                  FONT_DIGIT_WIDTH);
+    }
     f->start_x = layout.start_x;
     f->end_x = layout.end_x;
 

@@ -126,8 +126,8 @@ int main(void)
         assert(f.placeholder);
         assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
         assert(strcmp(f.value, "_______") == 0);
-        assert(f.start_x == (MAIN_DISPLAY_MAX_SLOTS -
-                             MAIN_DISPLAY_PLACEHOLDER_SLOTS) * FONT_DIGIT_WIDTH);
+        assert(f.start_x == (MAIN_DISPLAY_UI_WIDTH -
+                             MAIN_DISPLAY_PLACEHOLDER_SLOTS * FONT_DIGIT_WIDTH) / 2u);
         assert(f.status_count == 0u);
         assert(f.unit_len == 0u);
     }
@@ -141,8 +141,8 @@ int main(void)
         assert(f.placeholder);
         assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
         assert(strcmp(f.value, "_______") == 0);
-        assert(f.start_x == (MAIN_DISPLAY_MAX_SLOTS -
-                             MAIN_DISPLAY_PLACEHOLDER_SLOTS) * FONT_DIGIT_WIDTH);
+        assert(f.start_x == (MAIN_DISPLAY_UI_WIDTH -
+                             MAIN_DISPLAY_PLACEHOLDER_SLOTS * FONT_DIGIT_WIDTH) / 2u);
         assert(f.status_count == 0);
         assert(f.unit_len == 0);
     }
