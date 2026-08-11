@@ -43,9 +43,10 @@ RESET. Consequences:
 - **Initialize the panel AFTER `lt7680_reset()`, never before.** If you run the
   panel's 9-bit init sequence first and then pulse reset, the reset line wipes
   the panel config you just wrote → black screen. This was the actual bug.
-- Order: `lt7680_reset()` → `lt7680_wait_ready()` → `hal_panel_init()`
-  (sleeps ~200 ms for the panel's RC release) → `lt7680_gfx_init()` →
-  `lt7680_gfx_show_color_bars()`.
+- Boot order (verified build11): `lt7680_reset()` → `lt7680_wait_ready()` →
+  **blank `REG[12h]=0x08`** (see boot cosmetics) → `hal_panel_init()` (sleeps
+  ~200 ms for the panel's RC release) → `lt7680_gfx_init()` → clear+draw with
+  display off → 0x48.
 - Reset timing: hold low ≥10 ms, release, wait ≥50 ms before talking to LT7680.
 
 ## LT7680 SPI protocol (matches reverse-engineered V16 firmware)
@@ -179,6 +180,34 @@ These are applied in `lt7680_gfx_init()` (`configure_windows()`) and used by
 `lt7680_gfx_set_pixel()` / `lt7680_gfx_clear()`; both trees (KEITHLEY and
 `firmware/`) must stay in sync.  `lt7680_select_reg()` (bus) selects a
 register without writing data so a burst can target MRWDP.
+
+### Framebuffer orientation: the panel TRANSPOSES the framebuffer
+
+The RGB panel scans the 320x960 framebuffer with its axes EXCHANGED and NO
+reversal (`fb_x` = pixel row → screen column, `fb_y` = pixel column → screen
+row). To render an upright, un-mirrored image, write the **transpose** with a
+landscape 960x320 UI coordinate space:
+
+```c
+fb_x = uy;   /* no +axis reversed */
+fb_y = ux;   /* ui x along the panel's long axis */
+```
+
+Derived empirically (build6/7/8): reversing only `fb_x` flips the image
+upside down; reversing only `fb_y` mirrors it left-right; both reversed =
+180° mirror. Do NOT guess the axes — write a test glyph and read the result
+against this table. Center by converting logical position in the 960x320 UI
+space (`ux0 = (960-w)/2`, `uy0 = (320-h)/2`) and transposing; the LT7680
+timing/registers stay 320x960.
+
+### Readback: prove the canvas, not the panel
+
+`lt7680_gfx_peek_pixel(x,y,&px)` reads a canvas pixel back through MRWDP
+(cursor + select REG[04h] + two 0xC0 reads, LSB first). Use it after a clear
+to prove SDRAM was really written: all-zero samples ⇒ the fill works and any
+visible artifact is display-side (timing/panel); non-zero ⇒ memory was not
+cleared at that (x,y). This is how the MRWDP-burst clear was disproved on
+hardware in one flash.
 
 ### Clearing the canvas: use the Geometry Engine, not a MRWDP burst
 

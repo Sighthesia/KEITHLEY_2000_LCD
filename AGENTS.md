@@ -32,6 +32,7 @@
   ```
   若最后 reset 报错，写入其实已成功，按板上复位键启动即可；软件复位不可靠时手动按复位。
 - 硬件验收（彩条里程碑，已通过）：`LT7680_SPI_SELFTEST=0` 正常路径 → `lt7680_reset()`（PA3 同时复位 LT7680 与面板）→ `hal_panel_init()`（9-bit SPI ST7701S 序列，`0x11`→`0x35 0x00`→`0x3A 0x66`→`0x29`）→ `lt7680_gfx_init()` → `lt7680_gfx_show_color_bars()`；115200 串口回 `STATUS=0x..` / `PASS color-bars enabled`，屏幕显示彩条。
+- 硬件验收（数字演示里程碑，build11 已通过）：正常启动全程黑屏（复位后立即 `REG[12h]=0x08` 关显示、不调用 `show_color_bars()`），`lt7680_gfx_clear()` 用**几何引擎矩形填充**（`DCR1=REG[76h]=0xE0`，不是 MRWDP 突发），回读全部 `PX(..)=0000`，`clear-ms=5`（突发 614400 字节需 ~2s 且并不清空画布）；数字在物理屏正中、方向正确，映射是**纯转置** `fb_x=uy; fb_y=ux`（960×320 横屏 UI 空间，无任何轴反转；x 反转=上下颠倒、y 反转=左右镜像）。`lt7680_gfx_peek_pixel()` 可经 MRWDP 回读画布像素用于诊断。
 - **关键教训：`hal_panel_init()` 必须在 `lt7680_reset()` 之后调用**。PA3 经 BAT54 分路到 LT7680 RST 与 LCD RES 两条复位线；先初始化面板再复位会把刚写进面板的配置抹掉（这是黑屏根因之一）。
 - LT7680A-R + ST7701S 的初始化细节（SPI 协议、PLL/SDRAM/时序寄存器、已验证的 V16 寄存器值、彩条验收、黑屏排查顺序）见 skill `.agents/skills/lt7680-st7701/SKILL.md`；烧录用 `.agents/skills/openocd-stm32-flash/SKILL.md`。
 - 可用 `arm-none-eabi-objcopy -I ihex -O binary <firmware.hex> <firmware.bin>` 将 HEX 转为二进制供静态分析；转换不会恢复源代码或协议语义。
