@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build5 portrait-timing\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build6 fb-rotate-hide-update\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -252,8 +252,10 @@ int main(void)
        * the frame buffer: the canvas defaults to an 8bpp block window, so
        * turning the test pattern off alone would show a single-row sliver. */
       if (lt7680_read_reg(0x12u, &disp) == LT7680_OK) {
-        (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x20u));
-        (void)lt7680_read_reg(0x12u, &disp);
+        /* Keep the display blank while the 614400-byte framebuffer clear and
+         * per-pixel draw run. Otherwise the panel visibly shows each partial
+         * burst and the old/new image appears as two refreshes. */
+        (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x60u));
       }
       (void)lt7680_gfx_clear(0x0000u);
 
@@ -288,11 +290,17 @@ int main(void)
               uint16_t dx;
               for (dx = 0u; dx < FONT_DIGIT_WIDTH; dx++) {
                 if ((row[dx >> 3] & (0x80u >> (dx & 7u))) != 0u) {
-                  uint16_t px = (uint16_t)(x + dx);
-                  if (px < panel.width) {
-                    (void)lt7680_gfx_set_pixel(px, (uint16_t)(16u + dy),
-                                               0xFFFFu);
-                  }
+                    uint16_t logical_x = (uint16_t)(x + dx);
+                    uint16_t logical_y = (uint16_t)(16u + dy);
+                    /* The RGB panel scans the 320x960 framebuffer with its
+                     * axes exchanged and one axis reversed. Render the
+                     * landscape UI into framebuffer coordinates that undo
+                     * that mapping while keeping the verified timing. */
+                    uint16_t fb_x = (uint16_t)(panel.width - 1u - logical_y);
+                    uint16_t fb_y = logical_x;
+                    if (fb_x < panel.width && fb_y < panel.height) {
+                      (void)lt7680_gfx_set_pixel(fb_x, fb_y, 0xFFFFu);
+                    }
                 }
               }
             }
@@ -301,6 +309,11 @@ int main(void)
           p++;
         }
       }
+      (void)lt7680_write_reg(0x12u, 0x48u);
+      (void)lt7680_read_reg(0x12u, &disp);
+      hal_uart_send_text("R12-final=0x");
+      hal_uart_send_hex8(disp);
+      hal_uart_send_text("\r\n");
       hal_uart_send_text("digits-ms=");
       uart_print_u32(HAL_GetTick() - t0);
       hal_uart_send_text("\r\n");
