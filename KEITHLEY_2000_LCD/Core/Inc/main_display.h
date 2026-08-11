@@ -37,8 +37,22 @@
 /* Big-reading band spans the whole UI width, so 960/48 = 20 digit slots. */
 #define MAIN_DISPLAY_READING_X 0u
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_DIGIT_WIDTH)
-#define MAIN_DISPLAY_PLACEHOLDER_SLOTS 7u
 #define MAIN_DISPLAY_UNIT_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_TEXT_WIDTH)
+
+/* No-data state (startup): the reading band shows the "NO DATA" hint instead
+ * of digits/underscores. 12x24 small text, horizontally centred in the band
+ * and vertically centred in it (Q2/Q6), in the same grey as "----". */
+#define MAIN_DISPLAY_NO_DATA_TEXT "NO DATA"
+#define MAIN_DISPLAY_NO_DATA_LEN 7u
+#define MAIN_DISPLAY_NO_DATA_COLOR 0xC618u
+
+/* Static decorations (Q5-a): one 1px dark-grey separator under the status
+ * bar and one under the unit row, full UI width. Drawn with every frame
+ * (they sit under the per-frame background clears), visually static. */
+#define MAIN_DISPLAY_SEP_Y_STATUS MAIN_DISPLAY_UNIT_ROW_Y
+#define MAIN_DISPLAY_SEP_Y_UNIT MAIN_DISPLAY_READING_Y
+#define MAIN_DISPLAY_SEP_H 1u
+#define MAIN_DISPLAY_SEP_COLOR 0x8410u
 
 #define MAIN_DISPLAY_CURSOR_GAP 4u
 #define MAIN_DISPLAY_CURSOR_Y \
@@ -65,7 +79,9 @@ typedef struct {
     char unit[UI_MODEL_MAX_UNIT];
     uint8_t unit_len;
     uint8_t special;          /* 0 normal, 1 OVERFLOW, 2 no-reading */
-    bool placeholder;         /* initial screen: centered underscore slots */
+    bool no_data;             /* startup: no host message yet; show "NO DATA" */
+    uint16_t no_data_x;       /* left edge of the "NO DATA" hint */
+    uint16_t no_data_y;       /* top of the "NO DATA" hint */
     uint16_t value_color;     /* RGB565 for the big digits (special aware) */
     uint16_t start_x;         /* left edge of the right-aligned value block */
     uint16_t end_x;           /* right edge (exclusive) */

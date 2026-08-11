@@ -14,6 +14,8 @@ int main(void)
     assert(m.cursor_pos == 0);
     assert(!m.blink);
     assert(!m.hold && !m.trig && !m.remote);
+    /* No host message received yet (no-data state, Q4-a). */
+    assert(!m.any_message);
     /* status_bar embedded store is initialised with all six status tags. */
     assert(!status_bar_active(&m.status, 0x08u, 0x80u));
 
@@ -21,6 +23,7 @@ int main(void)
     ui_model_apply_field(&m, 0x01u, "123", 3);
     assert(memcmp(m.value, "123", 3) == 0 && m.value[3] == '\0');
     assert(m.unit[0] == '\0');
+    assert(m.any_message);
 
     /* apply_reading stores the split numeric prefix + unit + special. */
     ui_model_apply_reading(&m, "1.2345", 6, "VDC", 3, 0);
@@ -59,11 +62,12 @@ int main(void)
     ui_model_apply_blink(&m, false);
     assert(!m.blink);
 
-    /* apply_status forwards into the embedded status_bar_t... */
+    /* A status-only update also counts as a host message (exits no-data). */
     ui_model_apply_status(&m, 0x08u, 0x80u);
     assert(status_bar_active(&m.status, 0x08u, 0x80u));
     assert(status_bar_core_active(&m.status, 0));   /* HOLD */
     assert(!status_bar_core_active(&m.status, 3));  /* TRIG off */
+    assert(m.any_message);
 
     /* ...and updates the matching legacy mirrors only. */
     assert(m.hold);

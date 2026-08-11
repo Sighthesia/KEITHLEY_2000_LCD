@@ -258,22 +258,20 @@ static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
     return LT7680_OK;
 }
 
-static lt7680_status_t ui_draw_placeholders(uint16_t x, uint16_t y,
-                                             uint8_t count, uint16_t color)
+static lt7680_status_t ui_draw_separators(void)
 {
-    const uint16_t line_width = FONT_DIGIT_WIDTH - 16u;
-    uint8_t i;
-
-    for (i = 0u; i < count; i++) {
-        lt7680_status_t st = ui_fill_rect(
-            (uint16_t)(x + (uint16_t)i * FONT_DIGIT_WIDTH + 8u),
-            (uint16_t)(y + FONT_DIGIT_HEIGHT - 8u), line_width, 4u,
-            color);
-        if (st != LT7680_OK) {
-            return st;
-        }
-    }
-    return LT7680_OK;
+    /* Static decorations (Q5-a): full-width 1px lines under the status bar
+     * and under the unit row. Redrawn with every frame because the per-frame
+     * band clears would otherwise cover them; visually they never change. */
+    lt7680_status_t st1 = ui_fill_rect(0u, MAIN_DISPLAY_SEP_Y_STATUS,
+                                       MAIN_DISPLAY_UI_WIDTH,
+                                       MAIN_DISPLAY_SEP_H,
+                                       MAIN_DISPLAY_SEP_COLOR);
+    lt7680_status_t st2 = ui_fill_rect(0u, MAIN_DISPLAY_SEP_Y_UNIT,
+                                       MAIN_DISPLAY_UI_WIDTH,
+                                       MAIN_DISPLAY_SEP_H,
+                                       MAIN_DISPLAY_SEP_COLOR);
+    return (st1 != LT7680_OK) ? st1 : st2;
 }
 
 static void reading_scene_render(void)
@@ -282,7 +280,14 @@ static void reading_scene_render(void)
     uint8_t i;
     uint16_t sx;
 
-    if (!s_display_ready || !s_ui_dirty) {
+    if (!s_display_ready) {
+        return;
+    }
+    /* Static decorations are part of the frame: drawn once the display is
+     * enabled, independent of host-data dirtiness, so the base UI is never
+     * blank while waiting for the first message. */
+    (void)ui_draw_separators();
+    if (!s_ui_dirty) {
         return;
     }
     s_ui_dirty = false;
@@ -300,6 +305,9 @@ static void reading_scene_render(void)
     (void)ui_fill_rect(0u, MAIN_DISPLAY_CURSOR_Y,
                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CURSOR_H,
                        0x0000u);
+    /* The band clears above cover the separators; redraw them before the
+     * dynamic content so the frame is always complete. */
+    (void)ui_draw_separators();
     sx = 0u;
     for (i = 0u; i < frame.status_count; i++) {
         (void)ui_draw_text(sx, frame.status_y, frame.status_text[i],
@@ -312,9 +320,10 @@ static void reading_scene_render(void)
         (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
                            0xFFFFu, 0x0000u);
     }
-    if (frame.placeholder) {
-        (void)ui_draw_placeholders(frame.start_x, frame.reading_y,
-                                    frame.value_len, 0xFFFFu);
+    if (frame.no_data) {
+        (void)ui_draw_text(frame.no_data_x, frame.no_data_y,
+                           MAIN_DISPLAY_NO_DATA_TEXT,
+                           MAIN_DISPLAY_NO_DATA_COLOR, 0x0000u);
     } else if (frame.special != 0u) {
         (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
                            frame.value_color, 0x0000u);

@@ -18,6 +18,10 @@ typedef struct {
     char function[16];
     uint16_t cursor_pos;
     bool blink;
+    /* True once any host message (field/status/cursor/blink) has been
+     * applied. Drives the no-data state (Q4-a): before the first message
+     * the reading page shows the "NO DATA" hint instead of a value. */
+    bool any_message;
     /* Legacy convenience mirrors of the status tags (HOLD/TRIG from 0x08,
      * REM from 0x06). status_bar_t is the authoritative store. */
     bool hold;

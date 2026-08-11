@@ -117,34 +117,39 @@ int main(void)
         main_display_format(0, 0);
     }
 
-    /* Initial screen: no status/unit, centered seven underscore slots. */
+    /* No-data state (startup): no value/unit/status, the "NO DATA" hint is
+     * horizontally centred in the reading band and vertically centred in it,
+     * and the value is empty (no underscore slots). */
     {
         ui_model_t m;
         main_display_frame_t f;
         ui_model_init(&m);
         main_display_format(&m, &f);
-        assert(f.placeholder);
-        assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
-        assert(strcmp(f.value, "_______") == 0);
-        assert(f.start_x == (MAIN_DISPLAY_UI_WIDTH -
-                             MAIN_DISPLAY_PLACEHOLDER_SLOTS * FONT_DIGIT_WIDTH) / 2u);
+        assert(f.no_data);
+        assert(f.value_len == 0u);
+        assert(f.value[0] == '\0');
+        assert(!f.cursor_visible);
+        assert(f.start_x == 0u && f.end_x == 0u);
+        assert(f.no_data_x == (MAIN_DISPLAY_UI_WIDTH -
+                               MAIN_DISPLAY_NO_DATA_LEN * FONT_TEXT_WIDTH) / 2u);
+        assert(f.no_data_y == MAIN_DISPLAY_READING_Y +
+                              (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) / 2u);
         assert(f.status_count == 0u);
         assert(f.unit_len == 0u);
     }
 
-    /* Initial screen: no status/unit, centered seven underscore slots. */
+    /* A status-only message exits the no-data state (Q4-a): the frame is no
+     * longer marked no_data even though no reading is present. */
     {
         ui_model_t m;
         main_display_frame_t f;
         ui_model_init(&m);
+        ui_model_apply_status(&m, 0x06u, 0x80u);
         main_display_format(&m, &f);
-        assert(f.placeholder);
-        assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
-        assert(strcmp(f.value, "_______") == 0);
-        assert(f.start_x == (MAIN_DISPLAY_UI_WIDTH -
-                             MAIN_DISPLAY_PLACEHOLDER_SLOTS * FONT_DIGIT_WIDTH) / 2u);
-        assert(f.status_count == 0);
-        assert(f.unit_len == 0);
+        assert(!f.no_data);
+        assert(f.value_len == 0u);
+        assert(f.status_count == 1u);
+        assert(strcmp(f.status_text[0], "REM") == 0);
     }
 
     return 0;

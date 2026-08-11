@@ -79,12 +79,8 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     }
     f->value[n] = '\0';
     f->value_len = n;
-    if (n == 0u) {
-        n = MAIN_DISPLAY_PLACEHOLDER_SLOTS;
-        memset(f->value, '_', n);
-        f->value[n] = '\0';
-        f->value_len = n;
-        f->placeholder = true;
+    if (!m->any_message) {
+        f->no_data = true;
     }
     if (m->unit[0] != '\0') {
         n = (uint8_t)strlen(m->unit);
@@ -106,23 +102,24 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     f->unit_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH -
                            (uint16_t)f->unit_len * FONT_TEXT_WIDTH);
 
-    layout = main_display_layout_value(
-        f->value_len,
-        f->placeholder ? (uint16_t)((MAIN_DISPLAY_MAX_SLOTS -
-                                     MAIN_DISPLAY_PLACEHOLDER_SLOTS) *
-                                    FONT_DIGIT_WIDTH)
-                       : MAIN_DISPLAY_READING_X,
-        f->placeholder ? MAIN_DISPLAY_PLACEHOLDER_SLOTS : MAIN_DISPLAY_MAX_SLOTS);
-    if (f->placeholder) {
-        layout.start_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH -
-                                     MAIN_DISPLAY_PLACEHOLDER_SLOTS *
-                                     FONT_DIGIT_WIDTH) / 2u);
-        layout.end_x = (uint16_t)(layout.start_x +
-                                  MAIN_DISPLAY_PLACEHOLDER_SLOTS *
-                                  FONT_DIGIT_WIDTH);
+    /* No-data hint: centred in the reading band. */
+    f->no_data_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH -
+                               MAIN_DISPLAY_NO_DATA_LEN * FONT_TEXT_WIDTH) /
+                              2u);
+    f->no_data_y = (uint16_t)(MAIN_DISPLAY_READING_Y +
+                              (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) /
+                              2u);
+
+    if (!f->no_data) {
+        layout = main_display_layout_value(f->value_len, MAIN_DISPLAY_READING_X,
+                                           MAIN_DISPLAY_MAX_SLOTS);
+        f->start_x = layout.start_x;
+        f->end_x = layout.end_x;
+    } else {
+        /* No digits in the no-data state; never leave stale frame values. */
+        f->start_x = 0u;
+        f->end_x = 0u;
     }
-    f->start_x = layout.start_x;
-    f->end_x = layout.end_x;
 
     /* Cursor: POS indexes into the value string, clamped to its length;
      * only shown while blink (edit mode) is active and a value exists. */

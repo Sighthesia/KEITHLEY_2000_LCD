@@ -25,6 +25,7 @@ void ui_model_apply_field(ui_model_t *m, uint8_t tag, const char *value,
     }
     memcpy(m->value, value, n);
     m->value[n] = '\0';
+    m->any_message = true;
     (void)tag;
 }
 
@@ -34,6 +35,7 @@ void ui_model_apply_cursor(ui_model_t *m, uint16_t pos)
         return;
     }
     m->cursor_pos = pos;
+    m->any_message = true;
 }
 
 void ui_model_apply_blink(ui_model_t *m, bool on)
@@ -42,6 +44,7 @@ void ui_model_apply_blink(ui_model_t *m, bool on)
         return;
     }
     m->blink = on;
+    m->any_message = true;
 }
 
 void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
@@ -52,6 +55,7 @@ void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
         return;
     }
     m->special = special;
+    m->any_message = true;
     if (num != 0 && num_len > 0u) {
         n = num_len;
         if (n >= sizeof(m->value)) {
@@ -80,6 +84,7 @@ void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
         return;
     }
     status_bar_set(&m->status, tag, value);
+    m->any_message = true;
     /* Update only the legacy mirrors owned by this tag; other status groups
      * are independent and must not be reset by an unrelated message. */
     if (tag == K2000_TAG_STATUS_HOLD) {
