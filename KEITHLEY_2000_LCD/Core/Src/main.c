@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build4 landscape-madctl60\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build5 portrait-timing\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -253,6 +253,7 @@ int main(void)
        * turning the test pattern off alone would show a single-row sliver. */
       if (lt7680_read_reg(0x12u, &disp) == LT7680_OK) {
         (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x20u));
+        (void)lt7680_read_reg(0x12u, &disp);
       }
       (void)lt7680_gfx_clear(0x0000u);
 
