@@ -434,7 +434,11 @@ int main(void)
             /* Colour-bar milestone passed earlier; do NOT show the internal
              * test pattern at boot (bit5) - it flashes colour bars before the
              * demo blanks the display. Display stays 0x08 (off) throughout. */
-            hal_uart_send_text("PASS display blanked, drawing demo\r\n");
+            hal_uart_send_text("PASS display enabled, waiting for reading\r\n");
+            /* Enable the normal canvas output without the internal test
+             * pattern. The post-reset blank (0x08) must not remain active
+             * when the legacy digit demo is disabled. */
+            (void)lt7680_write_reg(0x12u, 0x48u);
             s_display_ready = true;
           }
         }
