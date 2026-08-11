@@ -1,0 +1,25 @@
+# Domain Context — KEITHLEY 2000 TFT Display Board
+
+## 术语
+
+- **主机 (Host)**: Keithley 2000 主测量单元。测量读数、模式、量程与状态的权威来源。
+- **显示板 (Display Board)**: 本固件所在的 STM32F103C8T6 + LT7680A-R + ST7701S 面板。负责呈现主机数据、回传按键、本地提供趋势/统计等增强视图。
+- **读数 (Reading)**: 主机通过协议发送的当前测量值，含数字部分与单位。
+- **消息 (Message)**: 以 `0x0D` 起始的协议消息。
+- **TAG**: 消息中标识字段/语义的类型字节（`0x04` POS、`0x0B` 闪烁、`0x06..0x0E` 状态等）。
+- **字段 (Field)**: TAG + value 构成的协议单元。
+- **状态指示器 (Status Indicator)**: 状态 TAG（`0x06..0x0E`）位图所指示的指示符（REM、HOLD、REL、TRIG、AUTO、ERR 等）。
+- **场景 (Scene)**: 全屏 UI 布局单元，如读数场景、趋势场景。
+- **UI 逻辑空间 (UI logical space)**: 960×320 横屏坐标空间，所有视图在该空间编排。
+- **帧缓冲变换 (Framebuffer transform)**: 逻辑坐标 → LT7680 原生帧缓冲的映射。当前为纯转置（`fb_x=uy; fb_y=ux`）。
+- **主机权威 (Host authority)**: 显示板与主机状态冲突时以主机为准；显示板不做测量状态的乐观更新。
+- **显示板本地键 (Board-local key)**: 由显示板解释、用于场景导航的按键（如 DISPLAY / TREND）。
+- **透传键 (Passthrough key)**: 显示板仅扫描、防抖并转发给主机的按键。
+- **特殊读数 (Special reading)**: `OVERFLOW`（超量程，红字）与 `----`（无读数，灰字）等非数值读数，均不压入趋势缓冲。
+- **读数场景 (Reading scene)**: 里程碑-1 唯一的全屏场景。布局自上而下：顶部状态栏（~24px）、功能区/单位行（~24px）、中部大读数区（48×96 大数字右对齐）、底部小字行（光标/次级信息）。
+- **状态栏 (Status bar)**: 读数场景顶部区域，渲染**核心指示器子集**：HOLD / REM / REL / TRIG / AUTO / ERR（只点亮置位项）。
+- **大读数 (Big reading)**: reading_split 拆分出的 `value` 数字串，以大数字字形显示；右对齐。
+- **单位串 (Unit string)**: reading_split 拆分出的尾部字母/符号部分（如 `VDC`、`mV`、`kΩ`），显示在功能区/单位列；功能/量程不虚构，量程信息蕴含在单位串中。
+- **光标 (Cursor)**: 主机 `POS` 指示的位置（value 字符串内从左数第 0 个字符起，钳位到串长）；编辑时以大读数下闪烁下划线呈现，非编辑不显示。
+- **闪烁 (Blink)**: 主机 `0x0B` 开始/停止、由显示板本地定时器翻转的可见性状态。
+- **场景切换 (Scene switch)**: 显示板本地键触发的场景间导航。里程碑-1 未接线——DISPLAY/TREND 键仍透传主机，仅预留场景框架接口。
