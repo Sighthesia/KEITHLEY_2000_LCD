@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build8 fb-transpose-landscape\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build9 ge-fill-clear\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -238,6 +238,7 @@ int main(void)
        * (Panel_Landscape=1); on the verified 320-wide portrait we render 6. */
       uint8_t disp = 0u;
       uint32_t t0;
+      uint32_t t1;
       uint16_t demo_len;
       uint16_t demo_w;
       uint16_t ux0;
@@ -256,9 +257,13 @@ int main(void)
         /* Keep the display blank while the 614400-byte framebuffer clear and
          * per-pixel draw run. Otherwise the panel visibly shows each partial
          * burst and the old/new image appears as two refreshes. */
-        (void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x60u));
+(void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x60u));
       }
+      t1 = HAL_GetTick();
       (void)lt7680_gfx_clear(0x0000u);
+      hal_uart_send_text("clear-ms=");
+      uart_print_u32(HAL_GetTick() - t1);
+      hal_uart_send_text("\r\n");
 
       /* Telemetry: confirm the windows and test-pattern state read back as
        * configured.  If MIW/CVSIMWTH/AW_* read back 0 the register write
@@ -274,6 +279,32 @@ int main(void)
       dump_reg("AWCOL=", 0x5Eu);
       dump_reg("P10=", 0x10u);
       dump_reg("P5E=", 0x5Eu);
+
+      /* Read back a sample of canvas pixels after the clear via MRWDP. If
+       * every sample is 0000 the GE fill reached the whole canvas and the
+       * striped background must be a display-side artefact; any non-zero
+       * sample pins down (x,y) where memory was NOT cleared. */
+      {
+        static const uint16_t sx[] = {0u, 159u, 319u};
+        static const uint16_t sy[] = {0u, 200u, 400u, 600u, 800u, 959u};
+        uint8_t i;
+        for (i = 0u; i < 3u; i++) {
+          uint8_t j;
+          for (j = 0u; j < 6u; j++) {
+            uint16_t px = 0u;
+            if (lt7680_gfx_peek_pixel(sx[i], sy[j], &px) == LT7680_OK) {
+              hal_uart_send_text("PX(");
+              uart_print_u32(sx[i]);
+              hal_uart_send_text(",");
+              uart_print_u32(sy[j]);
+              hal_uart_send_text(")=");
+              hal_uart_send_hex8((uint8_t)(px >> 8));
+              hal_uart_send_hex8((uint8_t)(px & 0xFFu));
+              hal_uart_send_text("\r\n");
+            }
+          }
+        }
+      }
 
 demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);

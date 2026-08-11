@@ -31,3 +31,4 @@ lt7680_status_t lt7680_gfx_draw_circle(int16_t xc, int16_t yc, int16_t r,
 lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
                                      uint16_t fg, uint16_t bg);
 lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565);
+lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565);

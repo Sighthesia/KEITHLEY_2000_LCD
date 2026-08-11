@@ -430,15 +430,15 @@ static lt7680_status_t set_fg_color16(uint16_t rgb565)
     return wr(REG_FGCB, (uint8_t)(b << 3));
 }
 
-/* Rectangle fill via the geometry engine:
- * - DCR0 = 0xE4  -> bit7 draw, bit5 fill, bit[4:1] = 0010b (rectangle)
- * - (D0h,D1h) = draw rectangle color select = 00b (foreground)
- * - Start/end points are exclusive: end = (x+w, y+h). */
+/* Rectangle fill via the geometry engine (LT768x DS V4.2 + Levetop
+ * LT768_Lib / RAiO Ra8876_Lite): DCR1 REG[76h] = 0xE0 -> bit7 start,
+ * bit6 fill, bit[5:4]=10b rectangle.  DCR0 REG[67h] only handles
+ * line/triangle.  Start/end points are exclusive: end = (x+w, y+h). */
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
 {
     lt7680_status_t st;
-    uint16_t end_x;
-    uint16_t end_y;
+    uint32_t end_x;
+    uint32_t end_y;
 
     if (rect == 0) {
         return LT7680_ERR_PARAM;
@@ -448,25 +448,21 @@ lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
     if (st != LT7680_OK) {
         return st;
     }
-    st = wr(REG_DCR0, 0x00u);  /* select draw rectangle command */
-    if (st != LT7680_OK) {
-        return st;
-    }
-
-    end_x = (uint16_t)(rect->x + rect->w);
-    end_y = (uint16_t)(rect->y + rect->h);
     st = wr32le(REG_GE_SPT, ((uint32_t)rect->x & 0x1FFFu) |
                             (((uint32_t)rect->y & 0x1FFFu) << 16));
     if (st != LT7680_OK) {
         return st;
     }
-    st = wr32le(REG_GE_EPT, ((uint32_t)end_x & 0x1FFFu) |
-                            (((uint32_t)end_y & 0x1FFFu) << 16));
+
+    end_x = (uint32_t)rect->x + (uint32_t)rect->w;
+    end_y = (uint32_t)rect->y + (uint32_t)rect->h;
+    st = wr32le(REG_GE_EPT, (end_x & 0x1FFFu) |
+                            ((end_y & 0x1FFFu) << 16));
     if (st != LT7680_OK) {
         return st;
     }
 
-    return wr(REG_DCR0, DCR0_DRAW_FILL | DCR0_DRAW_RECT | DCR0_DRAW_EN);
+    return wr(REG_DCR1, 0xE0u);
 }
 
 /* Direct pixel write.  The active window must be set first.  Point the data
@@ -493,6 +489,39 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
     pixel[0] = (uint8_t)(rgb565 & 0xFFu);
     pixel[1] = (uint8_t)(rgb565 >> 8);
     return lt7680_write_data(pixel, 2u);
+}
+
+lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565)
+{
+    lt7680_status_t st;
+    uint8_t lo = 0u;
+    uint8_t hi = 0u;
+
+    if (rgb565 == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    st = wr13(REG_CURH, x);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(REG_CURV, y);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_select_reg(REG_MRWDP);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_read_reg(REG_MRWDP, &lo);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_read_reg(REG_MRWDP, &hi);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    *rgb565 = (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+    return LT7680_OK;
 }
 
 /* Wait for the geometry engine to finish the current draw. The 2D engine

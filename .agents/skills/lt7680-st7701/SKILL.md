@@ -179,3 +179,30 @@ These are applied in `lt7680_gfx_init()` (`configure_windows()`) and used by
 `lt7680_gfx_set_pixel()` / `lt7680_gfx_clear()`; both trees (KEITHLEY and
 `firmware/`) must stay in sync.  `lt7680_select_reg()` (bus) selects a
 register without writing data so a burst can target MRWDP.
+
+### Clearing the canvas: use the Geometry Engine, not a MRWDP burst
+
+A MRWDP burst of zeros ("one burst fills the whole panel") did **not** clear
+Display RAM on hardware — the screen kept the pre-existing SDRAM content
+(red/black vertical stripes) behind correctly-drawn pixels. `set_pixel`
+works because it re-positions CURH/CURV every call; the burst clear relied on
+auto-increment that never covered the canvas. Clear/fill via the GE instead:
+
+- **Filled rectangle = `DCR1` REG[76h] = `0xE0`** (bit7 start, bit6 fill,
+  bit[5:4]=10b rectangle). `DCR0` REG[67h] only does line/triangle — ignore
+  the DCR0 bit[4:1] "rectangle" field in LT768x DS V4.2 (that field is an
+  LT7689 feature; 0xA4/0xE4 on DCR0 are both wrong for LT7680A).
+- Sequence: set FG color (`FGCR` D2h `R5<<3`, `FGCG` D3h `G6<<2`, `FGCB`
+  D4h `B5<<3`) → `GE_SPT` REG[68h..6Bh]=(x1,y1) → `GE_EPT`
+  REG[6Ch..6Fh]=(x2,y2) exclusive, full screen uses (0,0,width,height) →
+  write REG[76h]=0xE0 → poll STATUS bit3 (0x08, CORE_BUSY) until clear.
+- There is no "draw color select" register at D0h/D1h (D0h=FLDR, D1h=F2FSSR);
+  the GE always draws in the foreground color.
+
+### Boot sequence cosmetics (observed build8/9)
+
+After reset the panel briefly shows colour bars on the right, then a sky-blue
+sweep as display-off + clear run, then ~2 s black while the digits draw, then
+the image. This is expected: `lt7680_gfx_show_color_bars()` is called before
+the demo blanks the display (0x12 &= ~0x60) and the draw is per-pixel. With
+the GE-fill clear the black gap is only the per-pixel draw time.

@@ -58,6 +58,15 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_FGCG 0xD3u
 #define LT7680_REG_FGCB 0xD4u
 
+/* GE draw ops: LT768x DS V4.2 + Levetop LT768_Lib / RAiO Ra8876_Lite.
+ * Filled rectangles go through DCR1 (REG[76h]): bit7=start, bit6=fill,
+ * bit[5:4]=10b rectangle; DCR0 (REG[67h]) only handles line/triangle. */
+#define LT7680_DCR1_RECT_FILL 0xE0u
+
+/* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
+static lt7680_status_t set_fg_color16(uint16_t rgb565);
+static lt7680_status_t wait_2d_idle(void);
+
 /* 4.58" bar panel: 320x960. V16-derived RGB timings (REG[14]-[1F]):
  * H_BACK=80, H_FRONT=16, H_SYNC=16, V_BACK=10, V_FRONT=12, V_SYNC=3.
  * Register encoding: H values (reg+1)*8, V values reg+1, matching V16. */
@@ -273,48 +282,48 @@ lt7680_status_t lt7680_gfx_show_color_bars(void)
 
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565)
 {
-    uint8_t buf[256];
-    uint32_t total;
-    lt7680_status_t st;
+    lt7680_rect_t full;
 
     if (s_panel.width == 0u || s_panel.height == 0u) {
         return LT7680_ERR_PARAM;
     }
-    for (uint32_t i = 0u; i < sizeof(buf); i++) {
-        buf[i] = ((i & 1u) != 0u) ? (uint8_t)(rgb565 >> 8)
-                                  : (uint8_t)(rgb565 & 0xFFu);
-    }
-    st = wr13(LT7680_REG_CURH, 0u);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    st = wr13(LT7680_REG_CURV, 0u);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    st = lt7680_select_reg(LT7680_REG_MRWDP);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    /* Each MRWDP write auto-increments, so one burst fills the whole panel
-     * in row-major order within the active window. */
-    total = (uint32_t)s_panel.width * (uint32_t)s_panel.height * 2u;
-    while (total > 0u) {
-        uint32_t n = (total > sizeof(buf)) ? (uint32_t)sizeof(buf) : total;
-        st = lt7680_write_data(buf, n);
-        if (st != LT7680_OK) {
-            return st;
-        }
-        total -= n;
-    }
-    return LT7680_OK;
+    full.x = 0u;
+    full.y = 0u;
+    full.w = s_panel.width;
+    full.h = s_panel.height;
+    return lt7680_gfx_fill_rect(&full, rgb565);
 }
 
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565)
 {
-    (void)rect;
-    (void)rgb565;
-    return LT7680_ERR_PARAM;
+    lt7680_status_t st;
+
+    if (rect == 0) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr32le(LT7680_REG_GE_SPT, ((uint32_t)rect->x & 0x1FFFu) |
+                                   (((uint32_t)rect->y & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    /* End point is exclusive: end = (x + w, y + h). Levetop full-screen fills
+     * use (0,0,width,height); the active-window clip makes both conventions
+     * equivalent for a full-panel clear. */
+    st = wr32le(LT7680_REG_GE_EPT, (((uint32_t)rect->x + rect->w) & 0x1FFFu) |
+                                   ((((uint32_t)rect->y + rect->h) & 0x1FFFu) << 16));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_DCR1, LT7680_DCR1_RECT_FILL);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wait_2d_idle();
 }
 
 lt7680_status_t lt7680_gfx_draw_rect(const lt7680_rect_t *rect, uint16_t rgb565)
@@ -402,6 +411,41 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565)
         pixel[1] = (uint8_t)(rgb565 >> 8);
         return lt7680_write_data(pixel, 2u);
     }
+}
+
+/* Read back one 16bpp pixel from Display RAM at the graphic R/W cursor.
+ * Selecting MRWDP on each byte read keeps the read targeting the data port
+ * even if the first read does not auto-advance the cursor on this silicon. */
+lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565)
+{
+    lt7680_status_t st;
+    uint8_t lo = 0u, hi = 0u;
+
+    if (x >= s_panel.width || y >= s_panel.height || rgb565 == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    st = wr13(LT7680_REG_CURH, x);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr13(LT7680_REG_CURV, y);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_select_reg(LT7680_REG_MRWDP);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_read_reg(LT7680_REG_MRWDP, &lo);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = lt7680_read_reg(LT7680_REG_MRWDP, &hi);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    *rgb565 = (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+    return LT7680_OK;
 }
 
 /* Wait for the geometry engine to finish (status bit 0x08 = CORE_BUSY). */
