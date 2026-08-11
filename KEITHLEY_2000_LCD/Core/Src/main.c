@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build6 fb-rotate-hide-update\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build7 fb-rotate180-corrected\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -296,8 +296,11 @@ int main(void)
                      * axes exchanged and one axis reversed. Render the
                      * landscape UI into framebuffer coordinates that undo
                      * that mapping while keeping the verified timing. */
-                    uint16_t fb_x = (uint16_t)(panel.width - 1u - logical_y);
-                    uint16_t fb_y = logical_x;
+                    /* The previous transform produced a correctly horizontal
+                     * glyph block, but mirrored at the lower edge. Apply the
+                     * remaining 180-degree correction in framebuffer space. */
+                    uint16_t fb_x = logical_y;
+                    uint16_t fb_y = (uint16_t)(panel.height - 1u - logical_x);
                     if (fb_x < panel.width && fb_y < panel.height) {
                       (void)lt7680_gfx_set_pixel(fb_x, fb_y, 0xFFFFu);
                     }
