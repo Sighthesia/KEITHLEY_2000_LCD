@@ -117,5 +117,35 @@ int main(void)
         main_display_format(0, 0);
     }
 
+    /* Initial screen: no status/unit, centered seven underscore slots. */
+    {
+        ui_model_t m;
+        main_display_frame_t f;
+        ui_model_init(&m);
+        main_display_format(&m, &f);
+        assert(f.placeholder);
+        assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
+        assert(strcmp(f.value, "_______") == 0);
+        assert(f.start_x == (MAIN_DISPLAY_MAX_SLOTS -
+                             MAIN_DISPLAY_PLACEHOLDER_SLOTS) * FONT_DIGIT_WIDTH);
+        assert(f.status_count == 0u);
+        assert(f.unit_len == 0u);
+    }
+
+    /* Initial screen: no status/unit, centered seven underscore slots. */
+    {
+        ui_model_t m;
+        main_display_frame_t f;
+        ui_model_init(&m);
+        main_display_format(&m, &f);
+        assert(f.placeholder);
+        assert(f.value_len == MAIN_DISPLAY_PLACEHOLDER_SLOTS);
+        assert(strcmp(f.value, "_______") == 0);
+        assert(f.start_x == (MAIN_DISPLAY_MAX_SLOTS -
+                             MAIN_DISPLAY_PLACEHOLDER_SLOTS) * FONT_DIGIT_WIDTH);
+        assert(f.status_count == 0);
+        assert(f.unit_len == 0);
+    }
+
     return 0;
 }

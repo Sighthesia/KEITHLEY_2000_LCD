@@ -259,6 +259,23 @@ static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
     return LT7680_OK;
 }
 
+static lt7680_status_t ui_draw_placeholders(uint16_t x, uint16_t y,
+                                             uint8_t count, uint16_t color)
+{
+    uint8_t i;
+
+    for (i = 0u; i < count; i++) {
+        lt7680_status_t st = ui_fill_rect(
+            (uint16_t)(x + (uint16_t)i * FONT_DIGIT_WIDTH),
+            (uint16_t)(y + FONT_DIGIT_HEIGHT - 8u), FONT_DIGIT_WIDTH, 4u,
+            color);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    return LT7680_OK;
+}
+
 static void reading_scene_render(void)
 {
     main_display_frame_t frame;
@@ -295,7 +312,10 @@ static void reading_scene_render(void)
         (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
                            0xFFFFu, 0x0000u);
     }
-    if (frame.special != 0u) {
+    if (frame.placeholder) {
+        (void)ui_draw_placeholders(frame.start_x, frame.reading_y,
+                                    frame.value_len, 0xFFFFu);
+    } else if (frame.special != 0u) {
         (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
                            frame.value_color, 0x0000u);
     } else {

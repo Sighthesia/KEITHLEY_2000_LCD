@@ -37,6 +37,7 @@
 /* Big-reading band spans the whole UI width, so 960/48 = 20 digit slots. */
 #define MAIN_DISPLAY_READING_X 0u
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_DIGIT_WIDTH)
+#define MAIN_DISPLAY_PLACEHOLDER_SLOTS 7u
 #define MAIN_DISPLAY_UNIT_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_TEXT_WIDTH)
 
 #define MAIN_DISPLAY_CURSOR_GAP 4u
@@ -64,6 +65,7 @@ typedef struct {
     char unit[UI_MODEL_MAX_UNIT];
     uint8_t unit_len;
     uint8_t special;          /* 0 normal, 1 OVERFLOW, 2 no-reading */
+    bool placeholder;         /* initial screen: centered underscore slots */
     uint16_t value_color;     /* RGB565 for the big digits (special aware) */
     uint16_t start_x;         /* left edge of the right-aligned value block */
     uint16_t end_x;           /* right edge (exclusive) */

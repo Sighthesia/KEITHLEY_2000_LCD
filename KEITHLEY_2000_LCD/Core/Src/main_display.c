@@ -79,6 +79,13 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     }
     f->value[n] = '\0';
     f->value_len = n;
+    if (n == 0u) {
+        n = MAIN_DISPLAY_PLACEHOLDER_SLOTS;
+        memset(f->value, '_', n);
+        f->value[n] = '\0';
+        f->value_len = n;
+        f->placeholder = true;
+    }
     if (m->unit[0] != '\0') {
         n = (uint8_t)strlen(m->unit);
         if (n >= sizeof(f->unit)) {
@@ -99,8 +106,13 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     f->unit_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH -
                            (uint16_t)f->unit_len * FONT_TEXT_WIDTH);
 
-    layout = main_display_layout_value(f->value_len, MAIN_DISPLAY_READING_X,
-                                       MAIN_DISPLAY_MAX_SLOTS);
+    layout = main_display_layout_value(
+        f->value_len,
+        f->placeholder ? (uint16_t)((MAIN_DISPLAY_MAX_SLOTS -
+                                     MAIN_DISPLAY_PLACEHOLDER_SLOTS) *
+                                    FONT_DIGIT_WIDTH)
+                       : MAIN_DISPLAY_READING_X,
+        f->placeholder ? MAIN_DISPLAY_PLACEHOLDER_SLOTS : MAIN_DISPLAY_MAX_SLOTS);
     f->start_x = layout.start_x;
     f->end_x = layout.end_x;
 
