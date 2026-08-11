@@ -1,5 +1,6 @@
 #include "hal_board.h"
 
+#include "keypad.h"
 #include "lt7680_bus.h"
 #include "stm32f1xx_hal.h"
 
@@ -345,4 +346,35 @@ int hal_uart_receive_byte(void)
         return -1;
     }
     return (int)(USART1->DR & 0xFFu);
+}
+
+int hal_keypad_read_code(void)
+{
+    static const uint16_t s_row_pin[KEYPAD_ROWS] = {
+        KEY_ROW1_PIN, KEY_ROW2_PIN, KEY_ROW3_PIN, KEY_ROW4_PIN,
+    };
+    static GPIO_TypeDef *const s_row_port[KEYPAD_ROWS] = {
+        GPIOC, GPIOC, GPIOC, GPIOB,
+    };
+    static const uint16_t s_col_pin[KEYPAD_COLS] = {
+        GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3,
+        GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7,
+    };
+    uint8_t col;
+
+    for (col = 0u; col < KEYPAD_COLS; col++) {
+        uint8_t row;
+        /* Drive every column idle high, then pull only this column low. */
+        HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, KEY_COL_PIN_MASK, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, s_col_pin[col], GPIO_PIN_RESET);
+        for (row = 0u; row < KEYPAD_ROWS; row++) {
+            if (HAL_GPIO_ReadPin(s_row_port[row], s_row_pin[row]) ==
+                GPIO_PIN_RESET) {
+                return KEYPAD_RAW(row, col);
+            }
+        }
+    }
+    /* All columns scanned, no key pressed: restore idle-low columns. */
+    HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, KEY_COL_PIN_MASK, GPIO_PIN_RESET);
+    return 0;
 }

@@ -21,11 +21,18 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
 #include "hal_board.h"
 #include "font_digits.h"
+#include "font_text.h"
+#include "keypad.h"
 #include "k2000_proto.h"
 #include "lt7680_bus.h"
 #include "lt7680_gfx.h"
+#include "main_display.h"
+#include "panel_transform.h"
+#include "reading_split.h"
+#include "scene.h"
 #include "ui_model.h"
 /* USER CODE END Includes */
 
@@ -99,25 +106,54 @@ static void dump_reg16(const char *label, uint8_t reg)
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 static ui_model_t s_ui;
+static keypad_t s_keypad;
+static bool s_display_ready;
+static bool s_ui_dirty;
 
 static void proto_on_event(const k2000_event_t *evt)
 {
+    char num[UI_MODEL_MAX_FIELD];
+    char unit[UI_MODEL_MAX_UNIT];
+    uint8_t num_len;
+    uint8_t unit_len;
+    uint8_t special;
+
     if (evt == 0) {
         return;
     }
     switch (evt->type) {
     case K2000_EVT_FIELD:
-        ui_model_apply_field(&s_ui, evt->field.tag, evt->field.value,
-                             evt->field.value_len);
+        if (reading_is_special(evt->field.value, evt->field.value_len,
+                               &special)) {
+            num_len = evt->field.value_len;
+            if (num_len >= sizeof(num)) num_len = (uint8_t)(sizeof(num) - 1u);
+            memcpy(num, evt->field.value, num_len);
+            num[num_len] = '\0';
+            unit_len = 0u;
+            unit[0] = '\0';
+        } else {
+            reading_split(evt->field.value, evt->field.value_len, num, &num_len,
+                          unit, &unit_len);
+            special = 0u;
+        }
+        ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
+        s_ui_dirty = true;
+        break;
+    case K2000_EVT_STATUS:
+        ui_model_apply_status(&s_ui, evt->status_tag, evt->status_value);
+        s_ui_dirty = true;
         break;
     case K2000_EVT_CURSOR:
         ui_model_apply_cursor(&s_ui, evt->pos);
+        s_ui_dirty = true;
         break;
     case K2000_EVT_BLINK_START:
         ui_model_apply_blink(&s_ui, true);
+        s_ui_dirty = true;
         break;
     case K2000_EVT_BLINK_END:
         ui_model_apply_blink(&s_ui, false);
+        s_ui_dirty = true;
         break;
     default:
         break;
@@ -128,6 +164,146 @@ static void proto_on_unknown(uint8_t byte)
 {
     (void)byte;
 }
+
+/* Reading scene (id 0). Glyph text rendering is wired through
+ * lt7680_gfx_draw_text, which is a placeholder that returns
+ * LT7680_ERR_PARAM until the real 12x24 blit driver lands (plan Task 7), so
+ * this pass only formats the frame and redraws on model change. All panel
+ * writes are skipped unless the display initialised successfully. */
+static void reading_scene_enter(void)
+{
+}
+
+static void reading_scene_exit(void)
+{
+}
+
+static lt7680_status_t ui_set_pixel(uint16_t x, uint16_t y, uint16_t color)
+{
+    uint16_t fb_x;
+    uint16_t fb_y;
+
+    panel_transform_ui_to_fb(x, y, &fb_x, &fb_y);
+    return lt7680_gfx_set_pixel(fb_x, fb_y, color);
+}
+
+static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
+                                    uint16_t h, uint16_t color)
+{
+    lt7680_rect_t rect;
+
+    panel_transform_ui_to_fb(y, x, &rect.x, &rect.y);
+    rect.w = h;
+    rect.h = w;
+    return lt7680_gfx_fill_rect(&rect, color);
+}
+
+static lt7680_status_t ui_draw_text(uint16_t x, uint16_t y, const char *text,
+                                    uint16_t fg, uint16_t bg)
+{
+    uint16_t cx = x;
+
+    while (text != 0 && *text != '\0') {
+        const uint8_t *bitmap = font_text_bitmap(*text);
+        uint16_t row;
+        uint16_t col;
+
+        if (bitmap == 0) {
+            return LT7680_ERR_PARAM;
+        }
+        for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
+            const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
+            for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
+                uint16_t color = (bits[col >> 3] &
+                                  (uint8_t)(0x80u >> (col & 7u))) != 0u ? fg : bg;
+                lt7680_status_t st = ui_set_pixel((uint16_t)(cx + col),
+                                                   (uint16_t)(y + row), color);
+                if (st != LT7680_OK) {
+                    return st;
+                }
+            }
+        }
+        cx = (uint16_t)(cx + FONT_TEXT_WIDTH);
+        text++;
+    }
+    return LT7680_OK;
+}
+
+static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
+                                      uint16_t fg, uint16_t bg)
+{
+    uint16_t cx = x;
+
+    while (text != 0 && *text != '\0') {
+        const uint8_t *bitmap = font_digit_bitmap(*text);
+        uint16_t row;
+        uint16_t col;
+
+        if (bitmap == 0) {
+            return LT7680_ERR_PARAM;
+        }
+        for (row = 0u; row < FONT_DIGIT_HEIGHT; row++) {
+            const uint8_t *bits = bitmap + row * FONT_DIGIT_BYTES_PER_ROW;
+            for (col = 0u; col < FONT_DIGIT_WIDTH; col++) {
+                uint16_t color = (bits[col >> 3] &
+                                  (uint8_t)(0x80u >> (col & 7u))) != 0u ? fg : bg;
+                lt7680_status_t st = ui_set_pixel((uint16_t)(cx + col),
+                                                   (uint16_t)(y + row), color);
+                if (st != LT7680_OK) {
+                    return st;
+                }
+            }
+        }
+        cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
+        text++;
+    }
+    return LT7680_OK;
+}
+
+static void reading_scene_render(void)
+{
+    main_display_frame_t frame;
+    uint8_t i;
+    uint16_t sx;
+
+    if (!s_display_ready || !s_ui_dirty) {
+        return;
+    }
+    s_ui_dirty = false;
+    main_display_format(&s_ui, &frame);
+
+    (void)ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH,
+                       MAIN_DISPLAY_UI_HEIGHT, 0x0000u);
+    sx = 0u;
+    for (i = 0u; i < frame.status_count; i++) {
+        (void)ui_draw_text(sx, frame.status_y, frame.status_text[i],
+                           0xFFFFu, 0x0000u);
+        sx = (uint16_t)(sx + (uint8_t)strlen(frame.status_text[i]) *
+                                  FONT_TEXT_WIDTH +
+                        MAIN_DISPLAY_STATUS_LABEL_GAP);
+    }
+    if (frame.unit_len > 0u) {
+        (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
+                           0xFFFFu, 0x0000u);
+    }
+    if (frame.special != 0u) {
+        (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
+                           frame.value_color, 0x0000u);
+    } else {
+        (void)ui_draw_digits(frame.start_x, frame.reading_y, frame.value,
+                             frame.value_color, 0x0000u);
+    }
+    if (frame.cursor_visible) {
+        (void)ui_fill_rect(frame.cursor_x, frame.cursor_y, FONT_DIGIT_WIDTH,
+                           MAIN_DISPLAY_CURSOR_H, frame.value_color);
+    }
+}
+
+static const scene_t s_reading_scene = {
+    reading_scene_enter,
+    reading_scene_exit,
+    reading_scene_render,
+};
 
 /* USER CODE END 0 */
 
@@ -140,6 +316,10 @@ int main(void)
 
   /* USER CODE BEGIN 1 */
   ui_model_init(&s_ui);
+  keypad_init(&s_keypad);
+  scene_mgr_init();
+  scene_mgr_register(0, &s_reading_scene);
+  scene_mgr_enter(0);
 
   /* USER CODE END 1 */
 
@@ -187,6 +367,8 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
+    panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
+                         panel.width, panel.height);
     hal_uart_send_text("\r\nK2000 TFT build11 no-boot-bars\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
@@ -227,11 +409,13 @@ int main(void)
              * test pattern at boot (bit5) - it flashes colour bars before the
              * demo blanks the display. Display stays 0x08 (off) throughout. */
             hal_uart_send_text("PASS display blanked, drawing demo\r\n");
+            s_display_ready = true;
           }
         }
       }
     }
 #if FONT_DIGIT_DEMO
+    if (s_display_ready) {
     {
       /* Task 5 demo. Bit5 of REG[12h] enables the color-bar test pattern,
        * which overrides the SDRAM image; clear it so the big digits drawn
@@ -330,8 +514,9 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
                 if ((row[dx >> 3] & (0x80u >> (dx & 7u))) != 0u) {
                     uint16_t ux = (uint16_t)(ux0 + dx);
                     uint16_t uy = (uint16_t)(uy0 + dy);
-                    uint16_t fb_x = uy;
-                    uint16_t fb_y = ux;
+                    uint16_t fb_x;
+                    uint16_t fb_y;
+                    panel_transform_ui_to_fb(ux, uy, &fb_x, &fb_y);
                     if (fb_x < panel.width && fb_y < panel.height) {
                       (void)lt7680_gfx_set_pixel(fb_x, fb_y, 0xFFFFu);
                     }
@@ -352,6 +537,7 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       uart_print_u32(HAL_GetTick() - t0);
       hal_uart_send_text("\r\n");
     }
+    }
 #endif /* FONT_DIGIT_DEMO */
   }
 #endif /* LT7680_SPI_SELFTEST */
@@ -365,6 +551,20 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
     if (ch >= 0) {
       k2000_proto_feed((uint8_t)ch);
     }
+
+    /* Scan the key matrix, debounce, and passthrough press/release codes to
+     * the host. Local-key interpretation (DISPLAY/TREND scene switching) is
+     * deferred to the trend milestone (ADR-0002). */
+    {
+      int code = keypad_scan(&s_keypad, hal_keypad_read_code(),
+                             HAL_GetTick());
+      if (code != 0) {
+        uint8_t b = (uint8_t)code;
+        hal_uart_send(&b, 1);
+      }
+    }
+
+    scene_mgr_render();
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

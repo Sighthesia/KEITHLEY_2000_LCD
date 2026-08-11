@@ -1,4 +1,5 @@
 #include "lt7680_gfx.h"
+#include "font_text.h"
 
 /* LT768x register map (datasheet V4.2). All register addresses are 8-bit. */
 #define REG_SRR      0x00u  /* Software Reset Register */
@@ -521,6 +522,41 @@ lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565)
         return st;
     }
     *rgb565 = (uint16_t)((uint16_t)lo | ((uint16_t)hi << 8));
+    return LT7680_OK;
+}
+
+lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
+                                     uint16_t fg, uint16_t bg)
+{
+    uint16_t cx;
+
+    if (text == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    cx = x;
+    while (*text != '\0') {
+        const uint8_t *bitmap = font_text_bitmap(*text);
+        uint16_t row;
+        uint16_t col;
+
+        if (bitmap == 0) {
+            return LT7680_ERR_PARAM;
+        }
+        for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
+            for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
+                const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
+                uint16_t color = (bits[col >> 3] & (uint8_t)(0x80u >> (col & 7u)))
+                                     != 0u ? fg : bg;
+                lt7680_status_t st = lt7680_gfx_set_pixel(
+                    (uint16_t)(cx + col), (uint16_t)(y + row), color);
+                if (st != LT7680_OK) {
+                    return st;
+                }
+            }
+        }
+        cx = (uint16_t)(cx + FONT_TEXT_WIDTH);
+        text++;
+    }
     return LT7680_OK;
 }
 

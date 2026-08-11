@@ -48,7 +48,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/lt7680_bus.c
     Core/Src/lt7680_gfx.c
     Core/Src/font_digits.c
+    Core/Src/font_text.c
+    Core/Src/keypad.c
     Core/Src/k2000_proto.c
+    Core/Src/main_display.c
+    Core/Src/panel_transform.c
+    Core/Src/reading_split.c
+    Core/Src/scene.c
+    Core/Src/status_bar.c
     Core/Src/ui_model.c
 )
 
