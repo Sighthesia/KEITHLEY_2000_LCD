@@ -191,9 +191,8 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
 {
     lt7680_rect_t rect;
 
-    panel_transform_ui_to_fb(y, x, &rect.x, &rect.y);
-    rect.w = h;
-    rect.h = w;
+    panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
+                                  &rect.w, &rect.h);
     return lt7680_gfx_fill_rect(&rect, color);
 }
 
