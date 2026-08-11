@@ -199,10 +199,12 @@ auto-increment that never covered the canvas. Clear/fill via the GE instead:
 - There is no "draw color select" register at D0h/D1h (D0h=FLDR, D1h=F2FSSR);
   the GE always draws in the foreground color.
 
-### Boot sequence cosmetics (observed build8/9)
+### Boot sequence cosmetics
 
-After reset the panel briefly shows colour bars on the right, then a sky-blue
-sweep as display-off + clear run, then ~2 s black while the digits draw, then
-the image. This is expected: `lt7680_gfx_show_color_bars()` is called before
-the demo blanks the display (0x12 &= ~0x60) and the draw is per-pixel. With
-the GE-fill clear the black gap is only the per-pixel draw time.
+Write `REG[12h]=0x08` (display off, test pattern off) immediately after
+`lt7680_reset()`+`wait_ready` and do NOT call `show_color_bars()` during a
+normal boot: the internal colour-bar test pattern flashes bars on screen
+before the demo blanks the display. With display held off the whole init,
+the panel stays black until the final `0x48` after the image is drawn.
+Reset-order: reset → blank 0x12=0x08 → panel init → gfx init → clear+draw
+(display off) → 0x48.

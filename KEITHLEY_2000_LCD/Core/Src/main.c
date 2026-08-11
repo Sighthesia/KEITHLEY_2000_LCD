@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build10 blank-after-reset\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build11 no-boot-bars\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -215,7 +215,7 @@ int main(void)
            * register state (colour-bar test pattern / display on) never
            * flashes during the ~200ms panel init or gfx init. 0x08 = init
            * display ctrl value (bit3 scan dir set, bits7/6/5/4/0-2 clear). */
-          (void)lt7680_write_reg(0x12u, 0x08u);
+(void)lt7680_write_reg(0x12u, 0x08u);
           hal_panel_init();
           st = lt7680_gfx_init(&panel);
           if (st != LT7680_OK) {
@@ -223,14 +223,10 @@ int main(void)
             hal_uart_send_hex8((uint8_t)st);
             hal_uart_send_text("\r\n");
           } else {
-            st = lt7680_gfx_show_color_bars();
-            if (st != LT7680_OK) {
-              hal_uart_send_text("FAIL test-bars=");
-              hal_uart_send_hex8((uint8_t)st);
-              hal_uart_send_text("\r\n");
-            } else {
-              hal_uart_send_text("PASS color-bars enabled\r\n");
-            }
+            /* Colour-bar milestone passed earlier; do NOT show the internal
+             * test pattern at boot (bit5) - it flashes colour bars before the
+             * demo blanks the display. Display stays 0x08 (off) throughout. */
+            hal_uart_send_text("PASS display blanked, drawing demo\r\n");
           }
         }
       }
