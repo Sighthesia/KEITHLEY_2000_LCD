@@ -53,7 +53,7 @@
 /* Task 5 demo: after the color-bars acceptance, clear the test pattern and
  * draw the JetBrains Mono big digits to the real panel, printing the draw
  * time over UART. Set to 0 to restore the plain color-bars behaviour. */
-#define FONT_DIGIT_DEMO 1
+#define FONT_DIGIT_DEMO 0
 
 /* USER CODE END PD */
 
@@ -71,8 +71,8 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+#if FONT_DIGIT_DEMO
 static void uart_print_u32(uint32_t value);
-
 static void dump_reg(const char *label, uint8_t reg)
 {
     uint8_t v = 0u;
@@ -85,7 +85,6 @@ static void dump_reg(const char *label, uint8_t reg)
     }
     hal_uart_send_text("\r\n");
 }
-
 static void dump_reg16(const char *label, uint8_t reg)
 {
     uint8_t lo = 0u, hi = 0u;
@@ -100,6 +99,7 @@ static void dump_reg16(const char *label, uint8_t reg)
     }
     hal_uart_send_text("\r\n");
 }
+#endif
 
 /* USER CODE END PFP */
 
@@ -167,11 +167,8 @@ static void proto_on_unknown(uint8_t byte)
     (void)byte;
 }
 
-/* Reading scene (id 0). Glyph text rendering is wired through
- * lt7680_gfx_draw_text, which is a placeholder that returns
- * LT7680_ERR_PARAM until the real 12x24 blit driver lands (plan Task 7), so
- * this pass only formats the frame and redraws on model change. All panel
- * writes are skipped unless the display initialised successfully. */
+/* Reading scene (id 0). The renderer keeps the verified panel writes behind
+ * the display-ready gate and uses the logical UI coordinate transform. */
 static void reading_scene_enter(void)
 {
 }
@@ -640,6 +637,7 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 
+#if FONT_DIGIT_DEMO
 static void uart_print_u32(uint32_t value)
 {
     char buf[10];
@@ -650,6 +648,7 @@ static void uart_print_u32(uint32_t value)
     } while (value != 0u);
     hal_uart_send((const uint8_t *)&buf[i], (uint16_t)(sizeof(buf) - i));
 }
+#endif
 
 /* USER CODE END 4 */
 
