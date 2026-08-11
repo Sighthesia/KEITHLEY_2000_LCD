@@ -187,7 +187,7 @@ int main(void)
 
     hal_board_init();
     k2000_proto_init(&proto_cb);
-    hal_uart_send_text("\r\nK2000 TFT build7 fb-rotate180-corrected\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build8 fb-transpose-landscape\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -240,7 +240,8 @@ int main(void)
       uint32_t t0;
       uint16_t demo_len;
       uint16_t demo_w;
-      uint16_t x;
+      uint16_t ux0;
+      uint16_t uy0;
       static const char demo_digits[] =
 #if PANEL_LANDSCAPE
           "1234567";
@@ -274,9 +275,14 @@ int main(void)
       dump_reg("P10=", 0x10u);
       dump_reg("P5E=", 0x5Eu);
 
-      demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
+demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);
-      x = (uint16_t)((panel.width - demo_w) / 2u);
+      /* The RGB panel transposes the framebuffer (fb row -> screen column, no
+       * reversal). Render the landscape 960x320 UI directly into the 320x960
+       * framebuffer as its transpose: fb_x = uy, fb_y = ux. Centring in the
+       * UI space then lands the glyph block centred on the physical panel. */
+      ux0 = (uint16_t)((panel.height - demo_w) / 2u);
+      uy0 = (uint16_t)((panel.width - FONT_DIGIT_HEIGHT) / 2u);
       t0 = HAL_GetTick();
       {
         const char *p = demo_digits;
@@ -290,17 +296,10 @@ int main(void)
               uint16_t dx;
               for (dx = 0u; dx < FONT_DIGIT_WIDTH; dx++) {
                 if ((row[dx >> 3] & (0x80u >> (dx & 7u))) != 0u) {
-                    uint16_t logical_x = (uint16_t)(x + dx);
-                    uint16_t logical_y = (uint16_t)(16u + dy);
-                    /* The RGB panel scans the 320x960 framebuffer with its
-                     * axes exchanged and one axis reversed. Render the
-                     * landscape UI into framebuffer coordinates that undo
-                     * that mapping while keeping the verified timing. */
-                    /* The previous transform produced a correctly horizontal
-                     * glyph block, but mirrored at the lower edge. Apply the
-                     * remaining 180-degree correction in framebuffer space. */
-                    uint16_t fb_x = logical_y;
-                    uint16_t fb_y = (uint16_t)(panel.height - 1u - logical_x);
+                    uint16_t ux = (uint16_t)(ux0 + dx);
+                    uint16_t uy = (uint16_t)(uy0 + dy);
+                    uint16_t fb_x = uy;
+                    uint16_t fb_y = ux;
                     if (fb_x < panel.width && fb_y < panel.height) {
                       (void)lt7680_gfx_set_pixel(fb_x, fb_y, 0xFFFFu);
                     }
@@ -308,7 +307,7 @@ int main(void)
               }
             }
           }
-          x += FONT_DIGIT_WIDTH;
+          ux0 += FONT_DIGIT_WIDTH;
           p++;
         }
       }
