@@ -431,15 +431,22 @@ int main(void)
             hal_uart_send_hex8((uint8_t)st);
             hal_uart_send_text("\r\n");
           } else {
-            /* Colour-bar milestone passed earlier; do NOT show the internal
-             * test pattern at boot (bit5) - it flashes colour bars before the
-             * demo blanks the display. Display stays 0x08 (off) throughout. */
-            hal_uart_send_text("PASS display enabled, waiting for reading\r\n");
-            /* Enable the normal canvas output without the internal test
-             * pattern. The post-reset blank (0x08) must not remain active
-             * when the legacy digit demo is disabled. */
-            (void)lt7680_write_reg(0x12u, 0x48u);
-            s_display_ready = true;
+            /* Keep the display blank while SDRAM is cleared. Without this
+             * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
+             * as sparse RGB corruption. */
+            st = lt7680_gfx_clear(0x0000u);
+            if (st != LT7680_OK) {
+              hal_uart_send_text("FAIL clear=");
+              hal_uart_send_hex8((uint8_t)st);
+              hal_uart_send_text("\r\n");
+            } else {
+              /* Enable the normal canvas output without the internal test
+               * pattern. The post-reset blank (0x08) remains active until
+               * the framebuffer contains a known black image. */
+              (void)lt7680_write_reg(0x12u, 0x48u);
+              hal_uart_send_text("PASS display enabled, waiting for reading\r\n");
+              s_display_ready = true;
+            }
           }
         }
       }
