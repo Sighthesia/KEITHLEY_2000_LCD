@@ -734,6 +734,68 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
         (void)lt7680_write_reg(0x5Eu, 0x01u);
         hal_uart_send_text("AW5E restored to 0x01\r\n");
       }
+      /* AW_COLOR=0x00 confirmation.  The sweep showed 0x00 renders the
+       * MRWDP bars in clean colours (16bpp-like), hinting this silicon's
+       * colour-depth encoding is inverted versus the RA8876 docs.  Pin down
+       * the byte order and the missing green: repaint the six bars under
+       * 0x00 and dump eight straight MRWDP bytes across the first two pixels
+       * of each.  Healthy 16bpp reads back lo hi lo hi (GREEN 0x07E0 = E0 07
+       * E0 07); MSB-first would read 07 E0 07 E0; a missing-green bar shows
+       * up as stray bytes here. */
+      {
+        static const struct {
+          uint16_t rgb;
+          const char *name;
+        } aw0[6] = {
+            {0xF800u, "AW0 RED"}, {0x07E0u, "AW0 GREEN"}, {0x001Fu, "AW0 BLUE"},
+            {0xFFE0u, "AW0 YEL"}, {0xC618u, "AW0 GREY"}, {0xFFFFu, "AW0 WHITE"},
+        };
+        lt7680_status_t st = lt7680_write_reg(0x5Eu, 0x00u);
+        if (st == LT7680_OK) {
+          uint16_t bar_x = 0u;
+          uint8_t k;
+          (void)lt7680_gfx_clear(0x0000u);
+          for (k = 0u; k < 6u; k++) {
+            uint16_t dy;
+            for (dy = 0u; dy < 8u; dy++) {
+              uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
+              uint16_t dx;
+              for (dx = 0u; dx < (uint16_t)(panel.width / 6u); dx++) {
+                (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
+                                           aw0[k].rgb);
+              }
+            }
+            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
+          }
+          hal_uart_send_text("AW0=0x00 dump:\r\n");
+          bar_x = 0u;
+          for (k = 0u; k < 6u; k++) {
+            uint16_t ybar = (uint16_t)((panel.height / 2u) + 4u);
+            uint8_t i;
+            uint8_t b = 0u;
+            hal_uart_send_text(aw0[k].name);
+            hal_uart_send_text(":");
+            (void)lt7680_write_reg(0x5Fu, (uint8_t)(bar_x & 0xFFu));
+            (void)lt7680_write_reg(0x60u, (uint8_t)(bar_x >> 8));
+            (void)lt7680_write_reg(0x61u, (uint8_t)(ybar & 0xFFu));
+            (void)lt7680_write_reg(0x62u, (uint8_t)(ybar >> 8));
+            (void)lt7680_select_reg(0x04u);
+            for (i = 0u; i < 8u; i++) {
+              if (lt7680_read_reg(0x04u, &b) == LT7680_OK) {
+                hal_uart_send_hex8(b);
+                hal_uart_send_text(" ");
+              } else {
+                hal_uart_send_text("?? ");
+              }
+            }
+            hal_uart_send_text("\r\n");
+            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
+          }
+          HAL_Delay(5000u);
+        }
+        (void)lt7680_write_reg(0x5Eu, 0x01u);
+        hal_uart_send_text("AW0 done, AW5E restored to 0x01\r\n");
+      }
     }
 #endif /* COLOR_DIAG */
   }
