@@ -16,20 +16,18 @@
  *
  * All views are authored in the logical 960x320 landscape space (ADR-0001).
  * Vertical bands, top -> bottom:
- *   status bar   y = 0    .. 24   (12x24 text: HOLD/REM/REL/TRIG/AUTO/ERR)
- *   unit row     y = 24   .. 48   (12x24 text, right-aligned to UI width)
- *   big reading  y = 48   .. 144  (48x96 digits, right-aligned)
- *   footer       y = 144  .. 320  (cursor underline / secondary info) */
+ *   top band    y = 0    .. 24   (12x24 text: unit/range left, status right)
+ *   big reading y = 24   .. 120  (48x96 digits, right-aligned)
+ *   footer      y = 120  .. 320  (cursor underline / secondary info) */
 #define MAIN_DISPLAY_UI_WIDTH 960u
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
-#define MAIN_DISPLAY_STATUS_BAR_Y 0u
-#define MAIN_DISPLAY_STATUS_BAR_H FONT_TEXT_HEIGHT
-#define MAIN_DISPLAY_UNIT_ROW_Y \
-    (MAIN_DISPLAY_STATUS_BAR_Y + MAIN_DISPLAY_STATUS_BAR_H)
-#define MAIN_DISPLAY_UNIT_ROW_H FONT_TEXT_HEIGHT
+/* Top band merges the former status bar and unit row: the unit/range text
+ * sits at the left edge, the lit status indicators right-aligned. */
+#define MAIN_DISPLAY_TOP_BAND_Y 0u
+#define MAIN_DISPLAY_TOP_BAND_H FONT_TEXT_HEIGHT
 #define MAIN_DISPLAY_READING_Y \
-    (MAIN_DISPLAY_UNIT_ROW_Y + MAIN_DISPLAY_UNIT_ROW_H)
+    (MAIN_DISPLAY_TOP_BAND_Y + MAIN_DISPLAY_TOP_BAND_H)
 #define MAIN_DISPLAY_READING_H FONT_DIGIT_HEIGHT
 #define MAIN_DISPLAY_FOOTER_Y (MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_READING_H)
 #define MAIN_DISPLAY_FOOTER_H (MAIN_DISPLAY_UI_HEIGHT - MAIN_DISPLAY_FOOTER_Y)
@@ -39,18 +37,17 @@
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_DIGIT_WIDTH)
 #define MAIN_DISPLAY_UNIT_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_TEXT_WIDTH)
 
-/* No-data state (startup): the reading band shows the "NO DATA" hint instead
- * of digits/underscores. 12x24 small text, horizontally centred in the band
- * and vertically centred in it (Q2/Q6), in the same grey as "----". */
-#define MAIN_DISPLAY_NO_DATA_TEXT "NO DATA"
-#define MAIN_DISPLAY_NO_DATA_LEN 7u
-#define MAIN_DISPLAY_NO_DATA_COLOR 0xC618u
+/* Placeholder prompts (shared grey): seven right-aligned '?' slots in the
+ * reading band while no host message has arrived yet, and the "Range ?"
+ * unit/range hint while no unit has been received. */
+#define MAIN_DISPLAY_NO_DATA_SLOTS 7u
+#define MAIN_DISPLAY_PLACEHOLDER_COLOR 0xC618u
+#define MAIN_DISPLAY_RANGE_PLACEHOLDER "Range ?"
 
-/* Static decorations (Q5-a): one 1px dark-grey separator under the status
- * bar and one under the unit row, full UI width. Drawn with every frame
- * (they sit under the per-frame background clears), visually static. */
-#define MAIN_DISPLAY_SEP_Y_STATUS MAIN_DISPLAY_UNIT_ROW_Y
-#define MAIN_DISPLAY_SEP_Y_UNIT MAIN_DISPLAY_READING_Y
+/* Static decoration (Q5-a): one 1px dark-grey separator under the top band,
+ * full UI width. Drawn with every frame (it sits under the per-frame
+ * background clears), visually static. */
+#define MAIN_DISPLAY_SEP_Y_TOP_BAND MAIN_DISPLAY_READING_Y
 #define MAIN_DISPLAY_SEP_H 1u
 #define MAIN_DISPLAY_SEP_COLOR 0x8410u
 
@@ -79,19 +76,21 @@ typedef struct {
     char unit[UI_MODEL_MAX_UNIT];
     uint8_t unit_len;
     uint8_t special;          /* 0 normal, 1 OVERFLOW, 2 no-reading */
-    bool no_data;             /* startup: no host message yet; show "NO DATA" */
-    uint16_t no_data_x;       /* left edge of the "NO DATA" hint */
-    uint16_t no_data_y;       /* top of the "NO DATA" hint */
+    bool no_data;             /* startup: no host message yet; show '?' slots */
+    uint16_t no_data_x;       /* left edge of the right-aligned '?' slot block */
+    uint16_t no_data_y;       /* top of the '?' slot block */
     uint16_t value_color;     /* RGB565 for the big digits (special aware) */
     uint16_t start_x;         /* left edge of the right-aligned value block */
     uint16_t end_x;           /* right edge (exclusive) */
     uint16_t reading_y;       /* top of the big-reading band */
-    uint16_t unit_x;          /* left edge of the unit text */
-    uint16_t unit_y;          /* top of the unit row */
+    bool unit_placeholder;    /* unit/range empty: show "Range ?" */
+    uint16_t unit_x;          /* left edge of the unit text (top band) */
+    uint16_t unit_y;          /* top of the top band */
     bool cursor_visible;      /* blink set and a valid value present */
     uint16_t cursor_x;        /* left edge of the cursor slot */
     uint16_t cursor_y;        /* top of the cursor underline */
-    uint16_t status_y;        /* top of the status bar */
+    uint16_t status_y;        /* top of the status block (top band) */
+    uint16_t status_x;        /* left edge of the right-aligned status block */
     uint8_t status_count;     /* active core indicators to draw */
     char status_text[STATUS_BAR_CORE_COUNT][MAIN_DISPLAY_STATUS_LABEL_MAX];
 } main_display_frame_t;

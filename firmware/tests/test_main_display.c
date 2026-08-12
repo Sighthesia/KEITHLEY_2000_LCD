@@ -74,10 +74,15 @@ int main(void)
         assert(f.start_x == (MAIN_DISPLAY_MAX_SLOTS - 6u) * FONT_DIGIT_WIDTH);
         assert(f.end_x == MAIN_DISPLAY_MAX_SLOTS * FONT_DIGIT_WIDTH);
         assert(f.reading_y == MAIN_DISPLAY_READING_Y);
-        assert(f.unit_y == MAIN_DISPLAY_UNIT_ROW_Y);
-        assert(f.status_y == MAIN_DISPLAY_STATUS_BAR_Y);
-        /* unit "VDC" is 3 chars, right-aligned to the UI width */
-        assert(f.unit_x == MAIN_DISPLAY_UI_WIDTH - 3u * FONT_TEXT_WIDTH);
+        assert(f.unit_y == MAIN_DISPLAY_TOP_BAND_Y);
+        assert(f.status_y == MAIN_DISPLAY_TOP_BAND_Y);
+        /* unit "VDC" is 3 chars, left-aligned at the top band's left edge */
+        assert(f.unit_x == 0u);
+        assert(!f.unit_placeholder);
+        /* status block right-aligned to the UI width */
+        assert(f.status_x == MAIN_DISPLAY_UI_WIDTH -
+                            ((4u + 3u + 4u) * FONT_TEXT_WIDTH +
+                             2u * MAIN_DISPLAY_STATUS_LABEL_GAP));
         /* no blink -> cursor hidden */
         assert(!f.cursor_visible);
         assert(f.status_count == 3);
@@ -117,9 +122,9 @@ int main(void)
         main_display_format(0, 0);
     }
 
-    /* No-data state (startup): no value/unit/status, the "NO DATA" hint is
-     * horizontally centred in the reading band and vertically centred in it,
-     * and the value is empty (no underscore slots). */
+    /* No-data state (startup): no value/status; unit shows the "Range ?"
+     * placeholder; the reading band holds seven '?' slots right-aligned to
+     * the reading position, vertically centred in the band. */
     {
         ui_model_t m;
         main_display_frame_t f;
@@ -130,8 +135,9 @@ int main(void)
         assert(f.value[0] == '\0');
         assert(!f.cursor_visible);
         assert(f.start_x == 0u && f.end_x == 0u);
-        assert(f.no_data_x == (MAIN_DISPLAY_UI_WIDTH -
-                               MAIN_DISPLAY_NO_DATA_LEN * FONT_TEXT_WIDTH) / 2u);
+        assert(f.unit_placeholder);
+        assert(f.no_data_x == MAIN_DISPLAY_UI_WIDTH -
+                              MAIN_DISPLAY_NO_DATA_SLOTS * FONT_DIGIT_WIDTH);
         assert(f.no_data_y == MAIN_DISPLAY_READING_Y +
                               (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) / 2u);
         assert(f.status_count == 0u);
@@ -139,7 +145,8 @@ int main(void)
     }
 
     /* A status-only message exits the no-data state (Q4-a): the frame is no
-     * longer marked no_data even though no reading is present. */
+     * longer marked no_data even though no reading is present; the unit
+     * placeholder stays until a unit/range arrives. */
     {
         ui_model_t m;
         main_display_frame_t f;
@@ -148,8 +155,11 @@ int main(void)
         main_display_format(&m, &f);
         assert(!f.no_data);
         assert(f.value_len == 0u);
+        assert(f.unit_placeholder);
         assert(f.status_count == 1u);
         assert(strcmp(f.status_text[0], "REM") == 0);
+        assert(f.status_x == MAIN_DISPLAY_UI_WIDTH -
+                             (3u * FONT_TEXT_WIDTH));
     }
 
     return 0;

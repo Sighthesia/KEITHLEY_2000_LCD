@@ -267,18 +267,12 @@ static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
 
 static lt7680_status_t ui_draw_separators(void)
 {
-    /* Static decorations (Q5-a): full-width 1px lines under the status bar
-     * and under the unit row. Redrawn with every frame because the per-frame
-     * band clears would otherwise cover them; visually they never change. */
-    lt7680_status_t st1 = ui_fill_rect(0u, MAIN_DISPLAY_SEP_Y_STATUS,
-                                       MAIN_DISPLAY_UI_WIDTH,
-                                       MAIN_DISPLAY_SEP_H,
-                                       MAIN_DISPLAY_SEP_COLOR);
-    lt7680_status_t st2 = ui_fill_rect(0u, MAIN_DISPLAY_SEP_Y_UNIT,
-                                       MAIN_DISPLAY_UI_WIDTH,
-                                       MAIN_DISPLAY_SEP_H,
-                                       MAIN_DISPLAY_SEP_COLOR);
-    return (st1 != LT7680_OK) ? st1 : st2;
+    /* Static decoration (Q5-a): one full-width 1px line under the merged
+     * top band. Redrawn with every frame because the per-frame band clears
+     * would otherwise cover it; visually it never changes. */
+    return ui_fill_rect(0u, MAIN_DISPLAY_SEP_Y_TOP_BAND,
+                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_SEP_H,
+                        MAIN_DISPLAY_SEP_COLOR);
 }
 
 static void reading_scene_render(void)
@@ -300,11 +294,8 @@ static void reading_scene_render(void)
     s_ui_dirty = false;
     main_display_format(&s_ui, &frame);
 
-    (void)ui_fill_rect(0u, MAIN_DISPLAY_STATUS_BAR_Y,
-                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_BAR_H,
-                       0x0000u);
-    (void)ui_fill_rect(0u, MAIN_DISPLAY_UNIT_ROW_Y,
-                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UNIT_ROW_H,
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_TOP_BAND_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TOP_BAND_H,
                        0x0000u);
     (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y,
                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_READING_H,
@@ -312,10 +303,19 @@ static void reading_scene_render(void)
     (void)ui_fill_rect(0u, MAIN_DISPLAY_CURSOR_Y,
                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CURSOR_H,
                        0x0000u);
-    /* The band clears above cover the separators; redraw them before the
+    /* The band clears above cover the separator; redraw it before the
      * dynamic content so the frame is always complete. */
     (void)ui_draw_separators();
-    sx = 0u;
+    /* Top band: unit/range left (or "Range ?" while empty), status right. */
+    if (frame.unit_placeholder) {
+        (void)ui_draw_text(frame.unit_x, frame.unit_y,
+                           MAIN_DISPLAY_RANGE_PLACEHOLDER,
+                           MAIN_DISPLAY_PLACEHOLDER_COLOR);
+    } else if (frame.unit_len > 0u) {
+        (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
+                           0xFFFFu);
+    }
+    sx = frame.status_x;
     for (i = 0u; i < frame.status_count; i++) {
         (void)ui_draw_text(sx, frame.status_y, frame.status_text[i],
                            0xFFFFu);
@@ -323,14 +323,17 @@ static void reading_scene_render(void)
                                   FONT_TEXT_WIDTH +
                         MAIN_DISPLAY_STATUS_LABEL_GAP);
     }
-    if (frame.unit_len > 0u) {
-        (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
-                           0xFFFFu);
-    }
     if (frame.no_data) {
-        (void)ui_draw_text(frame.no_data_x, frame.no_data_y,
-                           MAIN_DISPLAY_NO_DATA_TEXT,
-                           MAIN_DISPLAY_NO_DATA_COLOR);
+        /* No-data state: seven '?' slots, one per right-aligned reading slot,
+         * vertically centred in the reading band (placeholder grey). */
+        for (i = 0u; i < MAIN_DISPLAY_NO_DATA_SLOTS; i++) {
+            (void)ui_draw_text((uint16_t)(frame.no_data_x +
+                                          (uint16_t)i * FONT_DIGIT_WIDTH +
+                                          (FONT_DIGIT_WIDTH -
+                                           FONT_TEXT_WIDTH) / 2u),
+                               frame.no_data_y, "?",
+                               MAIN_DISPLAY_PLACEHOLDER_COLOR);
+        }
     } else if (frame.special != 0u) {
         (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
                            frame.value_color);

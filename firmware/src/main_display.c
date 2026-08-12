@@ -97,15 +97,17 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     f->special = m->special;
     f->value_color = main_display_special_color(m->special);
     f->reading_y = MAIN_DISPLAY_READING_Y;
-    f->unit_y = MAIN_DISPLAY_UNIT_ROW_Y;
-    f->status_y = MAIN_DISPLAY_STATUS_BAR_Y;
-    f->unit_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH -
-                           (uint16_t)f->unit_len * FONT_TEXT_WIDTH);
+    f->unit_y = MAIN_DISPLAY_TOP_BAND_Y;
+    f->status_y = MAIN_DISPLAY_TOP_BAND_Y;
+    /* Unit/range sits at the left edge of the top band; while empty it is
+     * replaced by the "Range ?" placeholder (grey). */
+    f->unit_x = 0u;
+    f->unit_placeholder = (f->unit_len == 0u);
 
-    /* No-data hint: centred in the reading band. */
-    f->no_data_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH -
-                               MAIN_DISPLAY_NO_DATA_LEN * FONT_TEXT_WIDTH) /
-                              2u);
+    /* No-data hint: seven '?' slots right-aligned to the reading position,
+     * vertically centred in the reading band. */
+    f->no_data_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH -
+                              MAIN_DISPLAY_NO_DATA_SLOTS * FONT_DIGIT_WIDTH);
     f->no_data_y = (uint16_t)(MAIN_DISPLAY_READING_Y +
                               (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) /
                               2u);
@@ -141,5 +143,18 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
             f->status_text[f->status_count][n] = '\0';
             f->status_count++;
         }
+    }
+    /* Right-align the whole status block to the top band's right edge. */
+    f->status_x = 0u;
+    if (f->status_count > 0u) {
+        uint16_t w = 0u;
+        for (i = 0u; i < f->status_count; i++) {
+            n = (uint8_t)strlen(f->status_text[i]);
+            w = (uint16_t)(w + (uint16_t)n * FONT_TEXT_WIDTH);
+            if (i + 1u < f->status_count) {
+                w = (uint16_t)(w + MAIN_DISPLAY_STATUS_LABEL_GAP);
+            }
+        }
+        f->status_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - w);
     }
 }
