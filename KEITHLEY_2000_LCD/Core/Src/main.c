@@ -55,6 +55,13 @@
  * time over UART. Set to 0 to restore the plain color-bars behaviour. */
 #define FONT_DIGIT_DEMO 0
 
+/* Colour-path diagnosis: fill six swatches (RED/GREEN/BLUE/YEL/GREY/WHITE)
+ * with the GE engine while the display stays blank, then enable display and
+ * read every swatch back over MRWDP, reporting values on UART.  Correct
+ * SDRAM values with wrong panel colours pin the fault on the LT7680 -> panel
+ * display path; wrong readback values pin it on the write path. */
+#define COLOR_DIAG 1
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -71,8 +78,10 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+#if FONT_DIGIT_DEMO || COLOR_DIAG
 #if FONT_DIGIT_DEMO
 static void uart_print_u32(uint32_t value);
+#endif
 static void dump_reg(const char *label, uint8_t reg)
 {
     uint8_t v = 0u;
@@ -85,6 +94,7 @@ static void dump_reg(const char *label, uint8_t reg)
     }
     hal_uart_send_text("\r\n");
 }
+#if FONT_DIGIT_DEMO
 static void dump_reg16(const char *label, uint8_t reg)
 {
     uint8_t lo = 0u, hi = 0u;
@@ -100,6 +110,7 @@ static void dump_reg16(const char *label, uint8_t reg)
     hal_uart_send_text("\r\n");
 }
 #endif
+#endif /* FONT_DIGIT_DEMO || COLOR_DIAG */
 
 /* USER CODE END PFP */
 
@@ -615,6 +626,50 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
     }
     }
 #endif /* FONT_DIGIT_DEMO */
+#if COLOR_DIAG
+    {
+      /* Draw all six swatches while REG[12h] keeps the display blank, so the
+       * panel never shows a partially-filled frame; enable the display, then
+       * read one centre pixel of every swatch back over MRWDP. */
+      static const struct {
+        uint16_t rgb;
+        const char *name;
+      } swatch[6] = {
+          {0xF800u, "RED"},  {0x07E0u, "GREEN"}, {0x001Fu, "BLUE"},
+          {0xFFE0u, "YEL"},  {0xC618u, "GREY"},  {0xFFFFu, "WHITE"},
+      };
+      lt7680_rect_t rr;
+      uint8_t i;
+
+      rr.x = 0u;
+      rr.y = 0u;
+      rr.w = (uint16_t)(panel.width / 6u);
+      rr.h = (uint16_t)(panel.height / 2u);
+      for (i = 0u; i < 6u; i++) {
+        (void)lt7680_gfx_fill_rect(&rr, swatch[i].rgb);
+        rr.x = (uint16_t)(rr.x + rr.w);
+      }
+      (void)lt7680_write_reg(0x12u, 0x48u);
+      for (i = 0u; i < 6u; i++) {
+        uint16_t px = 0u;
+        uint16_t mx = (uint16_t)((uint16_t)(i * rr.w) + rr.w / 2u);
+        hal_uart_send_text(swatch[i].name);
+        hal_uart_send_text("=");
+        if (lt7680_gfx_peek_pixel(mx, (uint16_t)(rr.h / 2u), &px) ==
+            LT7680_OK) {
+          hal_uart_send_hex8((uint8_t)(px >> 8));
+          hal_uart_send_hex8((uint8_t)(px & 0xFFu));
+        } else {
+          hal_uart_send_text("ERR");
+        }
+        hal_uart_send_text("\r\n");
+      }
+      dump_reg("R01=", 0x01u);
+      dump_reg("R02=", 0x02u);
+      dump_reg("R03=", 0x03u);
+      dump_reg("R5E=", 0x5Eu);
+    }
+#endif /* COLOR_DIAG */
   }
 #endif /* LT7680_SPI_SELFTEST */
   /* USER CODE END 2 */
