@@ -170,6 +170,15 @@ data port (LT768x DS V4.2 §7.1.3, §10.2):
   `AW_WTH/HT` REG[5Ah..5Dh]=panel size.
 - **Color depth**: `AW_COLOR` REG[5Eh]=0x01 (block X-Y addressing, 16bpp;
   default 0 = 8bpp).
+  - Register bit fields (LT768x_DS V4.2 §REG[5Eh] AW_COLOR): bit3 = readback
+    position select, bit2 = addressing mode (0=block/X-Y, 1=linear),
+    bit[1:0] = canvas color depth & memory R/W width — in Block mode **00b=8bpp,
+    01b=16bpp, 1xb=24bpp**. So 0x01 is exactly 16bpp; 0x02 (or 0x03) selects
+    24bpp.
+  - **Do NOT copy the AP-Note flash demo's `REG_WR('h5E, 'h02)`** — that demo
+    shows a 1024x768 picture via DMA and uses 0x02 for *24bpp* data, not 16bpp.
+    Our canvas is 16bpp, so keep 0x01. Treat a "change 0x01→0x02" suggestion as
+    a misread of the color-depth encoding.
 - **Memory write procedure**: set active window → write Graphic R/W cursor
   `CURH` REG[5Fh..60h], `CURV` REG[61h..62h] → **address-write the Memory
   Data R/W Port `MRWDP` REG[04h]** → push 16bpp pixels LSB-first.  Skipping

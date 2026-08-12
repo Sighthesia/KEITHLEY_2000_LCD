@@ -251,7 +251,10 @@ static lt7680_status_t configure_windows(void)
     st = wr13(LT7680_REG_AW_HT0, s_panel.height);
     if (st != LT7680_OK) return st;
 
-    /* Canvas addressing: block (X-Y) mode, 16bpp memory R/W. */
+    /* Canvas addressing: block (X-Y) mode, 16bpp memory R/W.
+     * REG[5Eh] bit[1:0] in Block mode: 00=8bpp, 01=16bpp, 1x=24bpp
+     * (LT768x_DS V4.2). 0x01 is 16bpp; 0x02/0x03 would select 24bpp.
+     * The AP-Note flash demo writes 0x02 only because that picture is 24bpp. */
     return write_reg(LT7680_REG_AW_COLOR, 0x01u);
 }
 

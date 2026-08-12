@@ -67,7 +67,10 @@
 #define DPCR_DISPLAY_ON   (0x01u << 6)
 #define DPCR_PCLK_INVERT  (0x01u << 7)
 
-/* Canvas & active window color depth (REG[5Eh]). */
+/* Canvas & active window color depth (REG[5Eh]).
+ * bit[1:0] in Block mode (LT768x_DS V4.2): 00=8bpp, 01=16bpp, 1x=24bpp.
+ * 0x01 is 16bpp; 0x02/0x03 select 24bpp (the AP-Note flash demo writes 0x02
+ * only because that picture is 24bpp). */
 #define AWCOLOR_BLOCK (0x00u << 2)  /* bit2 = 0: block (X-Y) addressing */
 #define AWCOLOR_16BPP 0x01u         /* bit[1:0] = 01b: 16bpp */
 
