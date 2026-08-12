@@ -691,16 +691,15 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
           HAL_Delay(1500u);
         }
       }
-      /* MRWDP byte-level dump.  The text layer draws glyphs with one
-       * lt7680_gfx_set_pixel per set bit; the swatches walked above only
-       * proved the GE fill path.  Paint six tall bars via the CPU write port
-       * (kept on the panel for a visual cross-check), then dump the raw bytes
-       * the chip stores at a known pixel.  On a healthy 16bpp block canvas a
-       * GREY (0xC618) pixel must read back as "18 C6 18 C6" on four byte
-       * reads of the same two-byte pixel; a repeated single byte (18 18 18 18)
-       * or a one-byte-per-pixel pattern pins the data width, and a permuted
-       * byte order pins the read sequence. */
+      /* AW_COLOR sweep.  GE fills and the WALK frames always showed correct
+       * saturated colours, but every MRWDP-written bar read back as a dark
+       * purple/red while the raw byte dump had no two-byte 16bpp pattern at
+       * all --- the CPU write port behaves 8bpp under REG[5Eh]=0x01.  Walk
+       * every low-two-bit colour depth, clearing the canvas and repainting
+       * the six bars under each, and hold each frame so the correct setting
+       * is the one whose bars are clean saturated colours. */
       {
+        static const uint8_t awv[4] = {0x00u, 0x01u, 0x02u, 0x03u};
         static const struct {
           uint16_t rgb;
           const char *name;
@@ -708,41 +707,32 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
             {0xF800u, "MRW RED"}, {0x07E0u, "MRW GREEN"}, {0x001Fu, "MRW BLUE"},
             {0xFFE0u, "MRW YEL"}, {0xC618u, "MRW GREY"}, {0xFFFFu, "MRW WHITE"},
         };
-        uint16_t bar_w = (uint16_t)(panel.width / 6u);
-        uint16_t bar_x = 0u;
-        uint8_t k;
-        for (k = 0u; k < 6u; k++) {
-          uint16_t dy;
-          for (dy = 0u; dy < 8u; dy++) {
-            uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
-            uint16_t dx;
-            for (dx = 0u; dx < bar_w; dx++) {
-              (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
-                                         mrw[k].rgb);
+        uint8_t v;
+        for (v = 0u; v < 4u; v++) {
+          uint16_t bar_x = 0u;
+          uint8_t k;
+          hal_uart_send_text("AW5E=0x");
+          hal_uart_send_hex8(awv[v]);
+          hal_uart_send_text(" clear+repaint\r\n");
+          (void)lt7680_write_reg(0x5Eu, awv[v]);
+          (void)lt7680_gfx_clear(0x0000u);
+          for (k = 0u; k < 6u; k++) {
+            uint16_t dy;
+            for (dy = 0u; dy < 8u; dy++) {
+              uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
+              uint16_t dx;
+              for (dx = 0u; dx < (uint16_t)(panel.width / 6u); dx++) {
+                (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
+                                           mrw[k].rgb);
+              }
             }
+            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
           }
-          hal_uart_send_text(mrw[k].name);
-          hal_uart_send_text(" p0:");
-          {
-            uint16_t ybar = (uint16_t)((panel.height / 2u) + 4u);
-            uint16_t probe;
-            for (probe = 0u; probe < 4u; probe++) {
-              uint16_t xp = (uint16_t)(bar_x + probe / 2u);
-              uint8_t b = 0u;
-              (void)lt7680_write_reg(0x5Fu, (uint8_t)(xp & 0xFFu));
-              (void)lt7680_write_reg(0x60u, (uint8_t)(xp >> 8));
-              (void)lt7680_write_reg(0x61u, (uint8_t)(ybar & 0xFFu));
-              (void)lt7680_write_reg(0x62u, (uint8_t)(ybar >> 8));
-              (void)lt7680_select_reg(0x04u);
-              (void)lt7680_read_reg(0x04u, &b);
-              hal_uart_send_hex8(b);
-              hal_uart_send_text(" ");
-            }
-          }
-          hal_uart_send_text("\r\n");
-          bar_x = (uint16_t)(bar_x + bar_w);
+          hal_uart_send_text("  held 3s, check bar colours\r\n");
+          HAL_Delay(3000u);
         }
-        HAL_Delay(3000u);
+        (void)lt7680_write_reg(0x5Eu, 0x01u);
+        hal_uart_send_text("AW5E restored to 0x01\r\n");
       }
     }
 #endif /* COLOR_DIAG */
