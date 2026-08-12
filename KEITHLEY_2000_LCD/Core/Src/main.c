@@ -196,8 +196,11 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     return lt7680_gfx_fill_rect(&rect, color);
 }
 
+/* Transparent text: only set pixels where a glyph bit is set; background
+ * pixels are left to the caller's band clears (fill_rect). Never draws a
+ * background colour, so glyphs cannot carry a coloured underbox. */
 static lt7680_status_t ui_draw_text(uint16_t x, uint16_t y, const char *text,
-                                    uint16_t fg, uint16_t bg)
+                                    uint16_t fg)
 {
     uint16_t cx = x;
 
@@ -212,12 +215,14 @@ static lt7680_status_t ui_draw_text(uint16_t x, uint16_t y, const char *text,
         for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
             const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
             for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
-                uint16_t color = (bits[col >> 3] &
-                                  (uint8_t)(0x80u >> (col & 7u))) != 0u ? fg : bg;
-                lt7680_status_t st = ui_set_pixel((uint16_t)(cx + col),
-                                                   (uint16_t)(y + row), color);
-                if (st != LT7680_OK) {
-                    return st;
+                if ((bits[col >> 3] &
+                     (uint8_t)(0x80u >> (col & 7u))) != 0u) {
+                    lt7680_status_t st =
+                        ui_set_pixel((uint16_t)(cx + col),
+                                     (uint16_t)(y + row), fg);
+                    if (st != LT7680_OK) {
+                        return st;
+                    }
                 }
             }
         }
@@ -228,7 +233,7 @@ static lt7680_status_t ui_draw_text(uint16_t x, uint16_t y, const char *text,
 }
 
 static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
-                                      uint16_t fg, uint16_t bg)
+                                      uint16_t fg)
 {
     uint16_t cx = x;
 
@@ -243,12 +248,14 @@ static lt7680_status_t ui_draw_digits(uint16_t x, uint16_t y, const char *text,
         for (row = 0u; row < FONT_DIGIT_HEIGHT; row++) {
             const uint8_t *bits = bitmap + row * FONT_DIGIT_BYTES_PER_ROW;
             for (col = 0u; col < FONT_DIGIT_WIDTH; col++) {
-                uint16_t color = (bits[col >> 3] &
-                                  (uint8_t)(0x80u >> (col & 7u))) != 0u ? fg : bg;
-                lt7680_status_t st = ui_set_pixel((uint16_t)(cx + col),
-                                                   (uint16_t)(y + row), color);
-                if (st != LT7680_OK) {
-                    return st;
+                if ((bits[col >> 3] &
+                     (uint8_t)(0x80u >> (col & 7u))) != 0u) {
+                    lt7680_status_t st =
+                        ui_set_pixel((uint16_t)(cx + col),
+                                     (uint16_t)(y + row), fg);
+                    if (st != LT7680_OK) {
+                        return st;
+                    }
                 }
             }
         }
@@ -311,25 +318,25 @@ static void reading_scene_render(void)
     sx = 0u;
     for (i = 0u; i < frame.status_count; i++) {
         (void)ui_draw_text(sx, frame.status_y, frame.status_text[i],
-                           0xFFFFu, 0x0000u);
+                           0xFFFFu);
         sx = (uint16_t)(sx + (uint8_t)strlen(frame.status_text[i]) *
                                   FONT_TEXT_WIDTH +
                         MAIN_DISPLAY_STATUS_LABEL_GAP);
     }
     if (frame.unit_len > 0u) {
         (void)ui_draw_text(frame.unit_x, frame.unit_y, frame.unit,
-                           0xFFFFu, 0x0000u);
+                           0xFFFFu);
     }
     if (frame.no_data) {
         (void)ui_draw_text(frame.no_data_x, frame.no_data_y,
                            MAIN_DISPLAY_NO_DATA_TEXT,
-                           MAIN_DISPLAY_NO_DATA_COLOR, 0x0000u);
+                           MAIN_DISPLAY_NO_DATA_COLOR);
     } else if (frame.special != 0u) {
         (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
-                           frame.value_color, 0x0000u);
+                           frame.value_color);
     } else {
         (void)ui_draw_digits(frame.start_x, frame.reading_y, frame.value,
-                             frame.value_color, 0x0000u);
+                             frame.value_color);
     }
     if (frame.cursor_visible && s_blink_visible) {
         (void)ui_fill_rect(frame.cursor_x, frame.cursor_y, FONT_DIGIT_WIDTH,
