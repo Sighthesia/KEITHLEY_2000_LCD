@@ -691,13 +691,15 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
           HAL_Delay(1500u);
         }
       }
-      /* MRWDP write-path colour check.  The text layer draws glyphs with one
-       * lt7680_gfx_set_pixel per set bit (CPU write port over Display RAM),
-       * a path the GE swatches above never exercised.  Paint six tall bars in
-       * the test colours, read one pixel of each back over MRWDP, and hold.
-       * set==get + correct on screen => the text colour path is fine and the
-       * grey glyph problem lives elsewhere; set!=get => MRWDP data width or
-       * byte order is wrong for the configured canvas depth. */
+      /* MRWDP byte-level dump.  The text layer draws glyphs with one
+       * lt7680_gfx_set_pixel per set bit; the swatches walked above only
+       * proved the GE fill path.  Paint six tall bars via the CPU write port
+       * (kept on the panel for a visual cross-check), then dump the raw bytes
+       * the chip stores at a known pixel.  On a healthy 16bpp block canvas a
+       * GREY (0xC618) pixel must read back as "18 C6 18 C6" on four byte
+       * reads of the same two-byte pixel; a repeated single byte (18 18 18 18)
+       * or a one-byte-per-pixel pattern pins the data width, and a permuted
+       * byte order pins the read sequence. */
       {
         static const struct {
           uint16_t rgb;
@@ -711,8 +713,6 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
         uint8_t k;
         for (k = 0u; k < 6u; k++) {
           uint16_t dy;
-          hal_uart_send_text(mrw[k].name);
-          hal_uart_send_text("=");
           for (dy = 0u; dy < 8u; dy++) {
             uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
             uint16_t dx;
@@ -721,15 +721,22 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
                                          mrw[k].rgb);
             }
           }
+          hal_uart_send_text(mrw[k].name);
+          hal_uart_send_text(" p0:");
           {
-            uint16_t px = 0u;
-            if (lt7680_gfx_peek_pixel((uint16_t)(bar_x + bar_w / 2u),
-                                      (uint16_t)((panel.height / 2u) + 4u),
-                                      &px) == LT7680_OK) {
-              hal_uart_send_hex8((uint8_t)(px >> 8));
-              hal_uart_send_hex8((uint8_t)(px & 0xFFu));
-            } else {
-              hal_uart_send_text("ERR");
+            uint16_t ybar = (uint16_t)((panel.height / 2u) + 4u);
+            uint16_t probe;
+            for (probe = 0u; probe < 4u; probe++) {
+              uint16_t xp = (uint16_t)(bar_x + probe / 2u);
+              uint8_t b = 0u;
+              (void)lt7680_write_reg(0x5Fu, (uint8_t)(xp & 0xFFu));
+              (void)lt7680_write_reg(0x60u, (uint8_t)(xp >> 8));
+              (void)lt7680_write_reg(0x61u, (uint8_t)(ybar & 0xFFu));
+              (void)lt7680_write_reg(0x62u, (uint8_t)(ybar >> 8));
+              (void)lt7680_select_reg(0x04u);
+              (void)lt7680_read_reg(0x04u, &b);
+              hal_uart_send_hex8(b);
+              hal_uart_send_text(" ");
             }
           }
           hal_uart_send_text("\r\n");
