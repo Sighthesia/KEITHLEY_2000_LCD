@@ -668,6 +668,29 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
       dump_reg("R02=", 0x02u);
       dump_reg("R03=", 0x03u);
       dump_reg("R5E=", 0x5Eu);
+      /* Channel walk: cycle the whole panel through pure R / G / B / white /
+       * grey so a missing colour lane or a missing MSB shows up as "black",
+       * "pink-white" or "purple" on one specific frame.  Full-R/G/B isolate
+       * each lane; white/grey probe the 565->666 expansion. */
+      {
+        static const struct {
+          uint16_t rgb;
+          const char *name;
+        } walk[5] = {
+            {0xF800u, "WALK RED"},
+            {0x07E0u, "WALK GREEN"},
+            {0x001Fu, "WALK BLUE"},
+            {0xFFFFu, "WALK WHITE"},
+            {0xC618u, "WALK GREY"},
+        };
+        uint8_t k;
+        for (k = 0u; k < 5u; k++) {
+          hal_uart_send_text(walk[k].name);
+          hal_uart_send_text("\r\n");
+          (void)lt7680_gfx_clear(walk[k].rgb);
+          HAL_Delay(1500u);
+        }
+      }
     }
 #endif /* COLOR_DIAG */
   }
