@@ -147,19 +147,22 @@ lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
     return LT7680_OK;
 }
 
-/* Write Display RAM pixel data. Each byte is preceded by the data-write
- * command byte; CS is held low for the whole burst. */
+/* Write Display RAM pixel data. Mirror Levetop SPI_DataWrite: each byte is a
+ * full CS transaction (CS low -> 0x80 -> byte -> CS high).  Keeping CS low
+ * across a burst makes LT7680A-R consume every byte after the first 0x80 as
+ * data, so a repeated 0x80 prefix is written into the pixel stream and the
+ * picture looks like aliased 8bpp (the classic MRWDP symptom). */
 lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
 {
     uint32_t i;
     if (data == 0 || s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_PARAM;
     }
-    s_io->cs(false);
     for (i = 0; i < len; i++) {
+        s_io->cs(false);
         (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA);
         (void)xfer_byte(data[i]);
+        s_io->cs(true);
     }
-    s_io->cs(true);
     return LT7680_OK;
 }
