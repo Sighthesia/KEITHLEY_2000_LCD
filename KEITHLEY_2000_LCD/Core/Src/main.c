@@ -691,6 +691,52 @@ demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
           HAL_Delay(1500u);
         }
       }
+      /* MRWDP write-path colour check.  The text layer draws glyphs with one
+       * lt7680_gfx_set_pixel per set bit (CPU write port over Display RAM),
+       * a path the GE swatches above never exercised.  Paint six tall bars in
+       * the test colours, read one pixel of each back over MRWDP, and hold.
+       * set==get + correct on screen => the text colour path is fine and the
+       * grey glyph problem lives elsewhere; set!=get => MRWDP data width or
+       * byte order is wrong for the configured canvas depth. */
+      {
+        static const struct {
+          uint16_t rgb;
+          const char *name;
+        } mrw[6] = {
+            {0xF800u, "MRW RED"}, {0x07E0u, "MRW GREEN"}, {0x001Fu, "MRW BLUE"},
+            {0xFFE0u, "MRW YEL"}, {0xC618u, "MRW GREY"}, {0xFFFFu, "MRW WHITE"},
+        };
+        uint16_t bar_w = (uint16_t)(panel.width / 6u);
+        uint16_t bar_x = 0u;
+        uint8_t k;
+        for (k = 0u; k < 6u; k++) {
+          uint16_t dy;
+          hal_uart_send_text(mrw[k].name);
+          hal_uart_send_text("=");
+          for (dy = 0u; dy < 8u; dy++) {
+            uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
+            uint16_t dx;
+            for (dx = 0u; dx < bar_w; dx++) {
+              (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
+                                         mrw[k].rgb);
+            }
+          }
+          {
+            uint16_t px = 0u;
+            if (lt7680_gfx_peek_pixel((uint16_t)(bar_x + bar_w / 2u),
+                                      (uint16_t)((panel.height / 2u) + 4u),
+                                      &px) == LT7680_OK) {
+              hal_uart_send_hex8((uint8_t)(px >> 8));
+              hal_uart_send_hex8((uint8_t)(px & 0xFFu));
+            } else {
+              hal_uart_send_text("ERR");
+            }
+          }
+          hal_uart_send_text("\r\n");
+          bar_x = (uint16_t)(bar_x + bar_w);
+        }
+        HAL_Delay(3000u);
+      }
     }
 #endif /* COLOR_DIAG */
   }
