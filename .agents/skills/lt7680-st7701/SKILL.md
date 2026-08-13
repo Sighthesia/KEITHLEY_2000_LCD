@@ -184,6 +184,18 @@ data port (LT768x DS V4.2 §7.1.3, §10.2):
   Data R/W Port `MRWDP` REG[04h]** → push 16bpp pixels LSB-first.  Skipping
   the MRWDP address write sends the two data bytes into the last-addressed
   register (CURV) instead of Display RAM — a silent no-op on screen.
+- **CRITICAL: each display-RAM data byte is its OWN CS transaction.**
+  Mirror Levetop's SPI `SPI_DataWrite`: `CS low → 0x80 → byte → CS high`,
+  per byte.  Do NOT hold CS low across a burst of `0x80 lo 0x80 hi ...` —
+  on this LT7680A-R silicon every byte after the first 0x80 inside one CS
+  window is consumed as *data*, so the repeated 0x80 prefixes land in the
+  pixel stream and the picture looks like aliased 8bpp (each byte = one
+  independent RGB332 pixel, high byte lost).  This is the MRWDP "8bpp
+  symptom" — it is a **frame-structure bug, not a colour-depth register
+  problem**.  Diagnosed 2026-08-13: GE fills (bypass the SPI data port)
+  always showed correct saturated 16bpp while MRWDP text/bars were wrong
+  under every REG[02h]/[5Eh]/[10h] value; per-byte CS toggling fixed it
+  (white bar finally white, GREEN=E0E0, BLUE=1F1F on screen).
 
 These are applied in `lt7680_gfx_init()` (`configure_windows()`) and used by
 `lt7680_gfx_set_pixel()` / `lt7680_gfx_clear()`; both trees (KEITHLEY and
@@ -217,6 +229,14 @@ to prove SDRAM was really written: all-zero samples ⇒ the fill works and any
 visible artifact is display-side (timing/panel); non-zero ⇒ memory was not
 cleared at that (x,y). This is how the MRWDP-burst clear was disproved on
 hardware in one flash.
+
+**SPI-mode readback is aliased — treat dumps as advisory only.** RAMTEX:
+"in SPI bus mode the frame buffer memory can not be read". Observed pattern
+(2026-08-13): first byte = `0x80 XOR low-byte`, following bytes repeat the
+low byte (GREEN wrote `E0 07`, dump showed `60 E0 E0 E0...`). Only the
+recovered low byte (`dump[0] ^ 0x80`) is meaningful; byte order, the high
+byte and the pixel count are NOT trustworthy. Judge colour correctness from
+the SCREEN, never from a readback dump.
 
 ### Clearing the canvas: use the Geometry Engine, not a MRWDP burst
 
