@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<title>K2000 TFT Reading-Page 仿真器</title>
+<style>
+  :root { --bg:#111; --panel:#000; --txt:#ddd; --acc:#4c9aff; }
+  body { margin:0; background:var(--bg); color:var(--txt);
+         font-family:"DejaVu Sans Mono",monospace; font-size:14px; }
+  header { padding:10px 16px; border-bottom:1px solid #333; display:flex;
+           gap:16px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { font-size:15px; margin:0; color:#fff; }
+  header .hint { color:#888; font-size:12px; }
+  main { padding:16px; display:flex; gap:24px; flex-wrap:wrap; }
+  .stage { position:relative; }
+  canvas#panel { background:#000; border:1px solid #555;
+                 image-rendering:pixelated; display:block; }
+  canvas#fb { background:#000; border:1px solid #555;
+              image-rendering:pixelated; display:block; }
+  .cap { font-size:11px; color:#888; margin-top:4px; text-align:center; }
+  .controls { min-width:340px; max-width:460px; }
+  .controls h2 { font-size:13px; color:var(--acc); margin:0 0 8px; }
+  .row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+  .row label { width:110px; color:#bbb; }
+  .row input[type=text] { flex:1; background:#222; border:1px solid #444;
+                          color:#fff; padding:4px 6px; font-family:inherit; }
+  .row input[type=range] { flex:1; }
+  .row input[type=checkbox] { width:16px; height:16px; }
+  .row .sub { color:#888; font-size:12px; }
+  .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px;
+                 margin:6px 0; }
+  .status-grid label { display:flex; align-items:center; gap:6px; color:#bbb;
+                       font-size:13px; width:auto; }
+  select, button { background:#222; color:#fff; border:1px solid #444;
+                   padding:4px 8px; font-family:inherit; font-size:13px; }
+  button { background:var(--acc); color:#000; border:none; font-weight:bold;
+           cursor:pointer; }
+  .preset { margin-top:10px; }
+  .preset button { background:#2a2a2a; color:var(--txt); font-weight:normal;
+                   border:1px solid #444; margin:2px; }
+  .swatches { margin-top:10px; display:flex; gap:8px; align-items:center; }
+  .swatch { width:22px; height:22px; border:1px solid #666; }
+  details { margin-top:12px; }
+  summary { cursor:pointer; color:var(--acc); font-size:13px; }
+  .mono { font-family:monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>K2000 TFT — Reading-Page 布局仿真</h1>
+  <span class="hint">按固件 main_display_format / ui 渲染管线逐像素复刻 · 数据取自 firmware/src 位图</span>
+</header>
+<main>
+  <div class="stage">
+    <canvas id="panel" width="960" height="320" style="width:960px;height:320px"></canvas>
+    <div class="cap">可见屏 960×320（横屏 UI 空间，panel_transform 转置后即物理面板所见）</div>
+    <canvas id="fb" width="320" height="960" style="width:160px;height:480px;margin-top:12px"></canvas>
+    <div class="cap">帧缓冲 320×960（fb_x=ui_y, fb_y=ui_x）</div>
+  </div>
+
+  <div class="controls">
+    <h2>读数</h2>
+    <div class="row"><label>数值 (value)</label>
+      <input type="text" id="inpValue" value="1.000000" spellcheck="false"></div>
+    <div class="row"><label>单位 (unit)</label>
+      <input type="text" id="inpUnit" value="VDC" spellcheck="false"></div>
+    <div class="row"><label>特殊态</label>
+      <select id="selSpecial">
+        <option value="0">正常 (白)</option>
+        <option value="1">OVERFLOW (红)</option>
+        <option value="2">无读数 ---- (灰)</option>
+      </select></div>
+    <div class="row"><label>无数据 '?'</label>
+      <input type="checkbox" id="inpNoData"><span class="sub">启动占位：7 个 '?' 槽 + Range ?</span></div>
+
+    <h2 style="margin-top:14px">光标 / 闪烁</h2>
+    <div class="row"><label>POS</label>
+      <input type="range" id="inpPos" min="0" max="9" value="0">
+      <span class="sub" id="posVal">0</span></div>
+    <div class="row"><label>blink</label>
+      <input type="checkbox" id="inpBlink" checked></div>
+
+    <h2 style="margin-top:14px">状态指示</h2>
+    <div class="status-grid">
+      <label><input type="checkbox" data-tag="0x08" data-bit="0x80"> HOLD</label>
+      <label><input type="checkbox" data-tag="0x06" data-bit="0x80"> REM</label>
+      <label><input type="checkbox" data-tag="0x09" data-bit="0x80"> REL</label>
+      <label><input type="checkbox" data-tag="0x08" data-bit="0x40"> TRIG</label>
+      <label><input type="checkbox" data-tag="0x09" data-bit="0x20"> AUTO</label>
+      <label><input type="checkbox" data-tag="0x09" data-bit="0x10"> ERR</label>
+    </div>
+
+    <div class="preset">
+      <button onclick="applyPreset('nop')">占位 (Range ? + ???)</button>
+      <button onclick="applyPreset('normal')">1.000000 VDC</button>
+      <button onclick="applyPreset('ovfl')">OVERFLOW</button>
+      <button onclick="applyPreset('noread')">---- 无读数</button>
+      <button onclick="applyPreset('dbm')">0.00 dBm</button>
+      <button onclick="applyPreset('hold')">HOLD + REM + 光标</button>
+    </div>
+
+    <h2 style="margin-top:14px">颜色样本 (RGB565)</h2>
+    <div class="swatches">
+      <div class="swatch" style="background:#fff" title="正常 0xFFFF"></div>
+      <div class="swatch" style="background:#f00" title="OVERFLOW 0xF800"></div>
+      <div class="swatch" style="background:#888" title="占位 0xC618"></div>
+      <div class="swatch" style="background:#444" title="分隔线 0x8410"></div>
+    </div>
+
+    <details>
+      <summary>仿真 vs 固件一致性</summary>
+      <p style="color:#bbb;font-size:12px;line-height:1.5">
+      布局常量（960×320、顶带 y0..24、读数带 96 高、分隔线、光标槽、右对齐状态块、
+      7 个 '?' 槽）与 main_display.h 逐值一致；右对齐算法 main_display_layout_value、
+      光标位置 main_display_cursor_x、特殊色 main_display_special_color、status 右对齐
+      求和均从 C 移植。位图逐字节同源，1bpp MSB-first 行打包。闪烁周期 250ms 与
+      update_blink() 一致。像素 → 帧缓冲转置（fb_x=ui_y, fb_y=ui_x）在右侧 fb 预览可见。
+      </p>
+    </details>
+  </div>
+</main>
+
+<script src="font_data.js"></script>
+<script>
+"use strict";
+
+/* ---- 布局常量：与 main_display.h 逐值一致 ---- */
+const UI_W = 960, UI_H = 320;
+const TOP_BAND_Y = 0, TOP_BAND_H = 24;
+const READING_Y = TOP_BAND_Y + TOP_BAND_H, READING_H = 96;
+const FOOTER_Y = READING_Y + READING_H;
+const READING_X = 0, MAX_SLOTS = Math.floor(UI_W / DIGIT_W);
+const NO_DATA_SLOTS = 7;
+const PLACEHOLDER_COLOR = 0xC618;
+const RANGE_PLACEHOLDER = "Range ?";
+const SEP_Y = READING_Y, SEP_H = 1, SEP_COLOR = 0x8410;
+const CURSOR_GAP = 4;
+const CURSOR_Y = READING_Y + READING_H + CURSOR_GAP, CURSOR_H = 4;
+const STATUS_LABEL_GAP = 4, STATUS_LABEL_MAX = 6;
+
+/* ---- status_bar core 表：与 status_bar.c 一致 ---- */
+const CORE_TABLE = [
+  { label:"HOLD", tag:0x08, bit:0x80 },
+  { label:"REM",  tag:0x06, bit:0x80 },
+  { label:"REL",  tag:0x09, bit:0x80 },
+  { label:"TRIG", tag:0x08, bit:0x40 },
+  { label:"AUTO", tag:0x09, bit:0x20 },
+  { label:"ERR",  tag:0x09, bit:0x10 },
+];
+
+/* ---- RGB565 → CSS 颜色 ---- */
+function rgb565(css) {  /* #rrggbb → 565 */
+  const r = parseInt(css.slice(1,3),16), g = parseInt(css.slice(3,5),16),
+        b = parseInt(css.slice(5,7),16);
+  return ((r>>3)<<11) | ((g>>2)<<5) | (b>>3);
+}
+function toCss(hex) {
+  const r = (hex>>11)&0x1F, g = (hex>>5)&0x3F, b = hex&0x1F;
+  return `rgb(${(r<<3)|(r>>2)},${(g<<2)|(g>>4)},${(b<<3)|(b>>2)})`;
+}
+
+/* ---- 位图渲染：与 ui_draw_text / ui_draw_digits 一致 ---- */
+function drawGlyph(ctx, bitmap, W, H, BPR, x, y, color) {
+  ctx.fillStyle = color;
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      const byte = bitmap[row*BPR + (col>>3)];
+      if (byte & (0x80 >> (col & 7))) ctx.fillRect(x+col, y+row, 1, 1);
+    }
+  }
+}
+function textBitmap(c) {
+  const idx = c.charCodeAt(0);
+  if (idx < TEXT_FIRST || idx > TEXT_LAST) return null;
+  return TEXT_BITMAPS[idx - TEXT_FIRST];
+}
+function digitBitmap(c) {
+  const i = DIGIT_CHARS.indexOf(c);
+  return i < 0 ? null : DIGIT_BITMAPS[i];
+}
+
+/* ---- 布局计算：main_display_layout_value / cursor_x / special_color 移植 ---- */
+function layoutValue(valueLen, startX, slots) {
+  const right = startX + slots * DIGIT_W;
+  if (slots === 0) return { startX:right, endX:right, valid:false };
+  if (valueLen === 0) return { startX:right, endX:right, valid:true };
+  if (valueLen > slots) return { startX, endX:right, valid:false };
+  return { startX:right - valueLen*DIGIT_W, endX:right, valid:true };
+}
+function cursorX(layout, pos) {
+  if (!layout.valid) return layout.endX;
+  const maxi = (layout.endX - layout.startX) / DIGIT_W;
+  if (pos > maxi) pos = maxi;
+  return layout.startX + pos * DIGIT_W;
+}
+function specialColor(sp) {
+  if (sp === 1) return 0xF800;
+  if (sp === 2) return 0xC618;
+  return 0xFFFF;
+}
+
+/* ---- 帧缓冲转置预览（fb_x=ui_y, fb_y=ui_x）---- */
+function renderFB(ctx, panelCtx) {
+  const img = panelCtx.getImageData(0,0,UI_W,UI_H);
+  const d = img.data;
+  const fbimg = ctx.createImageData(320,960);
+  const fd = fbimg.data;
+  for (let uy = 0; uy < 320; uy++) {
+    for (let ux = 0; ux < 960; ux++) {
+      const si = (uy*UI_W + ux)*4;
+      const di = (ux*320 + uy)*4;
+      fd[di] = d[si]; fd[di+1] = d[si+1]; fd[di+2] = d[si+2]; fd[di+3] = 255;
+    }
+  }
+  ctx.putImageData(fbimg, 0, 0);
+}
+
+function render() {
+  const value = document.getElementById("inpValue").value;
+  const unit  = document.getElementById("inpUnit").value;
+  const special = parseInt(document.getElementById("selSpecial").value,10);
+  const noData  = document.getElementById("inpNoData").checked;
+  const blink   = document.getElementById("inpBlink").checked;
+  const pos     = parseInt(document.getElementById("inpPos").value,10);
+  const blinkVis = window.__blinkVis !== false;
+
+  /* 状态收集 */
+  const status = {};
+  document.querySelectorAll(".status-grid input").forEach(cb => {
+    if (cb.checked) {
+      const tag = parseInt(cb.dataset.tag,16), bit = parseInt(cb.dataset.bit,16);
+      status[tag] = (status[tag]||0) | bit;
+    }
+  });
+
+  const canvas = document.getElementById("panel");
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#000"; ctx.fillRect(0,0,UI_W,UI_H);
+
+  const paint = (x,y,color) => { ctx.fillStyle=color; ctx.fillRect(x,y,1,1); };
+
+  /* 静态装饰：顶带分隔线（整宽 1px） */
+  ctx.fillStyle = toCss(SEP_COLOR);
+  ctx.fillRect(0, SEP_Y, UI_W, SEP_H);
+
+  /* 顶带：unit/range 左，状态右 */
+  if (unit === "") {
+    let cx = 0;
+    for (const ch of RANGE_PLACEHOLDER) {
+      const bmp = textBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, cx, TOP_BAND_Y,
+                         toCss(PLACEHOLDER_COLOR));
+      cx += TEXT_W;
+    }
+  } else {
+    let cx = 0;
+    for (const ch of unit) {
+      const bmp = textBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, cx, TOP_BAND_Y,
+                         toCss(0xFFFF));
+      cx += TEXT_W;
+    }
+  }
+
+  /* 状态右对齐：与 main_display_format 相同求和 */
+  const active = [];
+  CORE_TABLE.forEach(ind => {
+    if ((status[ind.tag]||0) & ind.bit) active.push(ind.label);
+  });
+  if (active.length) {
+    let w = 0;
+    active.forEach((lab,i) => {
+      w += lab.length * TEXT_W;
+      if (i+1 < active.length) w += STATUS_LABEL_GAP;
+    });
+    let sx = UI_W - w;
+    active.forEach(lab => {
+      for (const ch of lab) {
+        const bmp = textBitmap(ch);
+        if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, sx, TOP_BAND_Y,
+                           toCss(0xFFFF));
+        sx += TEXT_W;
+      }
+      sx += STATUS_LABEL_GAP;
+    });
+  }
+
+  /* 读数带 */
+  const vColor = toCss(specialColor(special));
+  if (noData) {
+    const noDataX = UI_W - NO_DATA_SLOTS * DIGIT_W;
+    const noDataY = READING_Y + Math.floor((READING_H - TEXT_H)/2);
+    for (let i = 0; i < NO_DATA_SLOTS; i++) {
+      const bmp = textBitmap("?");
+      const gx = noDataX + i*DIGIT_W + (DIGIT_W - TEXT_W)/2;
+      drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, gx, noDataY,
+                toCss(PLACEHOLDER_COLOR));
+    }
+  } else if (special !== 0) {
+    /* 特殊态：小字 text 渲染（OVERFLOW / ----），对齐固件
+     * ui_draw_text(frame.start_x, frame.reading_y, ...)：
+     * 从右对齐 start_x 起、顶对齐 reading_y，逐字符 12px 宽。 */
+    const layout = layoutValue(value.length, READING_X, MAX_SLOTS);
+    let sx = layout.startX;
+    for (const ch of value) {
+      const bmp = textBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, sx, READING_Y,
+                         vColor);
+      sx += TEXT_W;
+    }
+    /* 光标 */
+    if (blink && value.length && blinkVis) {
+      const cxl = layoutValue(value.length, READING_X, MAX_SLOTS);
+      const cxp = cursorX(cxl, pos);
+      ctx.fillStyle = vColor;
+      ctx.fillRect(cxp, CURSOR_Y, DIGIT_W, CURSOR_H);
+    }
+  } else {
+    /* 正常：48×96 大数字右对齐 */
+    const layout = layoutValue(value.length, READING_X, MAX_SLOTS);
+    let sx = layout.startX;
+    for (const ch of value) {
+      const bmp = digitBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, DIGIT_W, DIGIT_H, DIGIT_BPR, sx, READING_Y,
+                         vColor);
+      sx += DIGIT_W;
+    }
+    if (blink && value.length && blinkVis) {
+      const cxp = cursorX(layout, pos);
+      ctx.fillStyle = vColor;
+      ctx.fillRect(cxp, CURSOR_Y, DIGIT_W, CURSOR_H);
+    }
+  }
+
+  /* 帧缓冲转置预览 */
+  renderFB(document.getElementById("fb").getContext("2d"), ctx);
+}
+
+/* ---- 预设 ---- */
+function applyPreset(name) {
+  const v = document.getElementById("inpValue"),
+        u = document.getElementById("inpUnit"),
+        s = document.getElementById("selSpecial"),
+        nd = document.getElementById("inpNoData"),
+        bl = document.getElementById("inpBlink");
+  const clearStatus = () => document.querySelectorAll(".status-grid input")
+                              .forEach(cb => cb.checked = false);
+  clearStatus();
+  switch (name) {
+    case "nop":
+      v.value=""; u.value=""; s.value="0"; nd.checked=true; bl.checked=false; break;
+    case "normal":
+      v.value="1.000000"; u.value="VDC"; s.value="0"; nd.checked=false; break;
+    case "ovfl":
+      v.value="OVERFLOW"; u.value=""; s.value="1"; nd.checked=false; bl.checked=false; break;
+    case "noread":
+      v.value="----"; u.value=""; s.value="2"; nd.checked=false; bl.checked=false; break;
+    case "dbm":
+      v.value="0.00"; u.value="dBm"; s.value="0"; nd.checked=false; break;
+    case "hold": {
+      v.value="123.456"; u.value="mV"; s.value="0"; nd.checked=false; bl.checked=true;
+      document.querySelectorAll(".status-grid input").forEach(cb => {
+        if ((cb.dataset.tag==="0x08"&&cb.dataset.bit==="0x80") ||
+            (cb.dataset.tag==="0x06"&&cb.dataset.bit==="0x80")) cb.checked=true;
+      });
+      break;
+    }
+  }
+  render();
+}
+
+/* ---- 事件绑定 ---- */
+document.querySelectorAll("input, select").forEach(el => {
+  el.addEventListener("input", () => { render(); });
+  el.addEventListener("change", () => { render(); });
+});
+document.getElementById("inpPos").addEventListener("input", e => {
+  document.getElementById("posVal").textContent = e.target.value;
+  render();
+});
+
+/* 闪烁：与 update_blink() 250ms 一致 */
+window.__blinkVis = true;
+setInterval(() => {
+  if (document.getElementById("inpBlink").checked) {
+    window.__blinkVis = !window.__blinkVis;
+    render();
+  } else {
+    window.__blinkVis = true;
+  }
+}, 250);
+
+render();
+</script>
+</body>
+</html>
