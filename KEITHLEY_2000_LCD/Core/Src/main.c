@@ -50,18 +50,6 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
-/* Task 5 demo: after the color-bars acceptance, clear the test pattern and
- * draw the JetBrains Mono big digits to the real panel, printing the draw
- * time over UART. Set to 0 to restore the plain color-bars behaviour. */
-#define FONT_DIGIT_DEMO 0
-
-/* Colour-path diagnosis: fill six swatches (RED/GREEN/BLUE/YEL/GREY/WHITE)
- * with the GE engine while the display stays blank, then enable display and
- * read every swatch back over MRWDP, reporting values on UART.  Correct
- * SDRAM values with wrong panel colours pin the fault on the LT7680 -> panel
- * display path; wrong readback values pin it on the write path. */
-#define COLOR_DIAG 1
-
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,39 +66,6 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
-#if FONT_DIGIT_DEMO || COLOR_DIAG
-#if FONT_DIGIT_DEMO
-static void uart_print_u32(uint32_t value);
-#endif
-static void dump_reg(const char *label, uint8_t reg)
-{
-    uint8_t v = 0u;
-    if (lt7680_read_reg(reg, &v) == LT7680_OK) {
-        hal_uart_send_text(label);
-        hal_uart_send_hex8(v);
-    } else {
-        hal_uart_send_text(label);
-        hal_uart_send_text("ERR");
-    }
-    hal_uart_send_text("\r\n");
-}
-#if FONT_DIGIT_DEMO
-static void dump_reg16(const char *label, uint8_t reg)
-{
-    uint8_t lo = 0u, hi = 0u;
-    if (lt7680_read_reg(reg, &lo) == LT7680_OK &&
-        lt7680_read_reg((uint8_t)(reg + 1u), &hi) == LT7680_OK) {
-        hal_uart_send_text(label);
-        hal_uart_send_hex8(hi);
-        hal_uart_send_hex8(lo);
-    } else {
-        hal_uart_send_text(label);
-        hal_uart_send_text("ERR");
-    }
-    hal_uart_send_text("\r\n");
-}
-#endif
-#endif /* FONT_DIGIT_DEMO || COLOR_DIAG */
 
 /* USER CODE END PFP */
 
@@ -445,7 +400,7 @@ int main(void)
     k2000_proto_init(&proto_cb);
     panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
                          panel.width, panel.height);
-    hal_uart_send_text("\r\nK2000 TFT build11 no-boot-bars\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build12 clean-demo\r\n");
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -473,7 +428,7 @@ int main(void)
            * register state (colour-bar test pattern / display on) never
            * flashes during the ~200ms panel init or gfx init. 0x08 = init
            * display ctrl value (bit3 scan dir set, bits7/6/5/4/0-2 clear). */
-(void)lt7680_write_reg(0x12u, 0x08u);
+          (void)lt7680_write_reg(0x12u, 0x08u);
           hal_panel_init();
           st = lt7680_gfx_init(&panel);
           if (st != LT7680_OK) {
@@ -501,303 +456,6 @@ int main(void)
         }
       }
     }
-#if FONT_DIGIT_DEMO
-    if (s_display_ready) {
-    {
-      /* Task 5 demo. Bit5 of REG[12h] enables the color-bar test pattern,
-       * which overrides the SDRAM image; clear it so the big digits drawn
-       * below are visible. 7 digits only fit the 960-wide landscape layout
-       * (Panel_Landscape=1); on the verified 320-wide portrait we render 6. */
-      uint8_t disp = 0u;
-      uint32_t t0;
-      uint32_t t1;
-      uint16_t demo_len;
-      uint16_t demo_w;
-      uint16_t ux0;
-      uint16_t uy0;
-      static const char demo_digits[] =
-#if PANEL_LANDSCAPE
-          "1234567";
-#else
-          "123456";
-#endif
-      /* Clear bit5 (color-bar test pattern) only if the read succeeded, so
-       * a failed read cannot write 0x12=0 and blank the display.  Then wipe
-       * the frame buffer: the canvas defaults to an 8bpp block window, so
-       * turning the test pattern off alone would show a single-row sliver. */
-      if (lt7680_read_reg(0x12u, &disp) == LT7680_OK) {
-        /* Keep the display blank while the 614400-byte framebuffer clear and
-         * per-pixel draw run. Otherwise the panel visibly shows each partial
-         * burst and the old/new image appears as two refreshes. */
-(void)lt7680_write_reg(0x12u, (uint8_t)(disp & ~0x60u));
-      }
-      t1 = HAL_GetTick();
-      (void)lt7680_gfx_clear(0x0000u);
-      hal_uart_send_text("clear-ms=");
-      uart_print_u32(HAL_GetTick() - t1);
-      hal_uart_send_text("\r\n");
-
-      /* Telemetry: confirm the windows and test-pattern state read back as
-       * configured.  If MIW/CVSIMWTH/AW_* read back 0 the register write
-       * path is at fault; if R12 still has bit5 set the test pattern never
-       * turned off. */
-      hal_uart_send_text("R12=0x");
-      hal_uart_send_hex8(disp);
-      hal_uart_send_text("\r\n");
-      dump_reg16("MIW=", 0x24u);
-      dump_reg16("CVSW=", 0x54u);
-      dump_reg16("AW_W=", 0x5Au);
-      dump_reg16("AW_H=", 0x5Cu);
-      dump_reg("AWCOL=", 0x5Eu);
-      dump_reg("P10=", 0x10u);
-      dump_reg("P5E=", 0x5Eu);
-
-      /* Read back a sample of canvas pixels after the clear via MRWDP. If
-       * every sample is 0000 the GE fill reached the whole canvas and the
-       * striped background must be a display-side artefact; any non-zero
-       * sample pins down (x,y) where memory was NOT cleared. */
-      {
-        static const uint16_t sx[] = {0u, 159u, 319u};
-        static const uint16_t sy[] = {0u, 200u, 400u, 600u, 800u, 959u};
-        uint8_t i;
-        for (i = 0u; i < 3u; i++) {
-          uint8_t j;
-          for (j = 0u; j < 6u; j++) {
-            uint16_t px = 0u;
-            if (lt7680_gfx_peek_pixel(sx[i], sy[j], &px) == LT7680_OK) {
-              hal_uart_send_text("PX(");
-              uart_print_u32(sx[i]);
-              hal_uart_send_text(",");
-              uart_print_u32(sy[j]);
-              hal_uart_send_text(")=");
-              hal_uart_send_hex8((uint8_t)(px >> 8));
-              hal_uart_send_hex8((uint8_t)(px & 0xFFu));
-              hal_uart_send_text("\r\n");
-            }
-          }
-        }
-      }
-
-demo_len = (uint16_t)(sizeof(demo_digits) - 1u);
-      demo_w = (uint16_t)(demo_len * FONT_DIGIT_WIDTH);
-      /* The RGB panel transposes the framebuffer (fb row -> screen column, no
-       * reversal). Render the landscape 960x320 UI directly into the 320x960
-       * framebuffer as its transpose: fb_x = uy, fb_y = ux. Centring in the
-       * UI space then lands the glyph block centred on the physical panel. */
-      ux0 = (uint16_t)((panel.height - demo_w) / 2u);
-      uy0 = (uint16_t)((panel.width - FONT_DIGIT_HEIGHT) / 2u);
-      t0 = HAL_GetTick();
-      {
-        const char *p = demo_digits;
-        while (*p != '\0') {
-          const uint8_t *bmp = font_digit_bitmap(*p);
-          if (bmp != 0) {
-            uint16_t dy;
-            for (dy = 0u; dy < FONT_DIGIT_HEIGHT; dy++) {
-              const uint8_t *row =
-                  bmp + (uint16_t)(dy * FONT_DIGIT_BYTES_PER_ROW);
-              uint16_t dx;
-              for (dx = 0u; dx < FONT_DIGIT_WIDTH; dx++) {
-                if ((row[dx >> 3] & (0x80u >> (dx & 7u))) != 0u) {
-                    uint16_t ux = (uint16_t)(ux0 + dx);
-                    uint16_t uy = (uint16_t)(uy0 + dy);
-                    uint16_t fb_x;
-                    uint16_t fb_y;
-                    panel_transform_ui_to_fb(ux, uy, &fb_x, &fb_y);
-                    if (fb_x < panel.width && fb_y < panel.height) {
-                      (void)lt7680_gfx_set_pixel(fb_x, fb_y, 0xFFFFu);
-                    }
-                }
-              }
-            }
-          }
-          ux0 += FONT_DIGIT_WIDTH;
-          p++;
-        }
-      }
-      (void)lt7680_write_reg(0x12u, 0x48u);
-      (void)lt7680_read_reg(0x12u, &disp);
-      hal_uart_send_text("R12-final=0x");
-      hal_uart_send_hex8(disp);
-      hal_uart_send_text("\r\n");
-      hal_uart_send_text("digits-ms=");
-      uart_print_u32(HAL_GetTick() - t0);
-      hal_uart_send_text("\r\n");
-    }
-    }
-#endif /* FONT_DIGIT_DEMO */
-#if COLOR_DIAG
-    {
-      /* Draw all six swatches while REG[12h] keeps the display blank, so the
-       * panel never shows a partially-filled frame; enable the display, then
-       * read one centre pixel of every swatch back over MRWDP. */
-      static const struct {
-        uint16_t rgb;
-        const char *name;
-      } swatch[6] = {
-          {0xF800u, "RED"},  {0x07E0u, "GREEN"}, {0x001Fu, "BLUE"},
-          {0xFFE0u, "YEL"},  {0xC618u, "GREY"},  {0xFFFFu, "WHITE"},
-      };
-      lt7680_rect_t rr;
-      uint8_t i;
-
-      rr.x = 0u;
-      rr.y = 0u;
-      rr.w = (uint16_t)(panel.width / 6u);
-      rr.h = (uint16_t)(panel.height / 2u);
-      for (i = 0u; i < 6u; i++) {
-        (void)lt7680_gfx_fill_rect(&rr, swatch[i].rgb);
-        rr.x = (uint16_t)(rr.x + rr.w);
-      }
-      (void)lt7680_write_reg(0x12u, 0x48u);
-      for (i = 0u; i < 6u; i++) {
-        uint16_t px = 0u;
-        uint16_t mx = (uint16_t)((uint16_t)(i * rr.w) + rr.w / 2u);
-        hal_uart_send_text(swatch[i].name);
-        hal_uart_send_text("=");
-        if (lt7680_gfx_peek_pixel(mx, (uint16_t)(rr.h / 2u), &px) ==
-            LT7680_OK) {
-          hal_uart_send_hex8((uint8_t)(px >> 8));
-          hal_uart_send_hex8((uint8_t)(px & 0xFFu));
-        } else {
-          hal_uart_send_text("ERR");
-        }
-        hal_uart_send_text("\r\n");
-      }
-      dump_reg("R01=", 0x01u);
-      dump_reg("R02=", 0x02u);
-      dump_reg("R03=", 0x03u);
-      dump_reg("R5E=", 0x5Eu);
-      /* Channel walk: cycle the whole panel through pure R / G / B / white /
-       * grey so a missing colour lane or a missing MSB shows up as "black",
-       * "pink-white" or "purple" on one specific frame.  Full-R/G/B isolate
-       * each lane; white/grey probe the 565->666 expansion. */
-      {
-        static const struct {
-          uint16_t rgb;
-          const char *name;
-        } walk[5] = {
-            {0xF800u, "WALK RED"},
-            {0x07E0u, "WALK GREEN"},
-            {0x001Fu, "WALK BLUE"},
-            {0xFFFFu, "WALK WHITE"},
-            {0xC618u, "WALK GREY"},
-        };
-        uint8_t k;
-        for (k = 0u; k < 5u; k++) {
-          hal_uart_send_text(walk[k].name);
-          hal_uart_send_text("\r\n");
-          (void)lt7680_gfx_clear(walk[k].rgb);
-          HAL_Delay(1500u);
-        }
-      }
-      /* AW_COLOR sweep.  GE fills and the WALK frames always showed correct
-       * saturated colours, but every MRWDP-written bar read back as a dark
-       * purple/red while the raw byte dump had no two-byte 16bpp pattern at
-       * all --- the CPU write port behaves 8bpp under REG[5Eh]=0x01.  Walk
-       * every low-two-bit colour depth, clearing the canvas and repainting
-       * the six bars under each, and hold each frame so the correct setting
-       * is the one whose bars are clean saturated colours. */
-      {
-        static const uint8_t awv[4] = {0x00u, 0x01u, 0x02u, 0x03u};
-        static const struct {
-          uint16_t rgb;
-          const char *name;
-        } mrw[6] = {
-            {0xF800u, "MRW RED"}, {0x07E0u, "MRW GREEN"}, {0x001Fu, "MRW BLUE"},
-            {0xFFE0u, "MRW YEL"}, {0xC618u, "MRW GREY"}, {0xFFFFu, "MRW WHITE"},
-        };
-        uint8_t v;
-        for (v = 0u; v < 4u; v++) {
-          uint16_t bar_x = 0u;
-          uint8_t k;
-          hal_uart_send_text("AW5E=0x");
-          hal_uart_send_hex8(awv[v]);
-          hal_uart_send_text(" clear+repaint\r\n");
-          (void)lt7680_write_reg(0x5Eu, awv[v]);
-          (void)lt7680_gfx_clear(0x0000u);
-          for (k = 0u; k < 6u; k++) {
-            uint16_t dy;
-            for (dy = 0u; dy < 8u; dy++) {
-              uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
-              uint16_t dx;
-              for (dx = 0u; dx < (uint16_t)(panel.width / 6u); dx++) {
-                (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
-                                           mrw[k].rgb);
-              }
-            }
-            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
-          }
-          hal_uart_send_text("  held 3s, check bar colours\r\n");
-          HAL_Delay(3000u);
-        }
-        (void)lt7680_write_reg(0x5Eu, 0x01u);
-        hal_uart_send_text("AW5E restored to 0x01\r\n");
-      }
-      /* AW_COLOR=0x00 confirmation.  The sweep showed 0x00 renders the
-       * MRWDP bars in clean colours (16bpp-like), hinting this silicon's
-       * colour-depth encoding is inverted versus the RA8876 docs.  Pin down
-       * the byte order and the missing green: repaint the six bars under
-       * 0x00 and dump eight straight MRWDP bytes across the first two pixels
-       * of each.  Healthy 16bpp reads back lo hi lo hi (GREEN 0x07E0 = E0 07
-       * E0 07); MSB-first would read 07 E0 07 E0; a missing-green bar shows
-       * up as stray bytes here. */
-      {
-        static const struct {
-          uint16_t rgb;
-          const char *name;
-        } aw0[6] = {
-            {0xF800u, "AW0 RED"}, {0x07E0u, "AW0 GREEN"}, {0x001Fu, "AW0 BLUE"},
-            {0xFFE0u, "AW0 YEL"}, {0xC618u, "AW0 GREY"}, {0xFFFFu, "AW0 WHITE"},
-        };
-        lt7680_status_t st = lt7680_write_reg(0x5Eu, 0x00u);
-        if (st == LT7680_OK) {
-          uint16_t bar_x = 0u;
-          uint8_t k;
-          (void)lt7680_gfx_clear(0x0000u);
-          for (k = 0u; k < 6u; k++) {
-            uint16_t dy;
-            for (dy = 0u; dy < 8u; dy++) {
-              uint16_t yy = (uint16_t)((panel.height / 2u) + dy);
-              uint16_t dx;
-              for (dx = 0u; dx < (uint16_t)(panel.width / 6u); dx++) {
-                (void)lt7680_gfx_set_pixel((uint16_t)(bar_x + dx), yy,
-                                           aw0[k].rgb);
-              }
-            }
-            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
-          }
-          hal_uart_send_text("AW0=0x00 dump:\r\n");
-          bar_x = 0u;
-          for (k = 0u; k < 6u; k++) {
-            uint16_t ybar = (uint16_t)((panel.height / 2u) + 4u);
-            uint8_t i;
-            uint8_t b = 0u;
-            hal_uart_send_text(aw0[k].name);
-            hal_uart_send_text(":");
-            (void)lt7680_write_reg(0x5Fu, (uint8_t)(bar_x & 0xFFu));
-            (void)lt7680_write_reg(0x60u, (uint8_t)(bar_x >> 8));
-            (void)lt7680_write_reg(0x61u, (uint8_t)(ybar & 0xFFu));
-            (void)lt7680_write_reg(0x62u, (uint8_t)(ybar >> 8));
-            (void)lt7680_select_reg(0x04u);
-            for (i = 0u; i < 8u; i++) {
-              if (lt7680_read_reg(0x04u, &b) == LT7680_OK) {
-                hal_uart_send_hex8(b);
-                hal_uart_send_text(" ");
-              } else {
-                hal_uart_send_text("?? ");
-              }
-            }
-            hal_uart_send_text("\r\n");
-            bar_x = (uint16_t)(bar_x + (uint16_t)(panel.width / 6u));
-          }
-          HAL_Delay(5000u);
-        }
-        (void)lt7680_write_reg(0x5Eu, 0x01u);
-        hal_uart_send_text("AW0 done, AW5E restored to 0x01\r\n");
-      }
-    }
-#endif /* COLOR_DIAG */
   }
 #endif /* LT7680_SPI_SELFTEST */
   /* USER CODE END 2 */
@@ -869,19 +527,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
-#if FONT_DIGIT_DEMO
-static void uart_print_u32(uint32_t value)
-{
-    char buf[10];
-    uint8_t i = (uint8_t)sizeof(buf);
-    do {
-        buf[--i] = (char)('0' + (value % 10u));
-        value /= 10u;
-    } while (value != 0u);
-    hal_uart_send((const uint8_t *)&buf[i], (uint16_t)(sizeof(buf) - i));
-}
-#endif
 
 /* USER CODE END 4 */
 
