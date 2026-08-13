@@ -5,29 +5,37 @@
 <title>K2000 TFT Reading-Page 仿真器</title>
 <style>
   :root { --bg:#111; --panel:#000; --txt:#ddd; --acc:#4c9aff; }
+  html, body { height:100%; overflow:hidden; }
   body { margin:0; background:var(--bg); color:var(--txt);
-         font-family:"DejaVu Sans Mono",monospace; font-size:14px; }
-  header { padding:10px 16px; border-bottom:1px solid #333; display:flex;
-           gap:16px; align-items:baseline; flex-wrap:wrap; }
+         font-family:"DejaVu Sans Mono",monospace; font-size:14px;
+         display:grid; grid-template-rows:auto minmax(0, 1fr); }
+  header { padding:6px 16px; border-bottom:1px solid #333; display:flex;
+           gap:16px; align-items:baseline; }
   header h1 { font-size:15px; margin:0; color:#fff; }
   header .hint { color:#888; font-size:12px; }
-  main { padding:16px; display:flex; gap:24px; flex-wrap:wrap; }
-  .stage { position:relative; width:960px; }
+  main { min-height:0; padding:12px; display:grid;
+         grid-template-columns:minmax(0, 1fr) 430px; gap:14px; overflow:hidden; }
+  .preview { min-width:0; min-height:0; display:flex; align-items:flex-start;
+             gap:10px; overflow:auto; }
+  .stage { position:relative; width:720px; flex:0 0 720px; }
+  canvas#panel, canvas#overlay { width:720px; height:240px; }
   canvas#panel { background:#000; border:1px solid #555;
                  image-rendering:pixelated; display:block; }
   canvas#overlay { position:absolute; left:0; top:0; image-rendering:pixelated;
                    display:block; cursor:crosshair; }
-  canvas#fb { background:#000; border:1px solid #555;
+  .fb-preview { flex:0 0 94px; }
+  canvas#fb { width:80px !important; height:240px !important; margin:0 !important;
+              background:#000; border:1px solid #555;
               image-rendering:pixelated; display:block; }
   .cap { font-size:11px; color:#888; margin-top:4px; text-align:center; }
-  .controls { min-width:340px; max-width:480px; }
-  .controls h2 { font-size:13px; color:var(--acc); margin:12px 0 8px; }
+  .controls { min-width:0; max-width:none; overflow:auto; padding-right:2px; }
+  .controls h2 { font-size:13px; color:var(--acc); margin:10px 0 6px; }
   .controls h2:first-child { margin-top:0; }
-  .row { display:flex; align-items:center; gap:8px; margin:6px 0; }
-  .row label { width:110px; color:#bbb; }
-  .row input[type=text] { flex:1; background:#222; border:1px solid #444;
-                          color:#fff; padding:4px 6px; font-family:inherit; }
-  .row input[type=range] { flex:1; }
+  .row { display:flex; align-items:center; gap:8px; margin:5px 0; }
+  .row label { width:110px; color:#bbb; flex:0 0 110px; }
+  .row input[type=text] { flex:1; min-width:0; background:#222; border:1px solid #444;
+                          color:#fff; padding:3px 6px; font-family:inherit; }
+  .row input[type=range] { flex:1; min-width:0; }
   .row input[type=checkbox] { width:16px; height:16px; }
   .row .sub { color:#888; font-size:12px; }
   .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px;
@@ -42,28 +50,47 @@
                  border:1px solid #444; }
   .preset { margin-top:10px; }
   .preset button { background:#2a2a2a; color:var(--txt); font-weight:normal;
-                   border:1px solid #444; margin:2px; }
+                   border:1px solid #444; margin:2px; padding:3px 8px; }
   .swatches { margin-top:10px; display:flex; gap:8px; align-items:center; }
   .swatch { width:22px; height:22px; border:1px solid #666; }
-  details { margin-top:12px; }
+  details { margin-top:8px; }
   summary { cursor:pointer; color:var(--acc); font-size:13px; }
   .mono { font-family:monospace; }
 
-  /* devtools 面板 */
-  #selInfo { background:#1c1c1c; border:1px solid #444; padding:8px;
-             font-size:12px; line-height:1.6; }
-  #selInfo b { color:#fff; }
-  #selInfo .xy { color:var(--acc); }
-  .elem-row { display:flex; justify-content:space-between; gap:8px;
-              padding:3px 4px; border-bottom:1px dashed #333; font-size:12px; }
-  .elem-row:hover { background:#222; cursor:pointer; }
-  .elem-row.sel { background:#2a3b4d; color:#fff; }
-  .elem-row .macro { color:#888; font-size:11px; }
-  textarea#exportC { width:100%; height:150px; background:#0d0d0d; color:#9f6;
-                      border:1px solid #444; font-family:monospace; font-size:11px;
-                      padding:6px; box-sizing:border-box; margin-top:6px; }
-  .btnrow { display:flex; gap:8px; margin-top:8px; flex-wrap:wrap; }
-  .hint-small { color:#888; font-size:11px; margin-top:4px; }
+  /* 布局参数控件 */
+  .param-group { margin-top:10px; }
+  .param-group h3 { font-size:12px; color:#999; margin:0 0 4px;
+                    border-bottom:1px solid #333; padding-bottom:2px; }
+  .param-row { display:grid; grid-template-columns:minmax(0, 1fr) 24px 58px 24px 34px;
+               align-items:center; gap:4px; margin:3px 0; padding:2px 4px;
+               border-radius:3px; }
+  .param-row.active { background:#1d2b3a; }
+  .param-row span { color:#bbb; font-size:12px; white-space:nowrap; overflow:hidden;
+                    text-overflow:ellipsis; }
+  .param-row input[type=number] { width:100%; box-sizing:border-box; background:#222;
+                                  border:1px solid #444; color:#fff;
+                                  font-family:inherit; font-size:12px;
+                                  text-align:right; padding:2px 4px; }
+  .param-row em { color:#888; font-style:normal; font-size:11px; text-align:right; }
+  .step { width:24px; height:24px; padding:0; background:#2a2a2a; color:var(--txt);
+          border:1px solid #444; font-weight:normal; font-size:14px; line-height:1;
+          cursor:pointer; }
+  .step:hover { background:#3a3a3a; }
+
+  /* 布局操作 */
+  .layout-actions { margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;
+                    align-items:center; }
+  #copyStatus { font-size:12px; color:var(--acc); min-height:16px; }
+  .layout-actions details { width:100%; margin-top:0; }
+  textarea#exportC { width:100%; height:120px; background:#0d0d0d; color:#9f6;
+                     border:1px solid #444; font-family:monospace; font-size:11px;
+                     padding:6px; box-sizing:border-box; margin-top:6px; }
+
+  @media (max-width:1100px), (max-height:620px) {
+    html, body { overflow:auto; }
+    main { grid-template-columns:1fr; overflow:visible; }
+    .controls { overflow:visible; }
+  }
 </style>
 </head>
 <body>
@@ -72,84 +99,94 @@
   <span class="hint">按固件 main_display_format / ui 渲染管线逐像素复刻 · 数据取自 firmware/src 位图</span>
 </header>
 <main>
-  <div class="stage">
-    <canvas id="panel" width="960" height="320"></canvas>
-    <canvas id="overlay" width="960" height="320"></canvas>
-    <div class="cap">可见屏 960×320 — 拖动 / 缩放手柄调整元素，蓝色=选中，灰色=其它</div>
-    <canvas id="fb" width="320" height="960" style="width:160px;height:480px;margin-top:12px"></canvas>
-    <div class="cap">帧缓冲 320×960（fb_x=ui_y, fb_y=ui_x）</div>
+  <div class="preview">
+    <div class="stage">
+      <canvas id="panel" width="960" height="320"></canvas>
+      <canvas id="overlay" width="960" height="320"></canvas>
+      <div class="cap">可见屏 960×320</div>
+    </div>
+    <div class="fb-preview">
+      <canvas id="fb" width="320" height="960"></canvas>
+      <div class="cap">帧缓冲 320×960<br>(fb_x=ui_y, fb_y=ui_x)</div>
+    </div>
   </div>
 
   <div class="controls">
-    <h2>读数</h2>
-    <div class="row"><label>数值 (value)</label>
-      <input type="text" id="inpValue" value="1.000000" spellcheck="false"></div>
-    <div class="row"><label>单位 (unit)</label>
-      <input type="text" id="inpUnit" value="VDC" spellcheck="false"></div>
-    <div class="row"><label>特殊态</label>
-      <select id="selSpecial">
-        <option value="0">正常 (白)</option>
-        <option value="1">OVERFLOW (红)</option>
-        <option value="2">无读数 ---- (灰)</option>
-      </select></div>
-    <div class="row"><label>无数据 '?'</label>
-      <input type="checkbox" id="inpNoData"><span class="sub">启动占位：7 个 '?' 槽 + Range ?</span></div>
+    <section class="scene-controls">
+      <h2>读数</h2>
+      <div class="row"><label>数值 (value)</label>
+        <input type="text" id="inpValue" value="1.000000" spellcheck="false"></div>
+      <div class="row"><label>单位 (unit)</label>
+        <input type="text" id="inpUnit" value="VDC" spellcheck="false"></div>
+      <div class="row"><label>特殊态</label>
+        <select id="selSpecial">
+          <option value="0">正常 (白)</option>
+          <option value="1">OVERFLOW (红)</option>
+          <option value="2">无读数 ---- (灰)</option>
+        </select></div>
+      <div class="row"><label>无数据 '?'</label>
+        <input type="checkbox" id="inpNoData"><span class="sub">启动占位：7 个 '?' 槽 + Range ?</span></div>
 
-    <h2>光标 / 闪烁</h2>
-    <div class="row"><label>POS</label>
-      <input type="range" id="inpPos" min="0" max="9" value="0">
-      <span class="sub" id="posVal">0</span></div>
-    <div class="row"><label>blink</label>
-      <input type="checkbox" id="inpBlink" checked></div>
+      <h2>光标 / 闪烁</h2>
+      <div class="row"><label>POS</label>
+        <input type="range" id="inpPos" min="0" max="9" value="0">
+        <span class="sub" id="posVal">0</span></div>
+      <div class="row"><label>blink</label>
+        <input type="checkbox" id="inpBlink" checked></div>
 
-    <h2>状态指示</h2>
-    <div class="status-grid">
-      <label><input type="checkbox" data-tag="0x08" data-bit="0x80"> HOLD</label>
-      <label><input type="checkbox" data-tag="0x06" data-bit="0x80"> REM</label>
-      <label><input type="checkbox" data-tag="0x09" data-bit="0x80"> REL</label>
-      <label><input type="checkbox" data-tag="0x08" data-bit="0x40"> TRIG</label>
-      <label><input type="checkbox" data-tag="0x09" data-bit="0x20"> AUTO</label>
-      <label><input type="checkbox" data-tag="0x09" data-bit="0x10"> ERR</label>
-    </div>
+      <h2>状态指示</h2>
+      <div class="status-grid">
+        <label><input type="checkbox" data-tag="0x08" data-bit="0x80"> HOLD</label>
+        <label><input type="checkbox" data-tag="0x06" data-bit="0x80"> REM</label>
+        <label><input type="checkbox" data-tag="0x09" data-bit="0x80"> REL</label>
+        <label><input type="checkbox" data-tag="0x08" data-bit="0x40"> TRIG</label>
+        <label><input type="checkbox" data-tag="0x09" data-bit="0x20"> AUTO</label>
+        <label><input type="checkbox" data-tag="0x09" data-bit="0x10"> ERR</label>
+      </div>
 
-    <div class="preset">
-      <button onclick="applyPreset('nop')">占位 (Range ? + ???)</button>
-      <button onclick="applyPreset('normal')">1.000000 VDC</button>
-      <button onclick="applyPreset('ovfl')">OVERFLOW</button>
-      <button onclick="applyPreset('noread')">---- 无读数</button>
-      <button onclick="applyPreset('dbm')">0.00 dBm</button>
-      <button onclick="applyPreset('hold')">HOLD + REM + 光标</button>
-    </div>
+      <div class="preset">
+        <button type="button" onclick="applyPreset('nop')">占位 (Range ? + ???)</button>
+        <button type="button" onclick="applyPreset('normal')">1.000000 VDC</button>
+        <button type="button" onclick="applyPreset('ovfl')">OVERFLOW</button>
+        <button type="button" onclick="applyPreset('noread')">---- 无读数</button>
+        <button type="button" onclick="applyPreset('dbm')">0.00 dBm</button>
+        <button type="button" onclick="applyPreset('hold')">HOLD + REM + 光标</button>
+      </div>
 
-    <h2>颜色样本 (RGB565)</h2>
-    <div class="swatches">
-      <div class="swatch" style="background:#fff" title="正常 0xFFFF"></div>
-      <div class="swatch" style="background:#f00" title="OVERFLOW 0xF800"></div>
-      <div class="swatch" style="background:#888" title="占位 0xC618"></div>
-      <div class="swatch" style="background:#444" title="分隔线 0x8410"></div>
-    </div>
+      <h2>颜色样本 (RGB565)</h2>
+      <div class="swatches">
+        <div class="swatch" style="background:#fff" title="正常 0xFFFF"></div>
+        <div class="swatch" style="background:#f00" title="OVERFLOW 0xF800"></div>
+        <div class="swatch" style="background:#888" title="占位 0xC618"></div>
+        <div class="swatch" style="background:#444" title="分隔线 0x8410"></div>
+      </div>
 
-    <h2>devtools：元素 / 坐标</h2>
-    <div class="hint-small">点选面板中的元素（或下方列表）→ 拖动移动、拖右下手柄缩放。坐标实时显示。</div>
-    <div id="selInfo">未选中</div>
-    <div id="elemList" style="margin-top:6px"></div>
-    <div class="btnrow">
-      <button onclick="exportLayout()">导出 C 宏</button>
-      <button class="ghost" onclick="resetLayout()">重置布局</button>
-      <button class="ghost" onclick="fitPanel()">缩放到容器</button>
-    </div>
-    <textarea id="exportC" placeholder="点击“导出 C 宏”后此处显示可粘贴到 main_display.h 的 #define 值…" readonly></textarea>
+      <details>
+        <summary>仿真 vs 固件一致性</summary>
+        <p style="color:#bbb;font-size:12px;line-height:1.5">
+        布局常量（960×320、顶带 y0..24、读数带 96 高、分隔线、光标槽、右对齐状态块、
+        7 个 '?' 槽）与 main_display.h 逐值一致；右对齐算法 main_display_layout_value、
+        光标位置 main_display_cursor_x、特殊色 main_display_special_color、status 右对齐
+        求和均从 C 移植。位图逐字节同源，1bpp MSB-first 行打包。闪烁周期 250ms 与
+        update_blink() 一致。像素 → 帧缓冲转置（fb_x=ui_y, fb_y=ui_x）在右侧 fb 预览可见。
+        </p>
+      </details>
+    </section>
 
-    <details>
-      <summary>仿真 vs 固件一致性</summary>
-      <p style="color:#bbb;font-size:12px;line-height:1.5">
-      布局常量（960×320、顶带 y0..24、读数带 96 高、分隔线、光标槽、右对齐状态块、
-      7 个 '?' 槽）与 main_display.h 逐值一致；右对齐算法 main_display_layout_value、
-      光标位置 main_display_cursor_x、特殊色 main_display_special_color、status 右对齐
-      求和均从 C 移植。位图逐字节同源，1bpp MSB-first 行打包。闪烁周期 250ms 与
-      update_blink() 一致。像素 → 帧缓冲转置（fb_x=ui_y, fb_y=ui_x）在右侧 fb 预览可见。
-      </p>
-    </details>
+    <section class="layout-controls">
+      <h2>布局参数</h2>
+      <div id="layoutParams"></div>
+    </section>
+
+    <section class="layout-actions">
+      <button type="button" onclick="exportLayout()">复制 C 宏</button>
+      <button type="button" class="ghost" onclick="resetLayout()">重置布局</button>
+      <span id="copyStatus" role="status"></span>
+      <details>
+        <summary>查看导出内容</summary>
+        <textarea id="exportC" readonly></textarea>
+      </details>
+    </section>
   </div>
 </main>
 
@@ -227,6 +264,40 @@ function setLayoutParam(id, value) {
 function adjustLayoutParam(id, delta) {
   const param = layoutParam(id);
   if (param) setLayoutParam(id, L[id] + delta * param.step);
+}
+
+/* 按 group（保持 LAYOUT_PARAMS 首次出现顺序）生成参数控件；
+ * 无头环境 #layoutParams 不存在或非真实 DOM 时直接 no-op。 */
+function buildLayoutControls() {
+  const host = document.getElementById("layoutParams");
+  if (!host || typeof host.appendChild !== "function") return;
+  const groups = new Map();
+  LAYOUT_PARAMS.forEach(param => {
+    if (!groups.has(param.group)) groups.set(param.group, []);
+    groups.get(param.group).push(param);
+  });
+  host.innerHTML = "";
+  groups.forEach((params, group) => {
+    const section = document.createElement("section");
+    section.className = "param-group";
+    section.innerHTML = `<h3>${group}</h3>`;
+    params.forEach(param => {
+      const row = document.createElement("label");
+      row.className = "param-row";
+      row.dataset.param = param.id;
+      row.innerHTML = `<span>${param.label}</span>` +
+        `<button type="button" class="step" data-delta="-1" aria-label="减少 ${param.label}">−</button>` +
+        `<input type="number" min="${param.min}" max="${param.max}" step="${param.step}" value="${L[param.id]}">` +
+        `<button type="button" class="step" data-delta="1" aria-label="增加 ${param.label}">+</button>` +
+        `<em>${param.unit}</em>`;
+      row.querySelector("input").addEventListener("input", event =>
+        setLayoutParam(param.id, Number(event.target.value)));
+      row.querySelectorAll("button").forEach(button => button.addEventListener("click", () =>
+        adjustLayoutParam(param.id, Number(button.dataset.delta))));
+      section.appendChild(row);
+    });
+    host.appendChild(section);
+  });
 }
 
 const topBandY = () => 0;
@@ -602,6 +673,7 @@ function applyDrag() {
 
 function buildElemList() {
   const host = document.getElementById("elemList");
+  if (!host) return;
   host.innerHTML = "";
   ELEMENTS.forEach(el => {
     const row = document.createElement("div");
@@ -615,6 +687,7 @@ function buildElemList() {
 }
 function updateInfo() {
   const host = document.getElementById("selInfo");
+  if (!host) return;
   const el = ELEMENTS.find(e => e.id === selId);
   if (!el) { host.innerHTML = "未选中 — 点击面板中的元素或下方列表"; }
   else {
@@ -734,6 +807,7 @@ setInterval(() => {
   }
 }, 250);
 
+buildLayoutControls();
 render();
 </script>
 </body>
