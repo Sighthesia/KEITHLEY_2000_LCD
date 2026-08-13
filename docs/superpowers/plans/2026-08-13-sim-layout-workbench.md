@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 将 K2000 布局仿真器改造成在 `1366×768` 桌面视口内无页面滚动、可通过直接数值输入精确调参的工作台。
+**Goal:** 将 K2000 布局仿真器改造成在 `1920×1080` 桌面视口内无页面滚动、可通过直接数值输入精确调参的工作台。
 
 **Architecture:** 继续以 `sim/index.html` 的 `L` 对象为唯一布局状态。新增声明式参数元数据，将参数行、范围裁剪、`+/-` 微调、选中元素高亮和导出文本都收敛到这一元数据；保留 overlay 作为显示层，不再将画布拖拽作为编辑入口。DOM 初始化必须保留对 `sim/verify.js` 最小 mock 的防御。
 
@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- `1366×768` 桌面视口不得产生页面滚动条；更小视口允许预览区或控制台内部滚动。
+- `1920×1080` 桌面视口不得产生页面滚动条；更小视口允许预览区或控制台内部滚动。
 - 不修改 `main_display.h`、`main_display.c` 或任何固件文件。
 - `L` 是唯一的可变布局模型；默认值继续逐项匹配 `main_display.h`。
 - 每次参数变动都必须立即调用 `render()` 更新主屏与帧缓冲缩略图。
@@ -114,7 +114,7 @@ git add sim/index.html sim/verify.js
 git commit -m "refactor(sim): centralize editable layout parameters"
 ```
 
-### Task 2: 改造为 1366×768 无滚动双栏工作台
+### Task 2: 改造为 1920×1080 无滚动双栏工作台
 
 **Files:**
 - Modify: `sim/index.html:6-155`
@@ -227,13 +227,13 @@ render();
 
 `buildLayoutControls()` 必须在 `#layoutParams` 不存在的无头环境下直接返回。
 
-- [ ] **Step 6: 打开浏览器验证 1366×768 工作台布局**
+- [ ] **Step 6: 打开浏览器验证 1920×1080 工作台布局**
 
 Run: `python3 -m http.server 8000 --directory .`
 
 Open: `http://localhost:8000/sim/`
 
-在浏览器开发者工具模拟 `1366×768`，确认：页面无滚动条；主屏与帧缓冲预览并排；全部 11 项参数可见；读数、状态、预设和导出操作仍可用。
+在浏览器开发者工具模拟 `1920×1080`，确认：页面无滚动条；主屏 1:1（960×320）与帧缓冲缩略图并排；全部 11 项参数可见；读数、状态、预设和导出操作仍可用。
 
 - [ ] **Step 7: 提交无滚动工作台界面**
 
@@ -342,7 +342,8 @@ git commit -m "feat(sim): synchronize layout inputs and C export"
 ```markdown
 ## 布局工作台
 
-- 设计目标为 `1366×768` 桌面视口无页面滚动；主屏与帧缓冲缩略图并排显示。
+- 设计目标为 `1920×1080` 桌面视口无页面滚动；主屏以 1:1 像素显示（960×320），
+  帧缓冲 320×960 缩略图并排预览。窗口更小时自动回退为单栏可滚动布局。
 - “布局参数”按垂直布局、光标、顶部文本和无数据占位分组。每项可直接输入整数，
   或用 `−` / `+` 按钮逐像素（问号槽按格）微调。
 - 修改参数后，选中的画布区域会高亮，主屏和帧缓冲预览立即更新；输入会被裁剪到可用范围。
