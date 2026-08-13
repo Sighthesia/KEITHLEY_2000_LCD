@@ -182,6 +182,53 @@ const L = {
   statusPadX: 0,     /* 状态块右缘额外间距（devtools 可拖）         */
 };
 
+/* ---- 布局参数元数据：每个可调参数声明范围/单位/所属画布元素。
+ * 数值输入与画布拖拽都经由 setLayoutParam / assignLayoutParam 统一裁剪，
+ * 范围规则唯一定义在这里，不会分叉。顺序与界面分组一致。 ---- */
+const LAYOUT_PARAMS = [
+  { id:"topBandH", label:"顶带高度", group:"垂直布局", unit:"px",
+    min:8, max:200, step:1, elementId:"top_band" },
+  { id:"sepH", label:"分隔线高度", group:"垂直布局", unit:"px",
+    min:1, max:8, step:1, elementId:"separator" },
+  { id:"readingH", label:"读数带高度", group:"垂直布局", unit:"px",
+    min:24, max:200, step:1, elementId:"reading" },
+  { id:"cursorGap", label:"光标间距", group:"光标", unit:"px",
+    min:0, max:100, step:1, elementId:"cursor" },
+  { id:"cursorH", label:"光标高度", group:"光标", unit:"px",
+    min:1, max:40, step:1, elementId:"cursor" },
+  { id:"unitPadX", label:"单位左边距", group:"顶部文本", unit:"px",
+    min:0, max:400, step:1, elementId:"unit" },
+  { id:"statusPadX", label:"状态右边距", group:"顶部文本", unit:"px",
+    min:0, max:300, step:1, elementId:"status" },
+  { id:"statusGap", label:"状态标签间距", group:"顶部文本", unit:"px",
+    min:0, max:64, step:1, elementId:"status" },
+  { id:"noDataSlots", label:"问号槽数", group:"无数据占位", unit:"slots",
+    min:1, max:20, step:1, elementId:"nodata" },
+  { id:"noDataDX", label:"问号水平偏移", group:"无数据占位", unit:"px",
+    min:-480, max:480, step:1, elementId:"nodata" },
+  { id:"noDataDY", label:"问号垂直偏移", group:"无数据占位", unit:"px",
+    min:-160, max:160, step:1, elementId:"nodata" },
+];
+
+function layoutParam(id) { return LAYOUT_PARAMS.find(param => param.id === id); }
+
+/* 统一裁剪赋值：范围规则唯一定义在 LAYOUT_PARAMS，拖拽与数值输入都走这里。 */
+function assignLayoutParam(id, value) {
+  const param = layoutParam(id);
+  if (!param || !Number.isFinite(value)) return false;
+  L[id] = clamp(Math.round(value), param.min, param.max);
+  return true;
+}
+function setLayoutParam(id, value) {
+  if (!assignLayoutParam(id, value)) return;
+  selId = layoutParam(id).elementId;
+  render();
+}
+function adjustLayoutParam(id, delta) {
+  const param = layoutParam(id);
+  if (param) setLayoutParam(id, L[id] + delta * param.step);
+}
+
 const topBandY = () => 0;
 const readingY = () => topBandY() + L.topBandH;
 const sepY = () => readingY();
@@ -385,7 +432,7 @@ function render() {
 /* ============================================================
  * devtools 层：每个可编辑元素定义在 ELEMENTS 里。
  *  - box()        当前几何（x,y,w,h），随 L 实时派生
- *  - move(dx,dy)  拖拽时如何改写 L
+ *  - move(dx,dy)  拖拽时如何改写 L（经 assignLayoutParam 统一裁剪到参数范围）
  *  - resize()     是否允许缩放（右下手柄）
  *  - macro        对应的 main_display.h 宏名（导出用）
  * ============================================================ */
@@ -393,40 +440,41 @@ const ELEMENTS = [
   { id:"top_band", name:"顶带 (unit/status)", macro:"MAIN_DISPLAY_TOP_BAND_H",
     color:"#4c9aff",
     box:() => ({ x:0, y:topBandY(), w:UI_W, h:L.topBandH }),
-    move:(dx,dy) => { L.topBandH = clamp(L.topBandH + dy, 8, 200); },
+    move:(dx,dy) => { assignLayoutParam("topBandH", L.topBandH + dy); },
     resize:true,
     resizeAxis:"v",
   },
   { id:"separator", name:"分隔线", macro:"MAIN_DISPLAY_SEP_Y_TOP_BAND",
     color:"#8aa0b0",
     box:() => ({ x:0, y:sepY(), w:UI_W, h:L.sepH }),
-    move:(dx,dy) => { L.topBandH = clamp(sepY() + dy, 0, 260); },
+    move:(dx,dy) => { assignLayoutParam("topBandH", sepY() + dy); },
     resize:false,
   },
   { id:"reading", name:"读数带 (大数字)", macro:"READING_H / SEP_Y",
     color:"#ffb347",
     box:() => ({ x:0, y:readingY(), w:UI_W, h:L.readingH }),
-    move:(dx,dy) => { L.topBandH = clamp(readingY() + dy, 0, 260); },
+    move:(dx,dy) => { assignLayoutParam("topBandH", readingY() + dy); },
     resize:true,
     resizeAxis:"v",
   },
   { id:"cursor", name:"光标下划线", macro:"MAIN_DISPLAY_CURSOR_GAP / _H",
     color:"#7bd88f",
     box:() => ({ x:0, y:cursorY(), w:UI_W, h:L.cursorH }),
-    move:(dx,dy) => { L.cursorGap = clamp(L.cursorGap + dy, 0, 100); },
+    move:(dx,dy) => { assignLayoutParam("cursorGap", L.cursorGap + dy); },
     resize:true,
     resizeAxis:"v",
   },
   { id:"nodata", name:"无数据 '?' 槽", macro:"MAIN_DISPLAY_NO_DATA_SLOTS",
     color:"#c9a0ff",
     box:() => ({ x:noDataX(), y:noDataY(), w:L.noDataSlots*DIGIT_W, h:TEXT_H }),
-    move:(dx,dy) => { L.noDataDX += dx; L.noDataDY += dy; },
+    move:(dx,dy) => { assignLayoutParam("noDataDX", L.noDataDX + dx);
+                      assignLayoutParam("noDataDY", L.noDataDY + dy); },
     resize:false,
   },
   { id:"unit", name:"单位文本 (左)", macro:"unit_x (左对齐)",
     color:"#5ac8fa",
     box:() => { const w = unitWidth(); return { x:L.unitPadX, y:topBandY(), w, h:TEXT_H }; },
-    move:(dx,dy) => { L.unitPadX = clamp(L.unitPadX + dx, 0, 400); },
+    move:(dx,dy) => { assignLayoutParam("unitPadX", L.unitPadX + dx); },
     resize:false,
   },
   { id:"status", name:"状态块 (右对齐)", macro:"MAIN_DISPLAY_STATUS_LABEL_GAP / 右缘",
@@ -434,7 +482,7 @@ const ELEMENTS = [
     box:() => { const labels = activeLabels(readStatus());
                 return { x:statusX(labels), y:topBandY(),
                          w:statusBlockWidth(labels), h:TEXT_H }; },
-    move:(dx,dy) => { L.statusPadX = clamp(L.statusPadX - dx, 0, 300); },
+    move:(dx,dy) => { assignLayoutParam("statusPadX", L.statusPadX - dx); },
     resize:false,
   },
 ];
@@ -542,9 +590,9 @@ function applyDrag() {
   if (drag.mode === "resize") {
     if (el.resizeAxis === "v") {
       const b = el.box();
-      if (el.id === "reading") L.readingH = clamp(L.readingH + dy, 24, 200);
-      else if (el.id === "cursor") L.cursorH = clamp(L.cursorH + dy, 1, 40);
-      else if (el.id === "top_band") L.topBandH = clamp(b.y + b.h + dy, 8, 200);
+      if (el.id === "reading") assignLayoutParam("readingH", L.readingH + dy);
+      else if (el.id === "cursor") assignLayoutParam("cursorH", L.cursorH + dy);
+      else if (el.id === "top_band") assignLayoutParam("topBandH", b.y + b.h + dy);
     }
   } else {
     el.move(dx, dy);
@@ -581,8 +629,8 @@ function updateInfo() {
 }
 
 /* ---- 导出 C 宏：把 L 转成可粘贴进 main_display.h 的 #define ---- */
-function exportLayout() {
-  const lines = [
+function exportLayoutText() {
+  return [
     "/* 由 sim 仿真器导出 — 覆盖 main_display.h 对应宏 */",
     `#define MAIN_DISPLAY_TOP_BAND_H ${L.topBandH}u`,
     `#define MAIN_DISPLAY_READING_H ${L.readingH}u`,
@@ -596,11 +644,19 @@ function exportLayout() {
     `/* unitPadX   = ${L.unitPadX} */`,
     `/* statusPadX = ${L.statusPadX} */`,
     `/* noDataDX   = ${L.noDataDX}  noDataDY = ${L.noDataDY} */`,
-  ];
-  document.getElementById("exportC").value = lines.join("\n");
-  const sel = document.getElementById("exportC");
-  sel.select();
-  sel.setSelectionRange(0, sel.value.length);
+  ].join("\n");
+}
+function exportLayout() {
+  const text = exportLayoutText();
+  const area = document.getElementById("exportC");
+  if (area) {
+    area.value = text;
+    if (typeof area.select === "function") {
+      area.select();
+      if (typeof area.setSelectionRange === "function")
+        area.setSelectionRange(0, area.value.length);
+    }
+  }
   try { document.execCommand("copy"); } catch (e) {}
 }
 

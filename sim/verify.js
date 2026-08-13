@@ -79,9 +79,9 @@ function report(name, ok) {
     const px = new Uint8Array(960 * 320);
     return { px, fillStyle: "",
       fillRect(x, y, w, h) {
-        if (this.fillStyle === "#000") return;
         for (let yy = y; yy < y + h; yy++) for (let xx = x; xx < x + w; xx++)
-          if (xx >= 0 && yy >= 0 && xx < 960 && yy < 320) px[yy * 960 + xx] = 1;
+          if (xx >= 0 && yy >= 0 && xx < 960 && yy < 320)
+            px[yy * 960 + xx] = (this.fillStyle === "#000") ? 0 : 1;
       },
       clearRect() {}, getImageData() { return { data: new Uint8ClampedArray(960 * 320 * 4) }; },
       createImageData(w, h) { return { data: new Uint8ClampedArray(w * h * 4) }; },
@@ -108,7 +108,19 @@ function report(name, ok) {
   };
   global.window = { __blinkVis: true };
   global.setInterval = () => 0;
-  eval(fontJs + "\n" + script);
+  /* 布局参数 API：set / adjust / clamp / reset / export（Task 1） */
+  const paramTests = `
+    report("layout param API", typeof setLayoutParam === "function" &&
+                               typeof adjustLayoutParam === "function");
+    setLayoutParam("topBandH", 40);
+    report("layout param set", L.topBandH === 40);
+    adjustLayoutParam("topBandH", -1000);
+    report("layout param clamp", L.topBandH === 8);
+    resetLayout();
+    report("layout param reset", L.topBandH === 24 && L.cursorH === 4);
+    report("layout export", /MAIN_DISPLAY_TOP_BAND_H 24u/.test(exportLayoutText()));
+  `;
+  eval(fontJs + "\n" + script + "\n" + paramTests);
 
   let lit = 0;
   for (const v of panelCtx.px) if (v) lit++;
