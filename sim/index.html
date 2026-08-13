@@ -15,16 +15,18 @@
   header .hint { color:#888; font-size:11px; }
   main { min-height:0; padding:8px 12px 12px; display:grid;
          grid-template-columns:minmax(0, 1fr) 430px; gap:14px; overflow:hidden; }
-  .preview { min-width:0; min-height:0; display:flex; align-items:flex-start;
-             gap:10px; overflow:auto; }
-  .stage { position:relative; width:960px; flex:0 0 960px; }
-  canvas#panel, canvas#overlay { width:960px; height:320px; }
+  .preview { --panel-w:min(960px, calc((100% - 10px) * 0.857142857));
+             min-width:0; min-height:0; display:flex; align-items:flex-start;
+             gap:10px; overflow:hidden; }
+  .stage { position:relative; width:var(--panel-w); flex:0 0 var(--panel-w); }
+  canvas#panel, canvas#overlay { width:var(--panel-w); height:auto; aspect-ratio:3 / 1; }
   canvas#panel { background:#000; border:1px solid #555;
                  image-rendering:pixelated; display:block; }
   canvas#overlay { position:absolute; left:0; top:0; image-rendering:pixelated;
                    display:block; cursor:default; }
-  .fb-preview { flex:0 0 174px; }
-  canvas#fb { width:160px !important; height:480px !important; margin:0 !important;
+  .fb-preview { flex:0 1 174px; min-width:0; }
+  canvas#fb { width:min(160px, 100%) !important; height:auto !important;
+              aspect-ratio:1 / 3; margin:0 !important;
               background:#000; border:1px solid #555;
               image-rendering:pixelated; display:block; }
   .cap { font-size:11px; color:#888; margin-top:4px; text-align:center; }
@@ -89,10 +91,11 @@
                      border:1px solid #444; font-family:monospace; font-size:11px;
                      padding:6px; box-sizing:border-box; margin-top:6px; }
 
-  @media (max-width:1520px), (max-height:820px) {
+  @media (max-width:800px) {
     html, body { overflow:auto; }
-    main { grid-template-columns:1fr; overflow:visible; }
+    main { grid-template-columns:minmax(0, 1fr); overflow:visible; }
     .controls { overflow:visible; }
+    .preview { overflow-x:auto; }
   }
 </style>
 </head>
