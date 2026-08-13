@@ -203,9 +203,9 @@
 "use strict";
 
 /* ============================================================
- * 布局模型：默认值与 main_display.h 一致；devtools 拖拽会改写 L。
+ * 布局模型：默认值与 main_display.h 一致；参数面板会改写 L。
  * 所有派生值（readingY / cursorY / noDataX …）都用 L 实时计算，
- * 这样拖动任何元素后整幅画面立即一致地重排。
+ * 这样修改任何参数后整幅画面立即一致地重排。
  * ============================================================ */
 const UI_W = 960, UI_H = 320;
 const PLACEHOLDER_COLOR = 0xC618;
@@ -221,10 +221,10 @@ const L = {
   cursorH: 4,        /* MAIN_DISPLAY_CURSOR_H                       */
   statusGap: 4,      /* MAIN_DISPLAY_STATUS_LABEL_GAP               */
   noDataSlots: 7,    /* MAIN_DISPLAY_NO_DATA_SLOTS                  */
-  noDataDX: 0,       /* '?' 块水平偏移（devtools 可拖）             */
+  noDataDX: 0,       /* '?' 块水平偏移                             */
   noDataDY: 0,       /* '?' 块垂直偏移                              */
-  unitPadX: 0,       /* 单位文本左内边距（devtools 可拖）           */
-  statusPadX: 0,     /* 状态块右缘额外间距（devtools 可拖）         */
+  unitPadX: 0,       /* 单位文本左内边距                           */
+  statusPadX: 0,     /* 状态块右缘额外间距                         */
 };
 
 /* ---- 布局参数元数据：每个可调参数声明范围/单位/所属画布元素。
