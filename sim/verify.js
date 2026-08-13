@@ -119,6 +119,10 @@ function report(name, ok) {
     resetLayout();
     report("layout param reset", L.topBandH === 24 && L.cursorH === 4);
     report("layout export", /MAIN_DISPLAY_TOP_BAND_H 24u/.test(exportLayoutText()));
+    report("layout sync fn", typeof syncLayoutControls === "function");
+    let exportNoThrow = true;
+    try { exportLayout(); } catch (e) { exportNoThrow = false; }
+    report("layout export no-exception", exportNoThrow);
   `;
   eval(fontJs + "\n" + script + "\n" + paramTests);
 

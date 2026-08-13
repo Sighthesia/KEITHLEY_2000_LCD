@@ -7,13 +7,13 @@
   :root { --bg:#111; --panel:#000; --txt:#ddd; --acc:#4c9aff; }
   html, body { height:100%; overflow:hidden; }
   body { margin:0; background:var(--bg); color:var(--txt);
-         font-family:"DejaVu Sans Mono",monospace; font-size:14px;
+         font-family:"DejaVu Sans Mono",monospace; font-size:13px;
          display:grid; grid-template-rows:auto minmax(0, 1fr); }
-  header { padding:6px 16px; border-bottom:1px solid #333; display:flex;
-           gap:16px; align-items:baseline; }
-  header h1 { font-size:15px; margin:0; color:#fff; }
-  header .hint { color:#888; font-size:12px; }
-  main { min-height:0; padding:12px; display:grid;
+  header { padding:4px 12px; border-bottom:1px solid #333; display:flex;
+           gap:12px; align-items:baseline; }
+  header h1 { font-size:14px; margin:0; color:#fff; }
+  header .hint { color:#888; font-size:11px; }
+  main { min-height:0; padding:8px 12px 12px; display:grid;
          grid-template-columns:minmax(0, 1fr) 430px; gap:14px; overflow:hidden; }
   .preview { min-width:0; min-height:0; display:flex; align-items:flex-start;
              gap:10px; overflow:auto; }
@@ -22,63 +22,66 @@
   canvas#panel { background:#000; border:1px solid #555;
                  image-rendering:pixelated; display:block; }
   canvas#overlay { position:absolute; left:0; top:0; image-rendering:pixelated;
-                   display:block; cursor:crosshair; }
+                   display:block; cursor:default; }
   .fb-preview { flex:0 0 94px; }
   canvas#fb { width:80px !important; height:240px !important; margin:0 !important;
               background:#000; border:1px solid #555;
               image-rendering:pixelated; display:block; }
   .cap { font-size:11px; color:#888; margin-top:4px; text-align:center; }
   .controls { min-width:0; max-width:none; overflow:auto; padding-right:2px; }
-  .controls h2 { font-size:13px; color:var(--acc); margin:10px 0 6px; }
+  .controls h2 { font-size:13px; color:var(--acc); margin:8px 0 4px; }
   .controls h2:first-child { margin-top:0; }
-  .row { display:flex; align-items:center; gap:8px; margin:5px 0; }
-  .row label { width:110px; color:#bbb; flex:0 0 110px; }
+  .scene-fold { margin-top:0; }
+  .scene-fold summary { font-size:13px; padding:3px 0; color:#bbb; }
+  .scene-body { margin-top:4px; }
+  .row { display:flex; align-items:center; gap:8px; margin:4px 0; }
+  .row label { width:110px; color:#bbb; flex:0 0 110px; font-size:12px; }
   .row input[type=text] { flex:1; min-width:0; background:#222; border:1px solid #444;
-                          color:#fff; padding:3px 6px; font-family:inherit; }
+                          color:#fff; padding:2px 6px; font-family:inherit; font-size:12px; }
   .row input[type=range] { flex:1; min-width:0; }
-  .row input[type=checkbox] { width:16px; height:16px; }
-  .row .sub { color:#888; font-size:12px; }
-  .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px;
-                 margin:6px 0; }
-  .status-grid label { display:flex; align-items:center; gap:6px; color:#bbb;
-                       font-size:13px; width:auto; }
+  .row input[type=checkbox] { width:15px; height:15px; }
+  .row .sub { color:#888; font-size:11px; }
+  .status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:2px 4px;
+                 margin:4px 0; }
+  .status-grid label { display:flex; align-items:center; gap:5px; color:#bbb;
+                       font-size:12px; width:auto; }
   select, button { background:#222; color:#fff; border:1px solid #444;
-                   padding:4px 8px; font-family:inherit; font-size:13px; }
+                   padding:3px 7px; font-family:inherit; font-size:12px; }
   button { background:var(--acc); color:#000; border:none; font-weight:bold;
            cursor:pointer; }
   button.ghost { background:#2a2a2a; color:var(--txt); font-weight:normal;
                  border:1px solid #444; }
-  .preset { margin-top:10px; }
+  .preset { margin-top:8px; }
   .preset button { background:#2a2a2a; color:var(--txt); font-weight:normal;
-                   border:1px solid #444; margin:2px; padding:3px 8px; }
-  .swatches { margin-top:10px; display:flex; gap:8px; align-items:center; }
-  .swatch { width:22px; height:22px; border:1px solid #666; }
-  details { margin-top:8px; }
-  summary { cursor:pointer; color:var(--acc); font-size:13px; }
+                   border:1px solid #444; margin:2px; padding:2px 7px; font-size:12px; }
+  .swatches { margin-top:8px; display:flex; gap:8px; align-items:center; }
+  .swatch { width:20px; height:20px; border:1px solid #666; }
+  details { margin-top:6px; }
+  summary { cursor:pointer; color:var(--acc); font-size:12px; }
   .mono { font-family:monospace; }
 
   /* 布局参数控件 */
-  .param-group { margin-top:10px; }
-  .param-group h3 { font-size:12px; color:#999; margin:0 0 4px;
-                    border-bottom:1px solid #333; padding-bottom:2px; }
+  .param-group { margin-top:6px; }
+  .param-group h3 { font-size:11px; color:#999; margin:0 0 2px;
+                    border-bottom:1px solid #333; padding-bottom:1px; }
   .param-row { display:grid; grid-template-columns:minmax(0, 1fr) 24px 58px 24px 34px;
-               align-items:center; gap:4px; margin:3px 0; padding:2px 4px;
+               align-items:center; gap:4px; margin:2px 0; padding:0 4px;
                border-radius:3px; }
   .param-row.active { background:#1d2b3a; }
   .param-row span { color:#bbb; font-size:12px; white-space:nowrap; overflow:hidden;
                     text-overflow:ellipsis; }
-  .param-row input[type=number] { width:100%; box-sizing:border-box; background:#222;
-                                  border:1px solid #444; color:#fff;
+  .param-row input[type=number] { width:100%; box-sizing:border-box; height:22px;
+                                  background:#222; border:1px solid #444; color:#fff;
                                   font-family:inherit; font-size:12px;
-                                  text-align:right; padding:2px 4px; }
-  .param-row em { color:#888; font-style:normal; font-size:11px; text-align:right; }
-  .step { width:24px; height:24px; padding:0; background:#2a2a2a; color:var(--txt);
-          border:1px solid #444; font-weight:normal; font-size:14px; line-height:1;
-          cursor:pointer; }
+                                  text-align:right; padding:1px 4px; }
+  .param-row em { color:#888; font-style:normal; font-size:10px; text-align:right; }
+  .step { width:22px; height:22px; padding:0; justify-self:center;
+          background:#2a2a2a; color:var(--txt); border:1px solid #444;
+          font-weight:normal; font-size:13px; line-height:1; cursor:pointer; }
   .step:hover { background:#3a3a3a; }
 
   /* 布局操作 */
-  .layout-actions { margin-top:12px; display:flex; flex-wrap:wrap; gap:8px;
+  .layout-actions { margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;
                     align-items:center; }
   #copyStatus { font-size:12px; color:var(--acc); min-height:16px; }
   .layout-actions details { width:100%; margin-top:0; }
@@ -113,6 +116,9 @@
 
   <div class="controls">
     <section class="scene-controls">
+      <details class="scene-fold">
+        <summary>场景控制：读数 / 光标 / 状态 / 预设</summary>
+        <div class="scene-body">
       <h2>读数</h2>
       <div class="row"><label>数值 (value)</label>
         <input type="text" id="inpValue" value="1.000000" spellcheck="false"></div>
@@ -170,6 +176,8 @@
         求和均从 C 移植。位图逐字节同源，1bpp MSB-first 行打包。闪烁周期 250ms 与
         update_blink() 一致。像素 → 帧缓冲转置（fb_x=ui_y, fb_y=ui_x）在右侧 fb 预览可见。
         </p>
+      </details>
+        </div>
       </details>
     </section>
 
@@ -257,13 +265,25 @@ function assignLayoutParam(id, value) {
   return true;
 }
 function setLayoutParam(id, value) {
-  if (!assignLayoutParam(id, value)) return;
+  if (!assignLayoutParam(id, value)) { syncLayoutControls(); return; }
   selId = layoutParam(id).elementId;
   render();
 }
 function adjustLayoutParam(id, delta) {
   const param = layoutParam(id);
   if (param) setLayoutParam(id, L[id] + delta * param.step);
+}
+
+/* 同步控件输入与选中高亮：只更新已存在的行，不重建 DOM，避免输入焦点丢失。 */
+function syncLayoutControls() {
+  if (typeof document.querySelectorAll !== "function") return;
+  document.querySelectorAll(".param-row").forEach(row => {
+    const param = layoutParam(row.dataset.param);
+    if (!param) return;
+    const input = row.querySelector("input");
+    if (input) input.value = L[param.id];
+    row.classList.toggle("active", param.elementId === selId);
+  });
 }
 
 /* 按 group（保持 LAYOUT_PARAMS 首次出现顺序）生成参数控件；
@@ -498,63 +518,37 @@ function render() {
   /* 帧缓冲转置预览 */
   renderFB(document.getElementById("fb").getContext("2d"), ctx);
   drawOverlay();
+  syncLayoutControls();
 }
 
 /* ============================================================
- * devtools 层：每个可编辑元素定义在 ELEMENTS 里。
- *  - box()        当前几何（x,y,w,h），随 L 实时派生
- *  - move(dx,dy)  拖拽时如何改写 L（经 assignLayoutParam 统一裁剪到参数范围）
- *  - resize()     是否允许缩放（右下手柄）
- *  - macro        对应的 main_display.h 宏名（导出用）
+ * 高亮层：ELEMENTS 只保留当前选中元素描边所需的几何与颜色。
+ *  - box()   当前几何（x,y,w,h），随 L 实时派生
+ *  - color   选中描边颜色
  * ============================================================ */
 const ELEMENTS = [
-  { id:"top_band", name:"顶带 (unit/status)", macro:"MAIN_DISPLAY_TOP_BAND_H",
-    color:"#4c9aff",
+  { id:"top_band", name:"顶带 (unit/status)", color:"#4c9aff",
     box:() => ({ x:0, y:topBandY(), w:UI_W, h:L.topBandH }),
-    move:(dx,dy) => { assignLayoutParam("topBandH", L.topBandH + dy); },
-    resize:true,
-    resizeAxis:"v",
   },
-  { id:"separator", name:"分隔线", macro:"MAIN_DISPLAY_SEP_Y_TOP_BAND",
-    color:"#8aa0b0",
+  { id:"separator", name:"分隔线", color:"#8aa0b0",
     box:() => ({ x:0, y:sepY(), w:UI_W, h:L.sepH }),
-    move:(dx,dy) => { assignLayoutParam("topBandH", sepY() + dy); },
-    resize:false,
   },
-  { id:"reading", name:"读数带 (大数字)", macro:"READING_H / SEP_Y",
-    color:"#ffb347",
+  { id:"reading", name:"读数带 (大数字)", color:"#ffb347",
     box:() => ({ x:0, y:readingY(), w:UI_W, h:L.readingH }),
-    move:(dx,dy) => { assignLayoutParam("topBandH", readingY() + dy); },
-    resize:true,
-    resizeAxis:"v",
   },
-  { id:"cursor", name:"光标下划线", macro:"MAIN_DISPLAY_CURSOR_GAP / _H",
-    color:"#7bd88f",
+  { id:"cursor", name:"光标下划线", color:"#7bd88f",
     box:() => ({ x:0, y:cursorY(), w:UI_W, h:L.cursorH }),
-    move:(dx,dy) => { assignLayoutParam("cursorGap", L.cursorGap + dy); },
-    resize:true,
-    resizeAxis:"v",
   },
-  { id:"nodata", name:"无数据 '?' 槽", macro:"MAIN_DISPLAY_NO_DATA_SLOTS",
-    color:"#c9a0ff",
+  { id:"nodata", name:"无数据 '?' 槽", color:"#c9a0ff",
     box:() => ({ x:noDataX(), y:noDataY(), w:L.noDataSlots*DIGIT_W, h:TEXT_H }),
-    move:(dx,dy) => { assignLayoutParam("noDataDX", L.noDataDX + dx);
-                      assignLayoutParam("noDataDY", L.noDataDY + dy); },
-    resize:false,
   },
-  { id:"unit", name:"单位文本 (左)", macro:"unit_x (左对齐)",
-    color:"#5ac8fa",
+  { id:"unit", name:"单位文本 (左)", color:"#5ac8fa",
     box:() => { const w = unitWidth(); return { x:L.unitPadX, y:topBandY(), w, h:TEXT_H }; },
-    move:(dx,dy) => { assignLayoutParam("unitPadX", L.unitPadX + dx); },
-    resize:false,
   },
-  { id:"status", name:"状态块 (右对齐)", macro:"MAIN_DISPLAY_STATUS_LABEL_GAP / 右缘",
-    color:"#ff8a80",
+  { id:"status", name:"状态块 (右对齐)", color:"#ff8a80",
     box:() => { const labels = activeLabels(readStatus());
                 return { x:statusX(labels), y:topBandY(),
                          w:statusBlockWidth(labels), h:TEXT_H }; },
-    move:(dx,dy) => { assignLayoutParam("statusPadX", L.statusPadX - dx); },
-    resize:false,
   },
 ];
 function unitWidth() {
@@ -563,7 +557,7 @@ function unitWidth() {
 }
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
-let selId = null, hoverId = null, drag = null;
+let selId = null;
 const overlay = document.getElementById("overlay");
 const octx = (overlay && typeof overlay.getContext === "function")
   ? overlay.getContext("2d") : null;
@@ -571,134 +565,22 @@ const octx = (overlay && typeof overlay.getContext === "function")
 function drawOverlay() {
   if (!octx) return;
   octx.clearRect(0,0,UI_W,UI_H);
-  /* 所有元素：灰框 + 标签（仅 hover/选中高亮） */
-  for (const el of ELEMENTS) {
-    const b = el.box();
-    const isSel = el.id === selId, isHov = el.id === hoverId;
-    if (!isSel && !isHov) continue;
-    octx.strokeStyle = isSel ? el.color : "rgba(150,170,190,0.55)";
-    octx.lineWidth = isSel ? 2 : 1;
-    octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
-    if (isSel && el.resize) {
-      /* 右下缩放手柄 */
-      octx.fillStyle = el.color;
-      octx.fillRect(b.x + b.w - 6, b.y + b.h - 6, 6, 6);
-    }
-  }
-  /* 标签画在最上 */
-  for (const el of ELEMENTS) {
-    const b = el.box();
-    if (el.id !== selId && el.id !== hoverId) continue;
-    const txt = `${el.name}  (${b.x},${b.y}) ${b.w}×${b.h}`;
-    octx.font = "11px monospace";
-    octx.textBaseline = "top";
-    const tw = octx.measureText(txt).width + 6;
-    const tx = Math.max(0, Math.min(UI_W - tw, b.x + 4));
-    const ty = Math.max(0, b.y + b.h + 2);
-    octx.fillStyle = "rgba(0,0,0,0.75)";
-    octx.fillRect(tx, ty, tw, 16);
-    octx.fillStyle = el.color;
-    octx.fillText(txt, tx + 3, ty + 3);
-  }
-  updateInfo();
-}
-
-function elAt(x, y) {
-  for (let i = ELEMENTS.length - 1; i >= 0; i--) {
-    const b = ELEMENTS[i].box();
-    if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return ELEMENTS[i];
-  }
-  return null;
-}
-function isHandle(el, x, y) {
-  if (!el.resize) return false;
+  const el = ELEMENTS.find(candidate => candidate.id === selId);
+  if (!el) return;
   const b = el.box();
-  return x >= b.x + b.w - 8 && y >= b.y + b.h - 8;
-}
-
-overlay.addEventListener("mousemove", ev => {
-  const r = overlay.getBoundingClientRect();
-  const x = (ev.clientX - r.left) * UI_W / r.width;
-  const y = (ev.clientY - r.top) * UI_H / r.height;
-  if (drag) {
-    drag.cur = { x, y };
-    applyDrag();
-    return;
-  }
-  const el = elAt(x, y);
-  hoverId = el ? el.id : null;
-  overlay.style.cursor = (el && isHandle(el, x, y)) ? "nwse-resize"
-                      : (el ? "move" : "default");
-  drawOverlay();
-});
-overlay.addEventListener("mousedown", ev => {
-  const r = overlay.getBoundingClientRect();
-  const x = (ev.clientX - r.left) * UI_W / r.width;
-  const y = (ev.clientY - r.top) * UI_H / r.height;
-  const el = elAt(x, y);
-  if (!el) { selId = null; drawOverlay(); return; }
-  selId = el.id;
-  drag = { el, mode: isHandle(el, x, y) ? "resize" : "move",
-           start: { x, y }, cur: { x, y } };
-  ev.preventDefault();
-  drawOverlay();
-});
-if (typeof window.addEventListener === "function") {
-  window.addEventListener("mousemove", ev => {
-    if (!drag) return;
-    const r = overlay.getBoundingClientRect();
-    drag.cur = { x:(ev.clientX-r.left)*UI_W/r.width, y:(ev.clientY-r.top)*UI_H/r.height };
-    applyDrag();
-  });
-  window.addEventListener("mouseup", () => { drag = null; });
-}
-
-function applyDrag() {
-  if (!drag) return;
-  const dx = drag.cur.x - drag.start.x;
-  const dy = drag.cur.y - drag.start.y;
-  const el = drag.el;
-  if (drag.mode === "resize") {
-    if (el.resizeAxis === "v") {
-      const b = el.box();
-      if (el.id === "reading") assignLayoutParam("readingH", L.readingH + dy);
-      else if (el.id === "cursor") assignLayoutParam("cursorH", L.cursorH + dy);
-      else if (el.id === "top_band") assignLayoutParam("topBandH", b.y + b.h + dy);
-    }
-  } else {
-    el.move(dx, dy);
-  }
-  render();
-}
-
-function buildElemList() {
-  const host = document.getElementById("elemList");
-  if (!host) return;
-  host.innerHTML = "";
-  ELEMENTS.forEach(el => {
-    const row = document.createElement("div");
-    row.className = "elem-row" + (el.id === selId ? " sel" : "");
-    const b = el.box();
-    row.innerHTML = `<span>${el.name} <span class="macro">${el.macro}</span></span>` +
-                    `<span class="xy">(${b.x},${b.y}) ${b.w}×${b.h}</span>`;
-    row.onclick = () => { selId = el.id; drawOverlay(); };
-    host.appendChild(row);
-  });
-}
-function updateInfo() {
-  const host = document.getElementById("selInfo");
-  if (!host) return;
-  const el = ELEMENTS.find(e => e.id === selId);
-  if (!el) { host.innerHTML = "未选中 — 点击面板中的元素或下方列表"; }
-  else {
-    const b = el.box();
-    host.innerHTML = `<b>${el.name}</b><br>` +
-      `坐标 <span class="xy">x=${b.x}, y=${b.y}</span> &nbsp; 尺寸 ` +
-      `<span class="xy">${b.w} × ${b.h}</span><br>` +
-      `宏: <span class="macro">${el.macro}</span>` +
-      (el.resize ? `<br><span style="color:#888">拖动右下角手柄缩放</span>` : "");
-  }
-  buildElemList();
+  octx.strokeStyle = el.color;
+  octx.lineWidth = 2;
+  octx.strokeRect(b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1);
+  const txt = `${el.name}  ${b.w}×${b.h}`;
+  octx.font = "11px monospace";
+  octx.textBaseline = "top";
+  const tw = octx.measureText(txt).width + 6;
+  const tx = Math.max(0, Math.min(UI_W - tw, b.x + 4));
+  const ty = Math.max(0, b.y + b.h + 2);
+  octx.fillStyle = "rgba(0,0,0,0.75)";
+  octx.fillRect(tx, ty, tw, 16);
+  octx.fillStyle = el.color;
+  octx.fillText(txt, tx + 3, ty + 3);
 }
 
 /* ---- 导出 C 宏：把 L 转成可粘贴进 main_display.h 的 #define ---- */
@@ -719,18 +601,38 @@ function exportLayoutText() {
     `/* noDataDX   = ${L.noDataDX}  noDataDY = ${L.noDataDY} */`,
   ].join("\n");
 }
+function legacyCopy(text, done) {
+  if (typeof document.execCommand !== "function") {
+    done("复制失败，请展开导出内容后手动复制");
+    return;
+  }
+  const area = document.getElementById("exportC");
+  if (!area || typeof area.select !== "function") {
+    done("复制失败，请展开导出内容后手动复制");
+    return;
+  }
+  area.value = text;
+  area.select();
+  if (typeof area.setSelectionRange === "function")
+    area.setSelectionRange(0, area.value.length);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+  if (ok) done("已复制");
+  else done("复制失败，请展开导出内容后手动复制");
+}
 function exportLayout() {
   const text = exportLayoutText();
   const area = document.getElementById("exportC");
-  if (area) {
-    area.value = text;
-    if (typeof area.select === "function") {
-      area.select();
-      if (typeof area.setSelectionRange === "function")
-        area.setSelectionRange(0, area.value.length);
-    }
+  if (area) area.value = text;
+  const status = document.getElementById("copyStatus");
+  const done = message => { if (status) status.textContent = message; };
+  if (typeof navigator !== "undefined" && navigator.clipboard &&
+      typeof navigator.clipboard.writeText === "function") {
+    navigator.clipboard.writeText(text).then(() => done("已复制"),
+                                              () => legacyCopy(text, done));
+  } else {
+    legacyCopy(text, done);
   }
-  try { document.execCommand("copy"); } catch (e) {}
 }
 
 function resetLayout() {
@@ -738,19 +640,8 @@ function resetLayout() {
   L.cursorGap = 4; L.cursorH = 4; L.statusGap = 4;
   L.noDataSlots = 7; L.noDataDX = 0; L.noDataDY = 0;
   L.unitPadX = 0; L.statusPadX = 0;
-  selId = null; hoverId = null;
+  selId = null;
   render();
-}
-function fitPanel() {
-  const stage = document.querySelector(".stage");
-  if (!stage) return;
-  const panel = document.getElementById("panel");
-  const overlayC = document.getElementById("overlay");
-  const scale = Math.min(1, (stage.clientWidth) / 960);
-  panel.style.width = Math.floor(960*scale) + "px";
-  panel.style.height = Math.floor(320*scale) + "px";
-  overlayC.style.width = panel.style.width;
-  overlayC.style.height = panel.style.height;
 }
 
 /* ---- 预设 ---- */
