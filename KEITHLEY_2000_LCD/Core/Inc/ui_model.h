@@ -29,6 +29,10 @@ typedef struct {
     bool remote;
     /* 0 = normal reading, 1 = OVERFLOW (red), 2 = "----" no reading (grey). */
     uint8_t special;
+    /* VFD digit-segment control tag bits (0x18 first-only, 0x1A 2nd-only,
+     * 0x7F full digit). Kept raw for a faithful log; TFT rendering may ignore.
+     */
+    uint8_t segment_ctrl;
     status_bar_t status;
 } ui_model_t;
 
@@ -40,4 +44,9 @@ void ui_model_apply_blink(ui_model_t *m, bool on);
 void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
                             const char *unit, uint8_t unit_len, uint8_t special);
 void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value);
+/* Inline text-tag events: append a symbol (u=0x10 / degree=0x13) to the unit
+ * as UTF-8, store a segment-control tag, or clear the current field. */
+void ui_model_apply_symbol(ui_model_t *m, uint8_t ctrl);
+void ui_model_apply_segment(ui_model_t *m, uint8_t ctrl);
+void ui_model_apply_flush(ui_model_t *m);
 void ui_model_render(const ui_model_t *m);

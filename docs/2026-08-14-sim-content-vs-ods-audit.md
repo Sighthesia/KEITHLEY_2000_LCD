@@ -78,3 +78,20 @@ ODS 中每行**首个指示符并不落在 0x80 列**（0x80 列多留空），�
 - 可显示内容 100% 可从 ODS 找到，无缺失项。
 - 位映射「约定 vs 字面列位」差异为已记录的历史情况，不影响内容覆盖率。
 - ODS 中未实现指示符（TALK/LSTN/SRQ、0x07 组、0x0A 组、0x0E 组、0x09 余项）保留作扩展依据。
+
+## 附：接收覆盖修复（2026-08-14）
+
+原始解析器（`k2000_proto.c`）只能识别 0x0D 起始、6 个状态 TAG、POS、Blink 与 ASCII 字段；ODS「Texts tags」的 `0x10`(µ)、`0x13`(°)、`0x02`(flush)、`0x18/0x1A/0x7F`(segment 控制) 均 < 0x80，会作为读数字符被吞进 value（实测 `1.234` + `0x10` + `V` 变成 `.234\x10V`，µ 污染读数字符串）。
+
+修复内容（firmware/src 与 CubeMX 树同步）：
+
+- 解析器新增 `append_symbol`/`feed_lone_text_tag`/`control_tag_type`：
+  - µ/°（内容符号）内联追加 UTF-8（`µ`=`\xC2\xB5`、`°`=`\xC2\xB0`）到当前字段值，**不关闭字段**，后续 `V` 仍在同字段，`reading_split` 才能正确拆出 `µV` 单位。
+  - segment/flush（控制字节）先关闭当前字段（emit），再发 `K2000_EVT_SEGMENT`/`K2000_EVT_FLUSH` 事件并回 IDLE。
+  - IDLE 状态遇到孤立文本标签发独立事件。
+- 事件类型新增 `K2000_EVT_SYMBOL`/`K2000_EVT_SEGMENT`/`K2000_EVT_FLUSH`，事件结构新增 `ctrl` 原始字节。
+- `ui_model` 新增 `apply_symbol`（µ/° 按 ODS 显式映射追加 UTF-8 到 unit）、`apply_segment`（记录 raw 段控制）、`apply_flush`（清 value/unit）。
+- `main.c`（firmware 骨架 + CubeMX）分发三个新事件到 ui_model。
+- 单测扩展：µ/° 内联不污染 value、segment/flush 关字段发事件、lone symbol、flush 独立事件；全部通过。
+
+已知边界（本次未改、保持原语义）：字段只在收到下一个 tag 时 emit；`0x0D` 只重置不清空挂起字段，若主机每段以 `0x0D` 结尾且无后续 tag，该段读数字符串不会 emit（与 ODS「End of message when another tag is received」一致，真机确认后再定）。

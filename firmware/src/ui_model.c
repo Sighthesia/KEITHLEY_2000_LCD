@@ -95,6 +95,54 @@ void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
     }
 }
 
+/* UTF-8 for the two ODS inline symbols. The TFT text font exposes matching
+ * glyphs via font_text_symbol_bitmap(); storing UTF-8 keeps the unit string
+ * valid C text and lets the renderer map it to the symbol glyphs. */
+static const char s_sym_micro_utf8[] = "\xC2\xB5";
+static const char s_sym_degree_utf8[] = "\xC2\xB0";
+
+static void unit_append(ui_model_t *m, const char *utf8, uint8_t len)
+{
+    uint8_t n = (uint8_t)strlen(m->unit);
+    if (n + len >= sizeof(m->unit)) {
+        return;
+    }
+    memcpy(&m->unit[n], utf8, len);
+    m->unit[n + len] = '\0';
+}
+
+void ui_model_apply_symbol(ui_model_t *m, uint8_t ctrl)
+{
+    if (m == 0) {
+        return;
+    }
+    if (ctrl == K2000_TAG_SYM_MICRO) {
+        unit_append(m, s_sym_micro_utf8, (uint8_t)(sizeof(s_sym_micro_utf8) - 1u));
+    } else if (ctrl == K2000_TAG_SYM_DEGREE) {
+        unit_append(m, s_sym_degree_utf8, (uint8_t)(sizeof(s_sym_degree_utf8) - 1u));
+    }
+    m->any_message = true;
+}
+
+void ui_model_apply_segment(ui_model_t *m, uint8_t ctrl)
+{
+    if (m == 0) {
+        return;
+    }
+    m->segment_ctrl = ctrl;
+    m->any_message = true;
+}
+
+void ui_model_apply_flush(ui_model_t *m)
+{
+    if (m == 0) {
+        return;
+    }
+    m->value[0] = '\0';
+    m->unit[0] = '\0';
+    m->any_message = true;
+}
+
 void ui_model_render(const ui_model_t *m)
 {
     (void)m;

@@ -7,6 +7,13 @@ static int s_status_evts = 0;
 static int s_pos_val = -1;
 static int s_last_status_tag = 0;
 static int s_last_status_value = 0;
+static int s_field_evts = 0;
+static char s_field_value[K2000_PROTO_MAX_FIELD];
+static int s_sym_evts = 0;
+static int s_sym_ctrl = 0;
+static int s_seg_evts = 0;
+static int s_seg_ctrl = 0;
+static int s_flush_evts = 0;
 
 static void on_event(const k2000_event_t *evt)
 {
@@ -18,6 +25,22 @@ static void on_event(const k2000_event_t *evt)
         break;
     case K2000_EVT_CURSOR:
         s_pos_val = evt->pos;
+        break;
+    case K2000_EVT_FIELD:
+        s_field_evts++;
+        memcpy(s_field_value, evt->field.value, evt->field.value_len);
+        s_field_value[evt->field.value_len] = '\0';
+        break;
+    case K2000_EVT_SYMBOL:
+        s_sym_evts++;
+        s_sym_ctrl = evt->ctrl;
+        break;
+    case K2000_EVT_SEGMENT:
+        s_seg_evts++;
+        s_seg_ctrl = evt->ctrl;
+        break;
+    case K2000_EVT_FLUSH:
+        s_flush_evts++;
         break;
     default:
         break;
@@ -68,6 +91,73 @@ int main(void)
     k2000_proto_feed('2');
     k2000_proto_feed('3');
     /* no crash, field path exercised */
+
+    /* Inline u symbol stays inside the reading value (ODS: 0x10=u content):
+     * 0x0D 0x01 "1.234" 0x10 "V" -> FIELD "1.234" + UTF-8 u + "V". */
+    s_field_evts = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x01u);   /* reading field tag */
+    k2000_proto_feed('1');
+    k2000_proto_feed('.');
+    k2000_proto_feed('2');
+    k2000_proto_feed('3');
+    k2000_proto_feed('4');
+    k2000_proto_feed(0x10u);   /* u symbol */
+    k2000_proto_feed('V');
+    k2000_proto_feed(0x06u);   /* status tag ends the stream */
+    assert(s_field_evts == 1);
+    assert(memcmp(s_field_value, "1.234\xC2\xB5"
+                                 "V", 9) == 0);
+    assert(s_field_value[9] == '\0');
+
+    /* Degree symbol inline: "23.5" 0x13 "C" -> "23.5" + degree + "C". */
+    s_field_evts = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x01u);
+    k2000_proto_feed('2');
+    k2000_proto_feed('3');
+    k2000_proto_feed('.');
+    k2000_proto_feed('5');
+    k2000_proto_feed(0x13u);   /* degree symbol */
+    k2000_proto_feed('C');
+    k2000_proto_feed(0x09u);   /* status tag ends the stream */
+    assert(s_field_evts == 1);
+    assert(memcmp(s_field_value, "23.5\xC2\xB0"
+                                 "C", 7) == 0);
+
+    /* Segment tags (0x18/0x1A/0x7F) close the field and emit segment events,
+     * never value chars. */
+    s_field_evts = 0;
+    s_seg_evts = 0;
+    s_seg_ctrl = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x01u);
+    k2000_proto_feed('9');
+    k2000_proto_feed(0x7Fu);   /* complete digit on */
+    k2000_proto_feed(0x09u);   /* status tag ends the stream */
+    assert(s_field_evts == 1);
+    assert(strcmp(s_field_value, "9") == 0);
+    assert(s_seg_evts == 1);
+    assert(s_seg_ctrl == 0x7F);
+
+    /* Flush (0x02) emits a FLUSH event without opening a field. */
+    s_flush_evts = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x02u);
+    assert(s_flush_evts == 1);
+
+    /* A lone symbol at message start (no field tag yet) is its own event. */
+    s_sym_evts = 0;
+    s_sym_ctrl = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x10u);
+    assert(s_sym_evts == 1);
+    assert(s_sym_ctrl == 0x10);
 
     return 0;
 }

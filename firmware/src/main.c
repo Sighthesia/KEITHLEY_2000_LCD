@@ -58,6 +58,15 @@ static void on_proto_event(const k2000_event_t *evt)
     case K2000_EVT_BLINK_END:
         ui_model_apply_blink(&s_model, false);
         break;
+    case K2000_EVT_SYMBOL:
+        ui_model_apply_symbol(&s_model, evt->ctrl);
+        break;
+    case K2000_EVT_SEGMENT:
+        ui_model_apply_segment(&s_model, evt->ctrl);
+        break;
+    case K2000_EVT_FLUSH:
+        ui_model_apply_flush(&s_model);
+        break;
     default:
         break;
     }

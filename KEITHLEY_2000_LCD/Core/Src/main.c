@@ -123,6 +123,18 @@ static void proto_on_event(const k2000_event_t *evt)
         ui_model_apply_blink(&s_ui, false);
         s_ui_dirty = true;
         break;
+    case K2000_EVT_SYMBOL:
+        ui_model_apply_symbol(&s_ui, evt->ctrl);
+        s_ui_dirty = true;
+        break;
+    case K2000_EVT_SEGMENT:
+        ui_model_apply_segment(&s_ui, evt->ctrl);
+        s_ui_dirty = true;
+        break;
+    case K2000_EVT_FLUSH:
+        ui_model_apply_flush(&s_ui);
+        s_ui_dirty = true;
+        break;
     default:
         break;
     }

@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <string.h>
 
+#include "k2000_proto.h"
 #include "ui_model.h"
 
 int main(void)
@@ -84,6 +85,25 @@ int main(void)
     assert(!m.hold && !m.trig);
     assert(status_bar_core_active(&m.status, 1));   /* REM still on */
 
+    /* Inline symbol tags append UTF-8 to the unit, never to the reading. */
+    ui_model_apply_reading(&m, "1.234", 5, "V", 1, 0);
+    ui_model_apply_symbol(&m, K2000_TAG_SYM_MICRO);   /* u */
+    assert(strcmp(m.unit, "V\xC2\xB5") == 0);
+    assert(strcmp(m.value, "1.234") == 0);
+    ui_model_apply_symbol(&m, K2000_TAG_SYM_DEGREE);  /* degree */
+    assert(strcmp(m.unit, "V\xC2\xB5\xC2\xB0") == 0);
+    assert(m.any_message);
+
+    /* Segment control tag is recorded raw; does not touch value/unit. */
+    ui_model_apply_segment(&m, K2000_TAG_SEG_FULL);
+    assert(m.segment_ctrl == K2000_TAG_SEG_FULL);
+    assert(strcmp(m.value, "1.234") == 0);
+
+    /* Flush clears the current value and unit. */
+    ui_model_apply_flush(&m);
+    assert(m.value[0] == '\0');
+    assert(m.unit[0] == '\0');
+
     /* NULL safety. */
     ui_model_init(0);
     ui_model_apply_field(0, 0, 0, 0);
@@ -91,6 +111,9 @@ int main(void)
     ui_model_apply_blink(0, false);
     ui_model_apply_reading(0, 0, 0, 0, 0, 0);
     ui_model_apply_status(0, 0, 0);
+    ui_model_apply_symbol(0, 0);
+    ui_model_apply_segment(0, 0);
+    ui_model_apply_flush(0);
 
     return 0;
 }

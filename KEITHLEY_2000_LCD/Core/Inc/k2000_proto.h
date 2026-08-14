@@ -16,6 +16,15 @@
 #define K2000_TAG_STATUS_STEP 0x0Au
 #define K2000_TAG_STATUS_CH_HIGH 0x0Eu
 
+/* Inline text tags (ODS "Texts tags"): these control bytes appear inside the
+ * ASCII text stream and must not be treated as reading characters. */
+#define K2000_TAG_FLUSH 0x02u     /* flush display, clear current field */
+#define K2000_TAG_SYM_MICRO 0x10u /* u */
+#define K2000_TAG_SYM_DEGREE 0x13u /* degree */
+#define K2000_TAG_SEG_FIRST 0x18u /* VFD first segment only */
+#define K2000_TAG_SEG_SECOND 0x1Au /* VFD 2nd segment only */
+#define K2000_TAG_SEG_FULL 0x7Fu  /* VFD complete digit on */
+
 typedef struct {
     uint8_t tag;
     char value[K2000_PROTO_MAX_FIELD];
@@ -28,6 +37,9 @@ typedef enum {
     K2000_EVT_BLINK_START,
     K2000_EVT_BLINK_END,
     K2000_EVT_STATUS,
+    K2000_EVT_SYMBOL,   /* inline text symbol (0x10=u, 0x13=deg) */
+    K2000_EVT_SEGMENT,  /* VFD digit-segment control (0x18/0x1A/0x7F) */
+    K2000_EVT_FLUSH,    /* 0x02: flush display / clear current field */
     K2000_EVT_UNKNOWN,
 } k2000_evt_type_t;
 
@@ -37,6 +49,8 @@ typedef struct {
     uint16_t pos;
     uint8_t status_tag;
     uint8_t status_value;
+    /* Raw byte for K2000_EVT_SYMBOL / K2000_EVT_SEGMENT / K2000_EVT_FLUSH. */
+    uint8_t ctrl;
 } k2000_event_t;
 
 typedef struct {
