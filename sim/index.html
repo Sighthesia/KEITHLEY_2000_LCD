@@ -310,7 +310,7 @@ function buildLayoutControls() {
     section.className = "param-group";
     section.innerHTML = `<h3>${group}</h3>`;
     params.forEach(param => {
-      const row = document.createElement("label");
+      const row = document.createElement("div");
       row.className = "param-row";
       row.dataset.param = param.id;
       row.innerHTML = `<span>${param.label}</span>` +
