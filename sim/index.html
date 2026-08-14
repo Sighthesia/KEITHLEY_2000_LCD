@@ -233,6 +233,8 @@ const L = {
   noDataDY: 0,       /* '?' 块垂直偏移                              */
   unitPadX: 0,       /* 单位文本左内边距                           */
   statusPadX: 0,     /* 状态块右缘额外间距                         */
+  footerSpecX: 0,    /* footer 规格文本左边距                       */
+  footerSpecY: 132,  /* footer 规格文本顶部 y（默认读数带下+光标）   */
 };
 
 /* ---- 布局参数元数据：每个可调参数声明范围/单位/所属画布元素。
@@ -261,6 +263,10 @@ const LAYOUT_PARAMS = [
     min:-480, max:480, step:1, elementId:"nodata" },
   { id:"noDataDY", label:"问号垂直偏移", group:"无数据占位", unit:"px",
     min:-160, max:160, step:1, elementId:"nodata" },
+  { id:"footerSpecX", label:"规格文本左边距", group:"footer 规格", unit:"px",
+    min:0, max:400, step:1, elementId:"footer_spec" },
+  { id:"footerSpecY", label:"规格文本顶部", group:"footer 规格", unit:"px",
+    min:0, max:320, step:1, elementId:"footer_spec" },
 ];
 
 function layoutParam(id) { return LAYOUT_PARAMS.find(param => param.id === id); }
@@ -332,6 +338,7 @@ const topBandY = () => 0;
 const readingY = () => topBandY() + L.topBandH;
 const sepY = () => readingY();
 const cursorY = () => readingY() + L.readingH + L.cursorGap;
+const footerSpecY = () => L.footerSpecY;
 const noDataX = () => UI_W - L.noDataSlots * DIGIT_W + L.noDataDX;
 const noDataY = () => readingY() + Math.floor((L.readingH - TEXT_H) / 2) + L.noDataDY;
 
@@ -437,6 +444,20 @@ function statusBlockWidth(labels) {
 }
 const statusX = labels => UI_W - statusBlockWidth(labels) - L.statusPadX;
 
+/* ---- Footer spec line（与固件 main_display_footer_spec 一致）---- */
+const RATE_READS = { FAST:"500 Read/s", MED:"50 Read/s", SLOW:"5 Read/s" };
+const RATE_BW = { FAST:"300 Hz - 300 kHz", MED:"30 Hz - 300 kHz",
+                  SLOW:"3 Hz - 300 kHz" };
+function unitIsAc(unit) {
+  return /AC/.test(unit || "");
+}
+function footerSpec(unit, rate) {
+  if (!unit || !RATE_READS[rate]) return "";
+  const reads = RATE_READS[rate];
+  if (unitIsAc(unit)) return `${RATE_BW[rate]} ${reads}`;
+  return reads;
+}
+
 function render() {
   const value = document.getElementById("inpValue").value;
   const unit  = document.getElementById("inpUnit").value;
@@ -537,6 +558,21 @@ function render() {
     }
   }
 
+  /* Footer spec line：单位 + 速率 -> Read/s（DCV/欧姆）或带宽 + Read/s
+   * （ACV/ACI），与固件 main_display_footer_spec 一致。 */
+  {
+    const spec = footerSpec(unit, rate);
+    if (spec) {
+      let sx = L.footerSpecX;
+      for (const ch of spec) {
+        const bmp = textBitmap(ch);
+        if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, sx,
+                           footerSpecY(), toCss(0xFFFF));
+        sx += TEXT_W;
+      }
+    }
+  }
+
   /* 帧缓冲转置预览 */
   renderFB(document.getElementById("fb").getContext("2d"), ctx);
   drawOverlay();
@@ -571,6 +607,13 @@ const ELEMENTS = [
     box:() => { const labels = activeLabels(readStatus());
                 return { x:statusX(labels), y:topBandY(),
                          w:statusBlockWidth(labels), h:TEXT_H }; },
+  },
+  { id:"footer_spec", name:"footer 规格文本", color:"#7bd88f",
+    box:() => { const unit = document.getElementById("inpUnit").value;
+                const rate = document.getElementById("inpRate").value;
+                const spec = footerSpec(unit, rate);
+                return { x:L.footerSpecX, y:footerSpecY(),
+                         w:spec.length * TEXT_W, h:TEXT_H }; },
   },
 ];
 function unitWidth() {
@@ -616,11 +659,13 @@ function exportLayoutText() {
     `#define MAIN_DISPLAY_CURSOR_H ${L.cursorH}u`,
     `#define MAIN_DISPLAY_STATUS_LABEL_GAP ${L.statusGap}u`,
     `#define MAIN_DISPLAY_NO_DATA_SLOTS ${L.noDataSlots}u`,
+    `#define MAIN_DISPLAY_FOOTER_SPEC_Y ${L.footerSpecY}u`,
     "",
     "/* devtools 偏移（非 main_display.h 宏；写入仿真/渲染逻辑或 main_display.c） */",
     `/* unitPadX   = ${L.unitPadX} */`,
     `/* statusPadX = ${L.statusPadX} */`,
     `/* noDataDX   = ${L.noDataDX}  noDataDY = ${L.noDataDY} */`,
+    `/* footerSpecX = ${L.footerSpecX} */`,
   ].join("\n");
 }
 function legacyCopy(text, done) {
@@ -662,6 +707,7 @@ function resetLayout() {
   L.cursorGap = 4; L.cursorH = 4; L.statusGap = 4;
   L.noDataSlots = 7; L.noDataDX = 0; L.noDataDY = 0;
   L.unitPadX = 0; L.statusPadX = 0;
+  L.footerSpecX = 0; L.footerSpecY = 132;
   selId = null;
   render();
 }

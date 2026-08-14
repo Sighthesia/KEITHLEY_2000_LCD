@@ -58,6 +58,14 @@
 #define MAIN_DISPLAY_STATUS_LABEL_GAP 4u
 #define MAIN_DISPLAY_STATUS_LABEL_MAX 6u
 
+/* Footer spec line: integration rate -> Read/s (DCV/ohm) or AC bandwidth +
+ * Read/s (ACV/ACI), drawn in the footer band under the reading. Left-aligned,
+ * one 12x24 text row; y is the top of the text. */
+#define MAIN_DISPLAY_FOOTER_SPEC_Y (MAIN_DISPLAY_CURSOR_Y + \
+                                    MAIN_DISPLAY_CURSOR_H + 8u)
+#define MAIN_DISPLAY_FOOTER_SPEC_X 0u
+#define MAIN_DISPLAY_FOOTER_SPEC_MAX 40u
+
 /* Right-aligned layout of a value into `slots` digit cells starting at
  * `start_x`. start_x is the left edge of the whole slot area; the returned
  * start_x is the left edge of the first glyph so the value ends flush at
@@ -93,6 +101,13 @@ typedef struct {
     uint16_t status_x;        /* left edge of the right-aligned status block */
     uint8_t status_count;     /* active core indicators to draw */
     char status_text[STATUS_BAR_CORE_COUNT][MAIN_DISPLAY_STATUS_LABEL_MAX];
+    /* Footer spec: integration-rate dependent reading/bandwidth text
+     * ("500 Read/s", "300 Hz - 300 kHz  500 Read/s"); empty when no rate or
+     * no unit. x/y position the left-aligned 12x24 text row. */
+    char footer_spec[MAIN_DISPLAY_FOOTER_SPEC_MAX];
+    uint8_t footer_spec_len;
+    uint16_t footer_spec_x;
+    uint16_t footer_spec_y;
 } main_display_frame_t;
 
 main_display_layout_t main_display_layout_value(uint8_t value_len,

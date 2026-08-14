@@ -323,6 +323,11 @@ static void reading_scene_render(void)
         (void)ui_fill_rect(frame.cursor_x, frame.cursor_y, FONT_DIGIT_WIDTH,
                            MAIN_DISPLAY_CURSOR_H, frame.value_color);
     }
+    /* Footer spec line: integration-rate dependent bandwidth/Read rate. */
+    if (frame.footer_spec_len > 0u) {
+        (void)ui_draw_text(frame.footer_spec_x, frame.footer_spec_y,
+                           frame.footer_spec, 0xFFFFu);
+    }
 }
 
 static const scene_t s_reading_scene = {

@@ -8,6 +8,15 @@
 #define UI_MODEL_MAX_FIELD 32u
 #define UI_MODEL_MAX_UNIT 16u
 
+/* Integration rate (0x08 FAST/MED/SLOW), derived from the status bits so the
+ * footer spec (Read/s or AC bandwidth) can be chosen. */
+typedef enum {
+    UI_RATE_NONE = 0,
+    UI_RATE_FAST,
+    UI_RATE_MED,
+    UI_RATE_SLOW,
+} ui_rate_t;
+
 /* UI model for the reading scene (milestone-1). Pure logic, host-testable.
  * The reading is kept as a split numeric prefix (value) plus unit suffix; the
  * special code flags OVERFLOW / no-reading; the status TAG values live in an
@@ -27,6 +36,9 @@ typedef struct {
     bool hold;
     bool trig;
     bool remote;
+    /* Integration rate from the 0x08 status group (FAST=0x04, MED=0x02,
+     * SLOW=0x01); UI_RATE_NONE when no rate bit is set. */
+    ui_rate_t rate;
     /* 0 = normal reading, 1 = OVERFLOW (red), 2 = "----" no reading (grey). */
     uint8_t special;
     /* VFD digit-segment control tag bits (0x18 first-only, 0x1A 2nd-only,

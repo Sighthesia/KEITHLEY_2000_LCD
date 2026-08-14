@@ -162,5 +162,59 @@ int main(void)
                              (3u * FONT_TEXT_WIDTH));
     }
 
+    /* Footer spec: DCV/ohm rate -> Read/s only; ACV/ACI -> bandwidth +
+     * Read/s; no rate/unit -> empty. */
+    {
+        ui_model_t m;
+        main_display_frame_t f;
+
+        /* FAST + VDC -> "500 Read/s" */
+        ui_model_init(&m);
+        ui_model_apply_reading(&m, "1.2345", 6, "VDC", 3, 0);
+        ui_model_apply_status(&m, 0x08u, 0x04u);   /* FAST */
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == strlen("500 Read/s"));
+        assert(memcmp(f.footer_spec, "500 Read/s", f.footer_spec_len) == 0);
+        assert(f.footer_spec_x == MAIN_DISPLAY_FOOTER_SPEC_X);
+        assert(f.footer_spec_y == MAIN_DISPLAY_FOOTER_SPEC_Y);
+
+        /* MED + VDC -> "50 Read/s" */
+        ui_model_init(&m);
+        ui_model_apply_reading(&m, "1.2345", 6, "VDC", 3, 0);
+        ui_model_apply_status(&m, 0x08u, 0x02u);   /* MED */
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == strlen("50 Read/s"));
+        assert(memcmp(f.footer_spec, "50 Read/s", f.footer_spec_len) == 0);
+
+        /* SLOW + VDC -> "5 Read/s" */
+        ui_model_init(&m);
+        ui_model_apply_reading(&m, "1.2345", 6, "VDC", 3, 0);
+        ui_model_apply_status(&m, 0x08u, 0x01u);   /* SLOW */
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == strlen("5 Read/s"));
+        assert(memcmp(f.footer_spec, "5 Read/s", f.footer_spec_len) == 0);
+
+        /* FAST + ACV -> "300 Hz - 300 kHz 500 Read/s" */
+        ui_model_init(&m);
+        ui_model_apply_reading(&m, "1.2345", 6, "ACV", 3, 0);
+        ui_model_apply_status(&m, 0x08u, 0x04u);
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == strlen("300 Hz - 300 kHz 500 Read/s"));
+        assert(memcmp(f.footer_spec, "300 Hz - 300 kHz 500 Read/s",
+                      f.footer_spec_len) == 0);
+
+        /* No rate -> empty footer. */
+        ui_model_init(&m);
+        ui_model_apply_reading(&m, "1.2345", 6, "VDC", 3, 0);
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == 0u && f.footer_spec[0] == '\0');
+
+        /* No unit -> empty footer even with a rate. */
+        ui_model_init(&m);
+        ui_model_apply_status(&m, 0x08u, 0x04u);
+        main_display_format(&m, &f);
+        assert(f.footer_spec_len == 0u && f.footer_spec[0] == '\0');
+    }
+
     return 0;
 }

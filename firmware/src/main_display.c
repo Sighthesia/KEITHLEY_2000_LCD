@@ -55,6 +55,64 @@ uint16_t main_display_special_color(uint8_t special)
     return 0xFFFFu;       /* normal: white */
 }
 
+/* Does the unit indicate AC (ACV/ACI)? "AC" anywhere in the unit string. */
+static bool unit_is_ac(const char *unit)
+{
+    if (unit == 0) {
+        return false;
+    }
+    for (; *unit != '\0'; unit++) {
+        if (unit[0] == 'A' && unit[1] == 'C') {
+            return true;
+        }
+    }
+    return false;
+}
+
+/* Compose the footer spec line for a rate + unit:
+ *   DCV/ohm   -> "500 Read/s" / "50 Read/s" / "5 Read/s"
+ *   ACV/ACI   -> "300 Hz - 300 kHz  500 Read/s" (bandwidth + Read/s)
+ * Empty when the rate is NONE or the unit is empty. */
+static void main_display_footer_spec(const char *unit, ui_rate_t rate,
+                                     char *out, uint8_t out_size,
+                                     uint8_t *out_len)
+{
+    static const char *const k_reads[] = { "", "500 Read/s", "50 Read/s",
+                                            "5 Read/s" };
+    static const char *const k_bw[] = { "", "300 Hz - 300 kHz",
+                                         "30 Hz - 300 kHz", "3 Hz - 300 kHz" };
+    const char *reads;
+    uint8_t n = 0u;
+
+    if (out != 0) {
+        out[0] = '\0';
+    }
+    if (out_len != 0) {
+        *out_len = 0u;
+    }
+    if (out == 0 || out_len == 0 || out_size == 0u) {
+        return;
+    }
+    if (unit == 0 || unit[0] == '\0' || rate == UI_RATE_NONE) {
+        return;
+    }
+    if (unit_is_ac(unit)) {
+        const char *bw = k_bw[rate];
+        while (*bw != '\0' && n + 1u < out_size) {
+            out[n++] = *bw++;
+        }
+        if (n + 1u < out_size) {
+            out[n++] = ' ';   /* separator before the Read/s */
+        }
+    }
+    reads = k_reads[rate];
+    while (*reads != '\0' && n + 1u < out_size) {
+        out[n++] = *reads++;
+    }
+    out[n] = '\0';
+    *out_len = n;
+}
+
 void main_display_format(const ui_model_t *m, main_display_frame_t *f)
 {
     const status_bar_indicator_t *ind;
@@ -157,4 +215,10 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
         }
         f->status_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - w);
     }
+
+    /* Footer spec line: depends on integration rate + measured unit. */
+    main_display_footer_spec(m->unit, m->rate, f->footer_spec,
+                             sizeof(f->footer_spec), &f->footer_spec_len);
+    f->footer_spec_x = MAIN_DISPLAY_FOOTER_SPEC_X;
+    f->footer_spec_y = MAIN_DISPLAY_FOOTER_SPEC_Y;
 }

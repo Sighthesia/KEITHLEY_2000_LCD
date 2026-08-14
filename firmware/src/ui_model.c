@@ -90,6 +90,15 @@ void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
     if (tag == K2000_TAG_STATUS_HOLD) {
         m->hold = (value & 0x80u) != 0u;
         m->trig = (value & 0x40u) != 0u;
+        if ((value & 0x04u) != 0u) {
+            m->rate = UI_RATE_FAST;
+        } else if ((value & 0x02u) != 0u) {
+            m->rate = UI_RATE_MED;
+        } else if ((value & 0x01u) != 0u) {
+            m->rate = UI_RATE_SLOW;
+        } else {
+            m->rate = UI_RATE_NONE;
+        }
     } else if (tag == K2000_TAG_STATUS_REM) {
         m->remote = (value & 0x80u) != 0u;
     }

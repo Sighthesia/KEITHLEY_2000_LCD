@@ -123,6 +123,18 @@ function report(name, ok) {
     let exportNoThrow = true;
     try { exportLayout(); } catch (e) { exportNoThrow = false; }
     report("layout export no-exception", exportNoThrow);
+    /* footer spec line (mirrors main_display_footer_spec) */
+    report("footer spec DCV FAST", footerSpec("VDC", "FAST") === "500 Read/s");
+    report("footer spec DCV MED", footerSpec("VDC", "MED") === "50 Read/s");
+    report("footer spec DCV SLOW", footerSpec("VDC", "SLOW") === "5 Read/s");
+    report("footer spec ACV FAST", footerSpec("ACV", "FAST") ===
+                                   "300 Hz - 300 kHz 500 Read/s");
+    report("footer spec ACV MED", footerSpec("ACV", "MED") ===
+                                  "30 Hz - 300 kHz 50 Read/s");
+    report("footer spec ACV SLOW", footerSpec("ACV", "SLOW") ===
+                                   "3 Hz - 300 kHz 5 Read/s");
+    report("footer spec empty unit", footerSpec("", "FAST") === "");
+    report("footer spec no rate", footerSpec("VDC", "") === "");
   `;
   eval(fontJs + "\n" + script + "\n" + paramTests);
 
