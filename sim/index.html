@@ -127,6 +127,9 @@
         <input type="text" id="inpValue" value="1.000000" spellcheck="false"></div>
       <div class="row"><label>单位 (unit)</label>
         <input type="text" id="inpUnit" value="VDC" spellcheck="false"></div>
+      <div class="row"><label>速率 (rate)</label>
+        <input type="text" id="inpRate" value="FAST" spellcheck="false"
+               placeholder="FAST / MED / SLOW，空 = 占位"></div>
       <div class="row"><label>特殊态</label>
         <select id="selSpecial">
           <option value="0">正常 (白)</option>
@@ -134,7 +137,7 @@
           <option value="2">无读数 ---- (灰)</option>
         </select></div>
       <div class="row"><label>无数据 '?'</label>
-        <input type="checkbox" id="inpNoData"><span class="sub">启动占位：7 个 '?' 槽 + Range ?</span></div>
+        <input type="checkbox" id="inpNoData"><span class="sub">启动占位：7 个 '?' 槽 + Range ? + Rate: ?</span></div>
 
       <h2>光标 / 闪烁</h2>
       <div class="row"><label>POS</label>
@@ -151,10 +154,11 @@
         <label><input type="checkbox" data-tag="0x08" data-bit="0x40"> TRIG</label>
         <label><input type="checkbox" data-tag="0x09" data-bit="0x20"> AUTO</label>
         <label><input type="checkbox" data-tag="0x09" data-bit="0x10"> ERR</label>
+        <label><input type="checkbox" data-tag="0x09" data-bit="0x40"> FILT</label>
       </div>
 
       <div class="preset">
-        <button type="button" onclick="applyPreset('nop')">占位 (Range ? + ???)</button>
+        <button type="button" onclick="applyPreset('nop')">占位 (Range ? + Rate: ?)</button>
         <button type="button" onclick="applyPreset('normal')">1.000000 VDC</button>
         <button type="button" onclick="applyPreset('ovfl')">OVERFLOW</button>
         <button type="button" onclick="applyPreset('noread')">---- 无读数</button>
@@ -213,6 +217,7 @@
 const UI_W = 960, UI_H = 320;
 const PLACEHOLDER_COLOR = 0xC618;
 const RANGE_PLACEHOLDER = "Range ?";
+const RATE_PLACEHOLDER = "Rate: ?";
 const SEP_COLOR = 0x8410;
 const STATUS_LABEL_MAX = 6;
 
@@ -338,6 +343,7 @@ const CORE_TABLE = [
   { label:"TRIG", tag:0x08, bit:0x40 },
   { label:"AUTO", tag:0x09, bit:0x20 },
   { label:"ERR",  tag:0x09, bit:0x10 },
+  { label:"FILT", tag:0x09, bit:0x40 },
 ];
 
 /* ---- RGB565 → CSS 颜色 ---- */
@@ -440,6 +446,8 @@ function render() {
   const pos     = parseInt(document.getElementById("inpPos").value,10);
   const blinkVis = window.__blinkVis !== false;
   const status = readStatus();
+  /* 无连接（noData）时：FILT 灯强制熄灭（滤波打开才显示，无连接即为关） */
+  if (noData) status[0x09] = (status[0x09]||0) & ~0x40;
   const labels = activeLabels(status);
 
   const canvas = document.getElementById("panel");
@@ -450,14 +458,25 @@ function render() {
   ctx.fillStyle = toCss(SEP_COLOR);
   ctx.fillRect(0, sepY(), UI_W, L.sepH);
 
-  /* 顶带：unit/range 左，状态右 */
+  /* 顶带：unit/range + rate 左，状态右 */
+  const rate = document.getElementById("inpRate").value;
   const unitText = (unit === "") ? RANGE_PLACEHOLDER : unit;
   const unitColor = (unit === "") ? toCss(PLACEHOLDER_COLOR) : toCss(0xFFFF);
+  /* 无连接（noData）时 rate 强制显示占位；有连接时才显示实际值 */
+  const rateShown = noData ? "" : rate;
+  const rateText = (rateShown === "") ? RATE_PLACEHOLDER : rateShown;
+  const rateColor = (rateShown === "") ? toCss(PLACEHOLDER_COLOR) : toCss(0xFFFF);
   {
     let cx = L.unitPadX;
     for (const ch of unitText) {
       const bmp = textBitmap(ch);
       if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, cx, topBandY(), unitColor);
+      cx += TEXT_W;
+    }
+    cx += TEXT_W;   /* 一个字符间距，隔开 unit 与 rate */
+    for (const ch of rateText) {
+      const bmp = textBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, cx, topBandY(), rateColor);
       cx += TEXT_W;
     }
   }
@@ -651,6 +670,7 @@ function resetLayout() {
 function applyPreset(name) {
   const v = document.getElementById("inpValue"),
         u = document.getElementById("inpUnit"),
+        r = document.getElementById("inpRate"),
         s = document.getElementById("selSpecial"),
         nd = document.getElementById("inpNoData"),
         bl = document.getElementById("inpBlink");
@@ -659,13 +679,13 @@ function applyPreset(name) {
   clearStatus();
   switch (name) {
     case "nop":
-      v.value=""; u.value=""; s.value="0"; nd.checked=true; bl.checked=false; break;
+      v.value=""; u.value=""; r.value=""; s.value="0"; nd.checked=true; bl.checked=false; break;
     case "normal":
-      v.value="1.000000"; u.value="VDC"; s.value="0"; nd.checked=false; break;
+      v.value="1.000000"; u.value="VDC"; r.value="FAST"; s.value="0"; nd.checked=false; break;
     case "ovfl":
-      v.value="OVERFLOW"; u.value=""; s.value="1"; nd.checked=false; bl.checked=false; break;
+      v.value="OVERFLOW"; u.value=""; r.value=""; s.value="1"; nd.checked=false; bl.checked=false; break;
     case "noread":
-      v.value="----"; u.value=""; s.value="2"; nd.checked=false; bl.checked=false; break;
+      v.value="----"; u.value=""; r.value=""; s.value="2"; nd.checked=false; bl.checked=false; break;
     case "dbm":
       v.value="0.00"; u.value="dBm"; s.value="0"; nd.checked=false; break;
     case "hold": {
