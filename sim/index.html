@@ -340,7 +340,7 @@ const sepY = () => readingY();
 const cursorY = () => readingY() + L.readingH + L.cursorGap;
 const footerSpecY = () => L.footerSpecY;
 const noDataX = () => UI_W - L.noDataSlots * DIGIT_W + L.noDataDX;
-const noDataY = () => readingY() + Math.floor((L.readingH - TEXT_H) / 2) + L.noDataDY;
+const noDataY = () => readingY() + L.noDataDY;
 
 /* ---- status_bar core 表：与 status_bar.c 一致 ---- */
 const CORE_TABLE = [
@@ -520,25 +520,26 @@ function render() {
   /* 读数带 */
   const vColor = toCss(specialColor(special));
   if (noData) {
+    /* 无数据占位：7 个 '?' 大字，复用读数位置和大小（右对齐槽位） */
     for (let i = 0; i < L.noDataSlots; i++) {
-      const bmp = textBitmap("?");
-      const gx = noDataX() + i*DIGIT_W + (DIGIT_W - TEXT_W)/2;
-      drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, gx, noDataY(),
-                toCss(PLACEHOLDER_COLOR));
+      const bmp = digitBitmap("?");
+      if (bmp) drawGlyph(ctx, bmp, DIGIT_W, DIGIT_H, DIGIT_BPR,
+                         noDataX() + i*DIGIT_W, noDataY(),
+                         toCss(PLACEHOLDER_COLOR));
     }
   } else if (special !== 0) {
-    /* 特殊态：小字 text 渲染（OVERFLOW / ----），对齐固件
-     * ui_draw_text(frame.start_x, frame.reading_y, ...)。 */
+    /* 特殊态（OVERFLOW / ----）：大字渲染，复用读数位置和大小，
+     * 与固件 ui_draw_digits(frame.start_x, frame.reading_y, ...) 一致。 */
     const layout = layoutValue(value.length, 0, Math.floor(UI_W / DIGIT_W));
     let sx = layout.startX;
     for (const ch of value) {
-      const bmp = textBitmap(ch);
-      if (bmp) drawGlyph(ctx, bmp, TEXT_W, TEXT_H, TEXT_BPR, sx, readingY(), vColor);
-      sx += TEXT_W;
+      const bmp = digitBitmap(ch);
+      if (bmp) drawGlyph(ctx, bmp, DIGIT_W, DIGIT_H, DIGIT_BPR, sx,
+                         readingY(), vColor);
+      sx += DIGIT_W;
     }
     if (blink && value.length && blinkVis) {
-      const cxl = layoutValue(value.length, 0, Math.floor(UI_W / DIGIT_W));
-      const cxp = cursorX(cxl, pos);
+      const cxp = cursorX(layout, pos);
       ctx.fillStyle = vColor;
       ctx.fillRect(cxp, cursorY(), DIGIT_W, L.cursorH);
     }
@@ -598,7 +599,7 @@ const ELEMENTS = [
     box:() => ({ x:0, y:cursorY(), w:UI_W, h:L.cursorH }),
   },
   { id:"nodata", name:"无数据 '?' 槽", color:"#c9a0ff",
-    box:() => ({ x:noDataX(), y:noDataY(), w:L.noDataSlots*DIGIT_W, h:TEXT_H }),
+    box:() => ({ x:noDataX(), y:noDataY(), w:L.noDataSlots*DIGIT_W, h:DIGIT_H }),
   },
   { id:"unit", name:"单位文本 (左)", color:"#5ac8fa",
     box:() => { const w = unitWidth(); return { x:L.unitPadX, y:topBandY(), w, h:TEXT_H }; },

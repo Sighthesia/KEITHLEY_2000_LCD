@@ -26,7 +26,7 @@ from PIL import Image, ImageDraw, ImageFont
 W = 48              # cell width  (px)
 H = 96              # cell height (px)
 BYTES_PER_ROW = W // 8          # 6
-CHARSET = "0123456789.+-Ee%mukKMWVOhDAC"
+CHARSET = "0123456789.+-Ee%mukKMWVOhDAC?RFL"
 
 
 def fits(font):

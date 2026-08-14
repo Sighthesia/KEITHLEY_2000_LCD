@@ -54,8 +54,17 @@ function report(name, ok) {
                   "8":1097,"9":880,".":137,"+":484,"-":156,"E":881,"e":820,"%":1058,
                   "m":960,"u":695,"k":829,"K":994,"M":1129,"W":1283,"V":818,"O":974,
                   "h":883,"D":1050,"A":904,"C":830 };
+  /* Extended charset (? R F L) added for big-digit special states. */
+  const extra = { "?":576, "R":1106, "F":725, "L":628 };
   const code = `
     for (const [ch, expect] of Object.entries(${JSON.stringify(truth)})) {
+      const bmp = digitBitmap(ch);
+      let ink = 0;
+      for (let y = 0; y < 96; y++) for (let x = 0; x < 48; x++)
+        if (bmp[y*6 + (x>>3)] & (0x80 >> (x & 7))) ink++;
+      ok(ink === expect, "digit '" + ch + "' ink " + ink + " == C " + expect);
+    }
+    for (const [ch, expect] of Object.entries(${JSON.stringify(extra)})) {
       const bmp = digitBitmap(ch);
       let ink = 0;
       for (let y = 0; y < 96; y++) for (let x = 0; x < 48; x++)
@@ -146,6 +155,35 @@ function report(name, ok) {
     if (panelCtx.px[y * 960 + x]) { if (y < minY) minY = y; if (y > maxY) maxY = y; }
   report("top-band text near y=0", minY <= 24);
   report("big digits reach y~119", maxY >= 119);
+
+  /* special/no-data reuse the reading big-glyph size: OVERFLOW must render
+   * with the 48x96 digit glyphs (height spans the reading band), not small
+   * 12x24 text. */
+  const bigRender = `
+    const ok = (cond, name) => report(name, cond);
+    panelCtx.px.fill(0);
+    document.getElementById("inpNoData").checked = false;
+    document.getElementById("selSpecial").value = "1";
+    document.getElementById("inpValue").value = "OVERFLOW";
+    render();
+    let litBig = 0, maxYb = -1, minYb = 999;
+    for (let y = 24; y < 320; y++) for (let x = 0; x < 960; x++)
+      if (panelCtx.px[y * 960 + x]) { litBig++; if (y < minYb) minYb = y; if (y > maxYb) maxYb = y; }
+    ok(litBig > 5000, "OVERFLOW big-glyph ink " + litBig);
+    ok(minYb >= 24 && maxYb >= 120, "OVERFLOW spans reading band y " + minYb + ".." + maxYb);
+
+    /* no-data '?' slots: seven big glyphs filling the band. */
+    panelCtx.px.fill(0);
+    document.getElementById("selSpecial").value = "0";
+    document.getElementById("inpNoData").checked = true;
+    render();
+    let litQ = 0, minYq = 999, maxYq = -1;
+    for (let y = 24; y < 320; y++) for (let x = 0; x < 960; x++)
+      if (panelCtx.px[y * 960 + x]) { litQ++; if (y < minYq) minYq = y; if (y > maxYq) maxYq = y; }
+    ok(litQ > 3000, "no-data '?' big-glyph ink " + litQ);
+    ok(minYq >= 24 && maxYq >= 120, "no-data '?' spans reading band y " + minYq + ".." + maxYq);
+  `;
+  eval(fontJs + "\n" + script + "\n" + bigRender);
 }
 
 if (failures) { console.error(`\n${failures} check(s) FAILED`); process.exit(1); }

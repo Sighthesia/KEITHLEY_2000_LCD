@@ -302,19 +302,19 @@ static void reading_scene_render(void)
                         MAIN_DISPLAY_STATUS_LABEL_GAP);
     }
     if (frame.no_data) {
-        /* No-data state: seven '?' slots, one per right-aligned reading slot,
-         * vertically centred in the reading band (placeholder grey). */
+        /* No-data state: seven '?' big-digit slots, one per right-aligned
+         * reading slot, filling the reading band like normal big digits. */
         for (i = 0u; i < MAIN_DISPLAY_NO_DATA_SLOTS; i++) {
-            (void)ui_draw_text((uint16_t)(frame.no_data_x +
-                                          (uint16_t)i * FONT_DIGIT_WIDTH +
-                                          (FONT_DIGIT_WIDTH -
-                                           FONT_TEXT_WIDTH) / 2u),
-                               frame.no_data_y, "?",
-                               MAIN_DISPLAY_PLACEHOLDER_COLOR);
+            (void)ui_draw_digits((uint16_t)(frame.no_data_x +
+                                            (uint16_t)i * FONT_DIGIT_WIDTH),
+                                 frame.no_data_y, "?",
+                                 MAIN_DISPLAY_PLACEHOLDER_COLOR);
         }
     } else if (frame.special != 0u) {
-        (void)ui_draw_text(frame.start_x, frame.reading_y, frame.value,
-                           frame.value_color);
+        /* Special readings (OVERFLOW / ----): big digits at the reading
+         * position, reusing the normal reading layout and size. */
+        (void)ui_draw_digits(frame.start_x, frame.reading_y, frame.value,
+                             frame.value_color);
     } else {
         (void)ui_draw_digits(frame.start_x, frame.reading_y, frame.value,
                              frame.value_color);

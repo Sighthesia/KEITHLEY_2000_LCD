@@ -30,7 +30,7 @@ def parse_bitmaps(path):
 
 def digits_js():
     glyphs = parse_bitmaps(sys.argv[1] + "/font_digits.c")
-    chars = "0123456789.+-Ee%mukKMWVOhDAC"
+    chars = "0123456789.+-Ee%mukKMWVOhDAC?RFL"
     return ("const DIGIT_CHARS = %r;\n" % chars) + \
         "const DIGIT_W = 48, DIGIT_H = 96, DIGIT_BPR = 6;\n" + \
         "const DIGIT_BITMAPS = [\n" + ",\n".join("  [" + ",".join("0x%02X" % b for b in g) + "]" for g in glyphs) + "\n];\n"

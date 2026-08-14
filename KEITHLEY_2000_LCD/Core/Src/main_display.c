@@ -162,13 +162,11 @@ void main_display_format(const ui_model_t *m, main_display_frame_t *f)
     f->unit_x = 0u;
     f->unit_placeholder = (f->unit_len == 0u);
 
-    /* No-data hint: seven '?' slots right-aligned to the reading position,
-     * vertically centred in the reading band. */
+    /* No-data hint: seven '?' big-glyph slots right-aligned to the reading
+     * position, filling the reading band like normal big digits. */
     f->no_data_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH -
                               MAIN_DISPLAY_NO_DATA_SLOTS * FONT_DIGIT_WIDTH);
-    f->no_data_y = (uint16_t)(MAIN_DISPLAY_READING_Y +
-                              (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) /
-                              2u);
+    f->no_data_y = MAIN_DISPLAY_READING_Y;
 
     if (!f->no_data) {
         layout = main_display_layout_value(f->value_len, MAIN_DISPLAY_READING_X,

@@ -138,8 +138,7 @@ int main(void)
         assert(f.unit_placeholder);
         assert(f.no_data_x == MAIN_DISPLAY_UI_WIDTH -
                               MAIN_DISPLAY_NO_DATA_SLOTS * FONT_DIGIT_WIDTH);
-        assert(f.no_data_y == MAIN_DISPLAY_READING_Y +
-                              (MAIN_DISPLAY_READING_H - FONT_TEXT_HEIGHT) / 2u);
+        assert(f.no_data_y == MAIN_DISPLAY_READING_Y);
         assert(f.status_count == 0u);
         assert(f.unit_len == 0u);
     }
