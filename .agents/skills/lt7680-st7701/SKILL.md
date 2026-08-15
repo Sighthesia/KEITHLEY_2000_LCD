@@ -257,6 +257,31 @@ auto-increment that never covered the canvas. Clear/fill via the GE instead:
 - There is no "draw color select" register at D0h/D1h (D0h=FLDR, D1h=F2FSSR);
   the GE always draws in the foreground color.
 
+### Double-buffered page presentation and BTE copy (verified 2026-08-15)
+
+Visible font scanning is eliminated by drawing to a non-visible SDRAM canvas
+page and switching `MISA` only after the frame completes. Use a 1MiB page
+stride (`page 0=0x000000`, `page 1=0x100000`): `MISA` and `CVSSA` are written
+as four separate registers, and this alignment keeps the lower address bytes
+zero during a page switch rather than exposing a transient intermediate address.
+
+To seed the hidden page efficiently, BTE memory-copy-with-ROP must be configured
+as follows for RGB565 pages: `BTE_CTRL1` (91h) = `0xC2` (ROP code 12 copies S0,
+operation 2 is memory copy), `BTE_COLR` (92h) = `0x25` (S0/S1/destination all
+16bpp), then program source/destination start addresses, both strides=320,
+coordinates=(0,0), size=(320,960), and start via `BTE_CTRL0` (90h)=`0x10`.
+Wait for CORE_BUSY to clear before GE drawing or changing MISA.
+
+**Do not use `BTE_CTRL1=0xF2`.** The high nibble is the ROP code, not a
+bus-width field: `0xF` is whiteness. Its physical symptom is a white copied
+area, inverted-looking black trend waveform, and residual green lines. `0xC2`
+copies the actual source pixels.
+
+Double buffering prevents partial frames but does not itself guarantee high
+refresh rate. The complete BTE-copy-to-present interval includes all remaining
+GE glyph runs and trend columns. Avoid re-rendering static labels/grid each
+frame; profile the full interval on target before advertising 10Hz/5Hz.
+
 ### Boot sequence cosmetics
 
 Write `REG[12h]=0x08` (display off, test pattern off) immediately after

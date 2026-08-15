@@ -59,6 +59,12 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_FGCG 0xD3u
 #define LT7680_REG_FGCB 0xD4u
 
+/* Keep page 1 on a 1 MiB boundary. MISA/CVSSA are four separate register
+ * writes on the SPI bus; this alignment makes the first three bytes remain
+ * zero when switching from page 0, so the visible address changes only on the
+ * final byte instead of exposing intermediate addresses during the update. */
+#define LT7680_CANVAS_PAGE_BYTES 0x00100000u
+
 /* GE draw ops: LT768x DS V4.2 + Levetop LT768_Lib / RAiO Ra8876_Lite.
  * Filled rectangles go through DCR1 (REG[76h]): bit7=start, bit6=fill,
  * bit[5:4]=10b rectangle; DCR0 (REG[67h]) only handles line/triangle. */
@@ -280,6 +286,26 @@ lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel)
     st = configure_panel();
     if (st != LT7680_OK) return st;
     return configure_windows();
+}
+
+lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page)
+{
+    if (page > 1u || s_panel.width == 0u || s_panel.height == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    return wr32le(LT7680_REG_CVSSA0,
+                  (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
+}
+
+lt7680_status_t lt7680_gfx_present_page(uint8_t page)
+{
+    if (page > 1u || s_panel.width == 0u || s_panel.height == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    /* MISA is latched by the display fetch path; changing it does not blank
+     * the panel and therefore presents the already-complete page atomically. */
+    return wr32le(LT7680_REG_MISA0,
+                  (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
 }
 
 lt7680_status_t lt7680_gfx_show_color_bars(void)

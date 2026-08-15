@@ -210,10 +210,10 @@ static void init_spi1(void)
 {
     __HAL_RCC_SPI1_CLK_ENABLE();
     SPI1->CR1 = 0;
-    /* Mode 0 (CPOL=0, CPHA=0), master, 8-bit, MSB first, /2 prescaler.
-     * PCLK2 = 8 MHz -> SPI clock = 4 MHz.  Mode 0 matches the verified
+    /* Mode 0 (CPOL=0, CPHA=0), master, 8-bit, MSB first, /4 prescaler.
+     * PCLK2 = 72 MHz -> SPI clock = 18 MHz.  Mode 0 matches the verified
      * bit-bang signalling the LT7680 color-bars milestone used. */
-    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM | SPI_CR1_BR_0;
+    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM | SPI_CR1_BR_1;
     SPI1->CR2 = 0;
     SPI1->CR1 |= SPI_CR1_SPE;
 }

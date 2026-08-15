@@ -18,6 +18,10 @@ typedef struct {
 } lt7680_rect_t;
 
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
+/* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
+lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
+/* Atomically make a completed canvas page the visible main image. */
+lt7680_status_t lt7680_gfx_present_page(uint8_t page);
 lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);

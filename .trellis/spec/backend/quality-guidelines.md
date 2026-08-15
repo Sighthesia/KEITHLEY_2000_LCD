@@ -49,6 +49,26 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - Rendering is resumable. Each step emits bounded bitmap runs or graph columns,
   then returns so the main loop can drain RX. The target acceptance limit is a
   measured worst-case slice below 10ms.
+- LT7680 double buffering uses two SDRAM pages. Render only to the non-visible
+  `CVSSA` page and present it only after completion by changing `MISA`; use a
+  1MiB-aligned second page so multi-register `MISA` writes do not expose an
+  intermediate display address.
+- Build each page's static base independently during its first hidden render.
+  Do not copy a complete 320x960 RGB565 page on every update: at 614400 bytes,
+  that transfer dominates the frame interval. Before presenting an existing
+  page, repaint all dynamic regions that can differ from the currently visible
+  page and track each page's completed text/trend generation separately.
+- Trend raster caches are page-local. With unchanged trend limits, compare the
+  new projection against that page's cached columns and repaint only changed
+  columns. A change in data availability or axis limits requires clearing and
+  rebuilding the full trend region, including grid and labels.
+- For BTE memory-copy-with-ROP of RGB565 pages, `BTE_CTRL1` must be `0xC2`
+  (ROP code 12 = copy S0, operation 2 = memory copy) and `BTE_COLR` must be
+  `0x25` (S0/S1/destination 16bpp). `0xF2` selects ROP whiteness and produces
+  white/inverted regions; never treat the ROP nibble as a bus-width field.
+- A complete page copy plus all 240 trend columns still bounds presentation
+  rate even when every individual slice is cooperative. Measure the full
+  copy-to-present interval on hardware before claiming the 10Hz/5Hz ceilings.
 
 ### 4. Validation & Error Matrix
 
@@ -63,6 +83,9 @@ model mutation, trend conversion, and drawing belong to the main loop.
 | Measurement dimension changes | Clear history before adding the new sample |
 | `OVERFLOW`, `----`, malformed number/unit | Do not insert trend sample |
 | Render frame changes mid-paint | Finish or explicitly supersede at a safe state boundary |
+| BTE page copy uses CTRL1 `0xF2` | Reject it: white/inverted copied regions mean ROP whiteness was selected |
+| Double-buffer page switch | Do not present until BTE and all dirty-region GE work are idle |
+| Alternate page has an older text/trend generation | Repaint that page's dynamic region before MISA present; never present it as-is |
 
 ### 5. Good/Base/Bad Cases
 
@@ -73,6 +96,10 @@ model mutation, trend conversion, and drawing belong to the main loop.
   documented 512-byte queue to 511 bytes.
 - Bad: projection checks only array index and lets an old wrapped slot reappear
   as a future sample.
+- Bad: treating an apparently fast BTE page copy as proof of 10Hz refresh while
+  still redrawing every trend column and large-glyph stroke before present.
+- Bad: sharing one curve cache between alternate SDRAM pages, causing the
+  renderer to skip columns that exist only on the other page.
 
 ### 6. Tests Required
 
@@ -87,6 +114,9 @@ model mutation, trend conversion, and drawing belong to the main loop.
   arrays reside in static RAM rather than an automatic stack frame.
 - Measure cooperative renderer slices on hardware; host tests can verify work
   budgets/state progression but cannot prove elapsed microcontroller time.
+- Verify each independently initialized page contains the static base and its
+  current dynamic regions before MISA presentation. Alternate pages under a
+  changing reading and confirm no older text or curve returns.
 
 ### 7. Wrong vs Correct
 

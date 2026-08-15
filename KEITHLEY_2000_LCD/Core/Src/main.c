@@ -63,7 +63,7 @@
  * charset (no U/Z/S glyphs; Flash too tight to add them). Set to 1 to enable;
  * excluded from the normal build so the Flash budget is unaffected. Keep the
  * unit table in sync with sim/index.html. */
-#define K2000_DEMO_FEED 0U
+#define K2000_DEMO_FEED 1U
 
 /* USER CODE END PD */
 
@@ -90,14 +90,37 @@ static ui_model_t s_ui;
 static keypad_t s_keypad;
 static bool s_display_ready;
 static bool s_display_enabled;
+static bool s_frame_rendering;
+static uint8_t s_visible_page;
+static uint8_t s_render_page;
+static uint8_t s_ready_page_mask;
+static bool s_render_full_page;
+static uint8_t s_text_generation;
+static uint8_t s_page_text_generation[2];
+static uint8_t s_frame_text_generation;
+static bool s_frame_has_trend_update;
+
+#if K2000_DEMO_FEED
+static uint32_t s_cnt_demo;
+#endif
+static uint32_t s_cnt_key;
+static uint32_t s_cnt_blink;
+static uint32_t s_cnt_scene;
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
 static uint32_t s_blink_tick;
 static trend_buffer_t s_trend;
 static trend_column_t s_trend_columns[TREND_MAX_COLUMNS];
-static uint8_t s_drawn_trend_y0[TREND_MAX_COLUMNS];
-static uint8_t s_drawn_trend_y1[TREND_MAX_COLUMNS];
-static uint8_t s_drawn_trend_occupied[(TREND_MAX_COLUMNS + 7u) / 8u];
+/* Each SDRAM page owns its own dynamic curve. Keep the last rasterized
+ * projection per page so a stable axis only repaints columns that changed
+ * since this particular page was last visible. */
+static uint8_t s_drawn_trend_y0[2][TREND_MAX_COLUMNS];
+static uint8_t s_drawn_trend_y1[2][TREND_MAX_COLUMNS];
+static uint8_t s_drawn_trend_occupied[2][(TREND_MAX_COLUMNS + 7u) / 8u];
+static bool s_page_trend_has_data[2];
+static float s_page_trend_minimum[2];
+static float s_page_trend_maximum[2];
+static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
 static uint32_t s_trend_refresh_tick;
@@ -259,13 +282,54 @@ static void k2000_demo_feed(void)
 
 static void display_enable_after_initial_frame(void)
 {
-    if (render_scheduler_take_initial_complete(&s_renderer) &&
-        !s_display_enabled)
+    bool initial_complete = render_scheduler_take_initial_complete(&s_renderer);
+
+    if ((initial_complete ||
+         (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE)) &&
+        lt7680_gfx_present_page(s_render_page) == LT7680_OK)
     {
-        (void)lt7680_write_reg(0x12u, 0x48u);
-        s_display_enabled = true;
-        hal_uart_send_text("PASS initial frame enabled\r\n");
+        s_visible_page = s_render_page;
+        s_ready_page_mask |= (uint8_t)(1u << s_render_page);
+        s_page_text_generation[s_render_page] = s_frame_text_generation;
+        if (s_frame_has_trend_update)
+        {
+            s_page_trend_has_data[s_render_page] = s_frame.trend_has_data;
+            s_page_trend_minimum[s_render_page] = s_frame.trend_minimum;
+            s_page_trend_maximum[s_render_page] = s_frame.trend_maximum;
+        }
+        s_frame_rendering = false;
+        if (!s_display_enabled)
+        {
+            (void)lt7680_write_reg(0x12u, 0x48u);
+            s_display_enabled = true;
+            hal_uart_send_text("PASS initial frame enabled\r\n");
+        }
     }
+}
+
+static bool begin_hidden_frame(void)
+{
+    lt7680_status_t st;
+
+    s_render_page = (uint8_t)(s_visible_page ^ 1u);
+    st = lt7680_gfx_select_canvas_page(s_render_page);
+    if (st != LT7680_OK)
+        return false;
+    s_render_full_page =
+        (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
+    if (s_render_full_page)
+    {
+        st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
+        if (st != LT7680_OK)
+            return false;
+        render_scheduler_init(&s_renderer);
+        s_waiting_visible = false;
+    }
+    s_frame_rendering = true;
+    s_frame_has_trend_update = s_render_full_page;
+    s_render_item = 0u;
+    s_render_column = 0u;
+    return true;
 }
 
 static void proto_on_event(const k2000_event_t *evt)
@@ -435,7 +499,10 @@ static const uint8_t *digit_glyph(const char *text, uint8_t *advance)
 static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
                                  uint16_t color, uint8_t mode)
 {
-    uint8_t budget = 12u;
+    /* A GE rectangle is a blocking SPI transaction.  Keep this small enough
+     * that the main loop can return to the RX ISR/keypad between calls; a
+     * large glyph may therefore span several cooperative calls. */
+    uint16_t budget = 64u;
     if (!s_bitmap_job.active)
     {
         s_bitmap_job.text = text;
@@ -547,7 +614,7 @@ static uint16_t right_text_x(const char *text, uint16_t right_edge)
 
 static bool trend_drawn_occupied(uint16_t column)
 {
-    return (s_drawn_trend_occupied[column >> 3] &
+    return (s_drawn_trend_occupied[s_render_page][column >> 3] &
             (uint8_t)(1u << (column & 7u))) != 0u;
 }
 
@@ -556,11 +623,11 @@ static void trend_set_drawn(uint16_t column, bool occupied,
 {
     uint8_t mask = (uint8_t)(1u << (column & 7u));
     if (occupied)
-        s_drawn_trend_occupied[column >> 3] |= mask;
+        s_drawn_trend_occupied[s_render_page][column >> 3] |= mask;
     else
-        s_drawn_trend_occupied[column >> 3] &= (uint8_t)~mask;
-    s_drawn_trend_y0[column] = y0;
-    s_drawn_trend_y1[column] = y1;
+        s_drawn_trend_occupied[s_render_page][column >> 3] &= (uint8_t)~mask;
+    s_drawn_trend_y0[s_render_page][column] = y0;
+    s_drawn_trend_y1[s_render_page][column] = y1;
 }
 
 static void trend_restore_grid(uint16_t x0, uint16_t x1,
@@ -595,6 +662,120 @@ static uint16_t trend_y_label_y(uint8_t index)
     return label_y < MAIN_DISPLAY_TREND_Y ? MAIN_DISPLAY_TREND_Y : label_y;
 }
 
+#if K2000_DEMO_FEED
+static uint8_t dbg_put_u16(char *b, uint16_t v)
+{
+    char tmp[6];
+    uint8_t i = 0u, n = 0u;
+    do
+    {
+        tmp[i++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v != 0u);
+    while (i > 0u)
+        b[n++] = tmp[--i];
+    return n;
+}
+
+static uint8_t dbg_put_u32(char *b, uint32_t v)
+{
+    char tmp[11];
+    uint8_t i = 0u, n = 0u;
+    do
+    {
+        tmp[i++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v != 0u);
+    while (i > 0u)
+        b[n++] = tmp[--i];
+    return n;
+}
+
+static void dbg_progress(uint32_t now, uint8_t item, uint16_t column)
+{
+    static uint8_t s_dbg_last_phase = 0xFFu;
+    static uint32_t s_dbg_last_beat;
+    bool phase_changed = s_renderer.phase != s_dbg_last_phase;
+    bool beat_due = (now - s_dbg_last_beat) >= 1000u;
+    if (!phase_changed && !beat_due)
+    {
+        return;
+    }
+    s_dbg_last_phase = s_renderer.phase;
+    s_dbg_last_beat = now;
+    {
+        char b[48];
+        uint8_t n = 0u;
+        b[n++] = '\r';
+        b[n++] = '\n';
+        if (phase_changed)
+            memcpy(b + n, "DBGP", 4u);
+        else
+            memcpy(b + n, "DBG.", 4u);
+        n += 4u;
+        b[n++] = (char)('0' + (uint8_t)s_renderer.phase);
+        b[n++] = ' ';
+        b[n++] = 'I';
+        b[n++] = '=';
+        n += dbg_put_u16(b + n, item);
+        b[n++] = ' ';
+        b[n++] = 'C';
+        b[n++] = '=';
+        n += dbg_put_u16(b + n, column);
+        b[n++] = ' ';
+        b[n++] = 'T';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, now);
+        b[n++] = '\r';
+        b[n++] = '\n';
+        b[n] = '\0';
+        hal_uart_send_text(b);
+    }
+}
+static void dbg_main_beat(uint32_t now)
+{
+    static bool s_dbg_first = true;
+    static uint32_t s_dbg_last_beat;
+    if (!s_dbg_first && (now - s_dbg_last_beat) < 1000u)
+    {
+        return;
+    }
+    s_dbg_first = false;
+    s_dbg_last_beat = now;
+    {
+        char b[64];
+        uint8_t n = 0u;
+        b[n++] = '\r';
+        b[n++] = '\n';
+        memcpy(b + n, "LOOP ", 5u);
+        n += 5u;
+        b[n++] = 'D';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, s_cnt_demo);
+        b[n++] = ' ';
+        b[n++] = 'K';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, s_cnt_key);
+        b[n++] = ' ';
+        b[n++] = 'U';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, s_cnt_blink);
+        b[n++] = ' ';
+        b[n++] = 'S';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, s_cnt_scene);
+        b[n++] = ' ';
+        b[n++] = 'T';
+        b[n++] = '=';
+        n += dbg_put_u32(b + n, now);
+        b[n++] = '\r';
+        b[n++] = '\n';
+        b[n] = '\0';
+        hal_uart_send_text(b);
+    }
+}
+#endif /* K2000_DEMO_FEED */
+
 static void trend_draw_column(uint16_t column, bool erase_previous)
 {
     trend_column_t *c = &s_trend_columns[column];
@@ -603,25 +784,37 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     uint16_t x0 = x > MAIN_DISPLAY_PLOT_X ? (uint16_t)(x - 1u) : x;
     uint16_t x1 = x < MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W ? (uint16_t)(x + 1u) : x;
     uint8_t y0 = 0u, y1 = 0u;
+    bool occupied = c->occupied && s_frame.trend_has_data;
 
-    if (erase_previous && trend_drawn_occupied(column))
-    {
-        uint16_t old_y0 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                     s_drawn_trend_y0[column]);
-        uint16_t old_y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                     s_drawn_trend_y1[column]);
-        (void)ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
-                           (uint16_t)(old_y1 - old_y0 + 1u),
-                           MAIN_DISPLAY_COLOR_BG);
-        trend_restore_grid(x0, x1, old_y0, old_y1);
-    }
-    if (c->occupied && s_frame.trend_has_data)
+    if (occupied)
     {
         float span = s_frame.trend_maximum - s_frame.trend_minimum;
         y0 = (uint8_t)((s_frame.trend_maximum - c->maximum) *
                        MAIN_DISPLAY_PLOT_H / span);
         y1 = (uint8_t)((s_frame.trend_maximum - c->minimum) *
                        MAIN_DISPLAY_PLOT_H / span);
+    }
+    if (!s_trend_full_repaint &&
+        occupied == trend_drawn_occupied(column) &&
+        (!occupied || (s_drawn_trend_y0[s_render_page][column] == y0 &&
+                       s_drawn_trend_y1[s_render_page][column] == y1)))
+    {
+        return;
+    }
+
+    if (erase_previous && trend_drawn_occupied(column))
+    {
+        uint16_t old_y0 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                      s_drawn_trend_y0[s_render_page][column]);
+        uint16_t old_y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                      s_drawn_trend_y1[s_render_page][column]);
+        (void)ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
+                           (uint16_t)(old_y1 - old_y0 + 1u),
+                           MAIN_DISPLAY_COLOR_BG);
+        trend_restore_grid(x0, x1, old_y0, old_y1);
+    }
+    if (occupied)
+    {
         if (x > MAIN_DISPLAY_PLOT_X)
             (void)ui_draw_line((uint16_t)(x - 1u),
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0),
@@ -638,7 +831,7 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
                                MAIN_DISPLAY_COLOR_GREEN_DIM);
     }
-    trend_set_drawn(column, c->occupied && s_frame.trend_has_data, y0, y1);
+    trend_set_drawn(column, occupied, y0, y1);
 }
 
 static void reading_scene_render(void)
@@ -647,12 +840,24 @@ static void reading_scene_render(void)
     bool initial_phase;
     bool text_due;
     bool trend_due;
+    bool page_text_stale;
 
     if (!s_display_ready)
     {
         return;
     }
+#if K2000_DEMO_FEED
+    dbg_progress(now, s_render_item, s_render_column);
+#endif
     trend_buffer_update(&s_trend, now);
+    if (s_renderer.phase == RENDER_PHASE_IDLE && s_frame_rendering)
+    {
+        /* A status/reading-only update reaches IDLE without visiting the
+         * trend-column completion path. Present it before accepting another
+         * snapshot, otherwise the completed hidden page could be overwritten. */
+        display_enable_after_initial_frame();
+        return;
+    }
     /* Publish immutable render snapshots only while idle. Queue a due trend
      * before text regions so a continuously dirty 10 Hz reading cannot starve
      * the 5 Hz graph; the region request is retained by the scheduler and runs
@@ -663,25 +868,44 @@ static void reading_scene_render(void)
         text_due = s_ui_dirty_regions != 0u &&
                    (now - s_text_refresh_tick) >= 100u;
         trend_due = (now - s_trend_refresh_tick) >= 200u;
-        if (text_due)
+        if (text_due || trend_due)
         {
-            main_display_format(&s_ui, &s_frame);
-            s_text_refresh_tick = now;
-        }
-        if (trend_due)
-        {
-            (void)trend_buffer_project(&s_trend, now, s_trend_columns,
-                                       TREND_MAX_COLUMNS);
-            main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
-            s_trend_refresh_tick = now;
-            s_render_item = 0u;
-            s_render_column = 0u;
-            render_scheduler_request_trend(&s_renderer);
-        }
-        if (text_due)
-        {
-            render_scheduler_request_regions(&s_renderer, s_ui_dirty_regions);
-            s_ui_dirty_regions = 0u;
+            if (begin_hidden_frame())
+            {
+                if (text_due)
+                    s_text_generation++;
+                main_display_format(&s_ui, &s_frame);
+                (void)trend_buffer_project(&s_trend, now, s_trend_columns,
+                                           TREND_MAX_COLUMNS);
+                main_display_format_trend(&s_trend, now, s_frame.unit,
+                                          &s_frame);
+                s_trend_full_repaint = s_render_full_page ||
+                    s_page_trend_has_data[s_render_page] !=
+                        s_frame.trend_has_data ||
+                    (s_frame.trend_has_data &&
+                     (s_page_trend_minimum[s_render_page] !=
+                          s_frame.trend_minimum ||
+                      s_page_trend_maximum[s_render_page] !=
+                          s_frame.trend_maximum));
+                s_frame_text_generation = s_text_generation;
+                page_text_stale = s_render_full_page ||
+                    s_page_text_generation[s_render_page] !=
+                    s_frame_text_generation;
+                if (text_due)
+                    s_text_refresh_tick = now;
+                if (trend_due)
+                    s_trend_refresh_tick = now;
+                if (!s_render_full_page && page_text_stale)
+                    render_scheduler_request_regions(&s_renderer,
+                                                    RENDER_DIRTY_STATUS |
+                                                    RENDER_DIRTY_READING);
+                if (!s_render_full_page && trend_due)
+                {
+                    render_scheduler_request_trend(&s_renderer);
+                    s_frame_has_trend_update = true;
+                }
+                s_ui_dirty_regions = 0u;
+            }
         }
     }
     initial_phase = s_renderer.phase <= RENDER_PHASE_INITIAL_TREND_COLUMNS;
@@ -863,24 +1087,68 @@ static void reading_scene_render(void)
     }
     case RENDER_PHASE_UPDATE_TREND_AXES:
     {
+        if (!s_trend_full_repaint)
+        {
+            /* The existing labels/grid remain valid. The columns phase below
+             * compares against this page's cache and touches changed pixels
+             * only. */
+            render_scheduler_complete_phase(&s_renderer);
+            return;
+        }
+        if (s_render_item == 0u)
+        {
+            /* Pages are rendered independently after their one-time base
+             * build, so erase this page's dynamic trend canvas before drawing
+             * the new projection. This avoids carrying the other page's old
+             * curve into the next MISA presentation. */
+            (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y, 960u,
+                               MAIN_DISPLAY_TREND_H, MAIN_DISPLAY_COLOR_BG);
+            s_render_item = 1u;
+            return;
+        }
         /* Axis text owns x=0..95 only; the plot and resident grid start at 96.
          * Pair each local clear with its replacement before moving to the next
          * label. Thus a shorter label cannot leave stale pixels, while the
          * complete axis never disappears for several cooperative slices. */
-        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u &&
-            (s_render_item & 1u) == 0u)
+        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u &&
+            (s_render_item & 1u) != 0u)
         {
-            uint8_t i = (uint8_t)(s_render_item / 2u);
-            (void)ui_fill_rect(0u, trend_y_label_y(i),
-                               MAIN_DISPLAY_PLOT_X, FONT_TEXT_HEIGHT,
-                               MAIN_DISPLAY_COLOR_BG);
+            uint8_t i = (uint8_t)((s_render_item - 1u) / 2u);
+            uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                    i * MAIN_DISPLAY_PLOT_H / 3u);
+            (void)ui_draw_line(MAIN_DISPLAY_PLOT_X, y,
+                               MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
+                               MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
             return;
         }
-        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u)
+        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u)
         {
-            uint8_t i = (uint8_t)(s_render_item / 2u);
+            uint8_t i = (uint8_t)((s_render_item - 1u) / 2u);
             if (!ui_draw_text(4u, trend_y_label_y(i), s_frame.y_labels[i],
+                               MAIN_DISPLAY_COLOR_CYAN))
+                return;
+            s_render_item++;
+            return;
+        }
+        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
+                            MAIN_DISPLAY_X_LABEL_COUNT * 2u + 1u)
+        {
+            uint8_t n = (uint8_t)(s_render_item -
+                                  (MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u));
+            uint8_t i = (uint8_t)(n / 2u);
+            uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                                    i * MAIN_DISPLAY_PLOT_W / 4u);
+            if ((n & 1u) == 0u)
+            {
+                (void)ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x,
+                                   MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
+                                   MAIN_DISPLAY_COLOR_GRID);
+                s_render_item++;
+                return;
+            }
+            if (!ui_draw_text((uint16_t)(x > 24u ? x - 24u : x),
+                              MAIN_DISPLAY_X_LABEL_Y, s_frame.x_labels[i],
                               MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
@@ -893,7 +1161,10 @@ static void reading_scene_render(void)
     case RENDER_PHASE_INITIAL_TREND_COLUMNS:
     case RENDER_PHASE_UPDATE_TREND_COLUMNS:
     {
-        uint16_t budget = 3u;
+        /* Each column can issue up to three line commands, plus an erase and
+         * grid restoration on updates.  Rendering all 240 columns in one
+         * pass defeats the cooperative scheduler and can starve input. */
+        uint16_t budget = 8u;
         if (s_frame.trend_has_data && s_waiting_visible)
         {
             (void)ui_fill_rect(390u, 232u, 192u, FONT_TEXT_HEIGHT,
@@ -905,7 +1176,8 @@ static void reading_scene_render(void)
         }
         while (s_render_column < TREND_MAX_COLUMNS && budget-- > 0u)
         {
-            trend_draw_column(s_render_column, !initial_phase);
+            trend_draw_column(s_render_column,
+                              !initial_phase && !s_trend_full_repaint);
             s_render_column++;
         }
         if (s_render_column >= TREND_MAX_COLUMNS)
@@ -1017,7 +1289,7 @@ int main(void)
 #else
         const lt7680_panel_t panel = {320u, 960u, 16u};
 #endif
-        const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
+        static const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
         lt7680_status_t st;
         uint8_t status = 0u;
 
@@ -1025,9 +1297,9 @@ int main(void)
         k2000_proto_init(&proto_cb);
         panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
                              panel.width, panel.height);
-        hal_uart_send_text("\r\nK2000 TFT build13 trend-layout");
+        hal_uart_send_text("\r\nK2000 TFT build13 trend-layout v16");
 #if K2000_DEMO_FEED
-        hal_uart_send_text(" DEMO-FEED\r\n");
+        hal_uart_send_text(" DEMO-FEED v16\r\n");
 #else
         hal_uart_send_text("\r\n");
 #endif
@@ -1081,7 +1353,11 @@ int main(void)
                         /* Keep the display blank while SDRAM is cleared. Without this
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */
-                        st = lt7680_gfx_clear(0x0000u);
+                        s_visible_page = 0u;
+                        s_render_page = 1u;
+                        st = lt7680_gfx_select_canvas_page(s_render_page);
+                        if (st == LT7680_OK)
+                            st = lt7680_gfx_clear(0x0000u);
                         if (st != LT7680_OK)
                         {
                             hal_uart_send_text("FAIL clear=");
@@ -1098,9 +1374,12 @@ int main(void)
                                                       &s_frame);
                             (void)trend_buffer_project(&s_trend, HAL_GetTick(),
                                                        s_trend_columns, TREND_MAX_COLUMNS);
+                            s_frame_rendering = true;
+                            s_frame_has_trend_update = true;
                             s_ui_dirty_regions = 0u;
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
+                            hal_uart_send_text("\r\nINIT-OK\r\n");
                         }
                     }
                 }
@@ -1114,6 +1393,9 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
+#if K2000_DEMO_FEED
+        dbg_main_beat(HAL_GetTick());
+#endif
 #if !K2000_DEMO_FEED
         {
             uint16_t rx_budget = 128u;
@@ -1127,6 +1409,7 @@ int main(void)
 #endif
 #if K2000_DEMO_FEED
         k2000_demo_feed();
+        s_cnt_demo++;
 #endif
 
         /* Scan the key matrix, debounce, and passthrough press/release codes to
@@ -1135,6 +1418,7 @@ int main(void)
         {
             int code = keypad_scan(&s_keypad, hal_keypad_read_code(),
                                    HAL_GetTick());
+            s_cnt_key++;
             if (code != 0)
             {
                 uint8_t b = (uint8_t)code;
@@ -1143,7 +1427,9 @@ int main(void)
         }
 
         update_blink();
+        s_cnt_blink++;
         scene_mgr_render();
+        s_cnt_scene++;
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */
@@ -1166,7 +1452,9 @@ void SystemClock_Config(void)
     RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
     RCC_OscInitStruct.HSIState = RCC_HSI_ON;
     RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
+    RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL16;
     if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
     {
         Error_Handler();
@@ -1175,12 +1463,12 @@ void SystemClock_Config(void)
     /** Initializes the CPU, AHB and APB buses clocks
      */
     RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
     RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
     RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
     {
         Error_Handler();
     }
