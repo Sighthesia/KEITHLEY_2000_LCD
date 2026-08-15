@@ -53,6 +53,18 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
+/* Demo feed: synthesize K2000 host frames on a timer so the full
+ * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
+ * verified on the bench without an instrument. Values ramp up/down while the
+ * unit/range table rotates (VDC/VAC/ADC/AAC/OHM/KOHM/MOHM/Hz/kHz/MHz/CEL plus
+ * mV/mA variants), exercising the split DC/AC half-height suffix, the
+ * digit-size unit letters and the info column lamps (REL/FILT/AUTO/MATH,
+ * HOLD/TRIG, FAST/MED/SLOW rate). Units are limited to the 64x128 digit
+ * charset (no U/Z/S glyphs; Flash too tight to add them). Set to 1 to enable;
+ * excluded from the normal build so the Flash budget is unaffected. Keep the
+ * unit table in sync with sim/index.html. */
+#define K2000_DEMO_FEED 0U
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -107,6 +119,129 @@ typedef struct {
 } bitmap_job_t;
 
 static bitmap_job_t s_bitmap_job;
+
+#if K2000_DEMO_FEED
+/* One entry per demo "range". lo_mant/hi_mant are the ramp low/high mantissas
+ * scaled by 10^frac_digits; status09 packs REL=0x40 FILT=0x20 AUTO=0x10,
+ * status08 packs HOLD=0x10 TRIG=0x08 FAST=0x04 MED=0x02 SLOW=0x01. Mirrors
+ * sim/index.html DEMO_UNITS. */
+typedef struct {
+    const char *unit;
+    uint8_t int_digits;
+    uint8_t frac_digits;
+    uint32_t lo_mant;
+    uint32_t hi_mant;
+    uint8_t status09;
+    uint8_t status08;
+} demo_unit_t;
+
+static const demo_unit_t s_demo_units[] = {
+    { "VDC",  2u, 5u,  20000u, 1250000u, 0x10u, 0x04u },
+    { "VAC",  3u, 5u,  20000u, 7000000u, 0x30u, 0x02u },
+    { "ADC",  2u, 5u,  10000u, 300000u,  0x10u, 0x01u },
+    { "AAC",  2u, 5u,  10000u, 300000u,  0x40u, 0x12u },
+    { "MVDC", 3u, 5u,  10000u, 100000u,  0x30u, 0x04u },
+    { "MVAC", 3u, 5u,  10000u, 100000u,  0x10u, 0x01u },
+    { "MADC", 2u, 5u,  10000u, 200000u,  0x50u, 0x04u },
+    { "MAAC", 2u, 5u,  10000u, 200000u,  0x30u, 0x02u },
+    { "OHM",  4u, 4u,  1000u, 2000000u,  0x10u, 0x02u },
+    { "KOHM", 3u, 4u,  1000u, 1000000u,  0x50u, 0x01u },
+    { "MOHM", 3u, 4u,  1000u, 1000000u,  0x30u, 0x0Cu },
+    { "Hz",   3u, 3u,  1000u, 1000000u,  0x10u, 0x04u },
+    { "kHz",  3u, 3u,  1000u, 1000000u,  0x00u, 0x14u },
+    { "MHz",  2u, 3u,  1000u, 50000u,    0x40u, 0x02u },
+    { "\xC2\xB0" "CEL", 2u, 3u, 1000u, 50000u, 0x30u, 0x01u },
+};
+#define DEMO_UNIT_COUNT \
+    ((uint8_t)(sizeof(s_demo_units) / sizeof(s_demo_units[0])))
+#define DEMO_FEED_PERIOD_MS 100u
+#define DEMO_SAMPLES_PER_UNIT 40u
+
+static uint32_t s_demo_last_tick;
+static uint32_t s_demo_sample;
+
+static void demo_u32_to_padded(char *out, uint32_t v, uint8_t digits)
+{
+    uint8_t i = digits;
+    while (i > 0u) {
+        out[--i] = (char)('0' + (v % 10u));
+        v /= 10u;
+    }
+}
+
+static void demo_format_value(const demo_unit_t *u, char *out)
+{
+    uint32_t div = 1u;
+    uint32_t ph = s_demo_sample % DEMO_SAMPLES_PER_UNIT;
+    uint32_t tri = ph < (DEMO_SAMPLES_PER_UNIT / 2u)
+        ? ph : (DEMO_SAMPLES_PER_UNIT - ph);
+    uint32_t mant = u->lo_mant +
+        (u->hi_mant - u->lo_mant) * tri * 2u / DEMO_SAMPLES_PER_UNIT;
+    uint8_t i;
+    for (i = 0u; i < u->frac_digits; i++) {
+        div *= 10u;
+    }
+    demo_u32_to_padded(out, mant / div, u->int_digits);
+    out[u->int_digits] = '.';
+    demo_u32_to_padded(out + u->int_digits + 1u, mant % div, u->frac_digits);
+    out[u->int_digits + u->frac_digits + 1u] = '\0';
+}
+
+static void demo_feed_unit(const char *unit)
+{
+    /* A leading UTF-8 micro (C2 B5) or degree (C2 B0) is emitted as its
+     * inline symbol tag so the parser appends the symbol to the field instead
+     * of treating 0xC2 as a new-field tag (>=0x80). */
+    if (unit[0] == (char)0xC2u) {
+        if (unit[1] == (char)0xB5u) {
+            k2000_proto_feed(K2000_TAG_SYM_MICRO);
+            unit += 2;
+        } else if (unit[1] == (char)0xB0u) {
+            k2000_proto_feed(K2000_TAG_SYM_DEGREE);
+            unit += 2;
+        }
+    }
+    for (; *unit != '\0'; unit++) {
+        k2000_proto_feed((uint8_t)*unit);
+    }
+}
+
+static void k2000_demo_feed(void)
+{
+    uint32_t now = HAL_GetTick();
+    const demo_unit_t *u;
+    char text[16];
+    const char *p;
+    uint8_t unit_index;
+
+    if (now - s_demo_last_tick < DEMO_FEED_PERIOD_MS) {
+        return;
+    }
+    s_demo_last_tick = now;
+
+    unit_index = (uint8_t)((s_demo_sample / DEMO_SAMPLES_PER_UNIT) %
+                           DEMO_UNIT_COUNT);
+    u = &s_demo_units[unit_index];
+    demo_format_value(u, text);
+
+    /* 0x0D start, 0x01 field tag, value+unit text, then status tags. The
+     * field terminator doubles as the first status tag (see parser). */
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x01u);
+    for (p = text; *p != '\0'; p++) {
+        k2000_proto_feed((uint8_t)*p);
+    }
+    demo_feed_unit(u->unit);
+    k2000_proto_feed(K2000_TAG_STATUS_REL);   /* 0x09 REL/FILT/AUTO */
+    k2000_proto_feed(u->status09);
+    k2000_proto_feed(K2000_TAG_STATUS_HOLD);  /* 0x08 HOLD/TRIG/rate */
+    k2000_proto_feed(u->status08);
+    k2000_proto_feed(K2000_TAG_STATUS_SHIFT); /* 0x07 MATH lamp every 4th */
+    k2000_proto_feed((unit_index % 4u == 3u) ? 0x20u : 0x00u);
+
+    s_demo_sample++;
+}
+#endif /* K2000_DEMO_FEED */
 
 static void display_enable_after_initial_frame(void)
 {
@@ -740,7 +875,12 @@ int main(void)
     k2000_proto_init(&proto_cb);
     panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
                          panel.width, panel.height);
-    hal_uart_send_text("\r\nK2000 TFT build13 trend-layout\r\n");
+    hal_uart_send_text("\r\nK2000 TFT build13 trend-layout");
+#if K2000_DEMO_FEED
+    hal_uart_send_text(" DEMO-FEED\r\n");
+#else
+    hal_uart_send_text("\r\n");
+#endif
     hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
     st = lt7680_reset();
@@ -815,6 +955,9 @@ int main(void)
       while (rx_budget-- > 0u && (ch = hal_uart_receive_byte()) >= 0)
         k2000_proto_feed((uint8_t)ch);
     }
+#if K2000_DEMO_FEED
+    k2000_demo_feed();
+#endif
 
     /* Scan the key matrix, debounce, and passthrough press/release codes to
      * the host. Local-key interpretation (DISPLAY/TREND scene switching) is

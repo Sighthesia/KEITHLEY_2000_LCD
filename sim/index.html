@@ -12,6 +12,7 @@ html,body{margin:0;background:#111;color:#bbb;font:13px monospace}body{display:f
 <label>读数 <input id="reading" value="+03.68900"></label>
 <label>单位 <input id="unit" value="V"></label>
 <label><input id="overflow" type="checkbox"> OVERFLOW</label>
+<label><input id="demo" type="checkbox"> Demo 动态档位轮换</label>
 <p class="note">完整设计预设包含 10V AUTO、MOVING 10 与 GPIB 16；这些是仿真场景输入，不代表面板协议能够提供这些字段。</p>
 </div>
 <script src="font_data.js"></script>
@@ -45,8 +46,13 @@ function render(){
  let dx=L.readingX;digits(ctx,value,dx,ry,color);dx+=value.length*DIGIT_W;digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W;
  if(suffix)half(ctx,suffix,dx,ry+DIGIT_H-HALF_H,color);
  const info=(s,y,c)=>text(ctx,s,L.infoRight-s.length*TEXT_W,y,c);
- info("Zin: >10GΩ",L.infoZinY,COLORS.muted);info("Range: 10V AUTO",L.infoRangeY,COLORS.white);info("Rate: 500 Read/s",L.infoRateY,COLORS.white);
- text(ctx,"FILT",748,L.infoStatusY,COLORS.green);text(ctx,"REL",820,L.infoStatusY,COLORS.green);text(ctx,"MATH",892,L.infoStatusY,COLORS.green);
+ info("Zin: >10GΩ",L.infoZinY,COLORS.muted);
+ info(demo.on?demo.range:"Range: 10V AUTO",L.infoRangeY,COLORS.white);
+ info(demo.on?demo.rate:"Rate: 500 Read/s",L.infoRateY,COLORS.white);
+ const lamp=(on)=>on?COLORS.green:COLORS.muted;
+ text(ctx,"FILT",748,L.infoStatusY,lamp(demo.on?demo.filt:true));
+ text(ctx,"REL",820,L.infoStatusY,lamp(demo.on?demo.rel:true));
+ text(ctx,"MATH",892,L.infoStatusY,lamp(demo.on?demo.math:true));
  ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
  const data=traceData(),lo=Math.min(...data),hi=Math.max(...data),pad=(hi-lo)*.1,ylo=lo-pad,yhi=hi+pad;
  for(let i=0;i<4;i++)text(ctx,(yhi-(yhi-ylo)*i/3).toFixed(2)+"V",8,L.plotY+i*L.plotH/3-10,COLORS.cyan);
@@ -54,6 +60,44 @@ function render(){
  for(const [color,dy] of [[COLORS.greenDim,-1],[COLORS.greenDim,1],[COLORS.green,0]]){ctx.strokeStyle=color;ctx.beginPath();data.forEach((v,i)=>{const px=L.plotX+i*(L.plotW-1)/239,py=L.plotY+(yhi-v)/(yhi-ylo)*L.plotH+dy;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});ctx.stroke()}
  renderFB(document.getElementById("fb").getContext("2d"),ctx);
 }
-if(typeof document!=="undefined"){document.querySelectorAll("input").forEach(e=>e.addEventListener("input",render));render()}
+const DEMO_UNITS=[
+ {unit:"VDC",int:2,frac:5,lo:20000,hi:1250000,s9:0x10,s8:0x04},
+ {unit:"VAC",int:3,frac:5,lo:20000,hi:7000000,s9:0x30,s8:0x02},
+ {unit:"ADC",int:2,frac:5,lo:10000,hi:300000,s9:0x10,s8:0x01},
+ {unit:"AAC",int:2,frac:5,lo:10000,hi:300000,s9:0x40,s8:0x12},
+ {unit:"MVDC",int:3,frac:5,lo:10000,hi:100000,s9:0x30,s8:0x04},
+ {unit:"MVAC",int:3,frac:5,lo:10000,hi:100000,s9:0x10,s8:0x01},
+ {unit:"MADC",int:2,frac:5,lo:10000,hi:200000,s9:0x50,s8:0x04},
+ {unit:"MAAC",int:2,frac:5,lo:10000,hi:200000,s9:0x30,s8:0x02},
+ {unit:"OHM",int:4,frac:4,lo:1000,hi:2000000,s9:0x10,s8:0x02},
+ {unit:"KOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x50,s8:0x01},
+ {unit:"MOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x30,s8:0x0c},
+ {unit:"Hz",int:3,frac:3,lo:1000,hi:1000000,s9:0x10,s8:0x04},
+ {unit:"kHz",int:3,frac:3,lo:1000,hi:1000000,s9:0x00,s8:0x14},
+ {unit:"MHz",int:2,frac:3,lo:1000,hi:50000,s9:0x40,s8:0x02},
+ {unit:"°CEL",int:2,frac:3,lo:1000,hi:50000,s9:0x30,s8:0x01},
+];
+const DEMO_UNIT_COUNT=DEMO_UNITS.length,DEMO_SAMPLES_PER_UNIT=40,DEMO_FEED_PERIOD_MS=100;
+const DEMO_RATE_TEXT={0x04:"500 Read/s",0x02:"50 Read/s",0x01:"5 Read/s"};
+const demo={on:false,timer:null,sample:0,range:"Range: AUTO",rate:"Rate: -- Read/s",filt:false,rel:false,math:false};
+function demoPad(v,d){return String(v).padStart(d,"0")}
+function demoStep(){
+ const u=DEMO_UNITS[Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%DEMO_UNIT_COUNT];
+ const ph=demo.sample%DEMO_SAMPLES_PER_UNIT,tri=(ph<DEMO_SAMPLES_PER_UNIT/2?ph:DEMO_SAMPLES_PER_UNIT-ph)*2;
+ const div=10**u.frac,mant=u.lo+Math.round((u.hi-u.lo)*tri/DEMO_SAMPLES_PER_UNIT);
+ document.getElementById("reading").value=demoPad(Math.floor(mant/div),u.int)+"."+demoPad(mant%div,u.frac);
+ document.getElementById("unit").value=u.unit;
+ demo.range=(u.s9&0x10)?"Range: AUTO":"Range: MANUAL";
+ demo.rate="Rate: "+(DEMO_RATE_TEXT[u.s8&0x07]||"-- Read/s");
+ demo.filt=!!(u.s9&0x20);demo.rel=!!(u.s9&0x40);
+ demo.math=Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%4===3;
+ demo.sample++;render();
+}
+function toggleDemo(){
+ demo.on=!demo.on;
+ if(demo.on){demo.timer=setInterval(demoStep,DEMO_FEED_PERIOD_MS);demoStep()}
+ else{clearInterval(demo.timer);demo.timer=null;render()}
+}
+if(typeof document!=="undefined"){document.querySelectorAll("input").forEach(e=>e.addEventListener("input",render));document.getElementById("demo").addEventListener("change",toggleDemo);render()}
 </script>
 </body></html>
