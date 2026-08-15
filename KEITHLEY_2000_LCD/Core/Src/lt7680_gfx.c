@@ -59,6 +59,19 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_FGCG 0xD3u
 #define LT7680_REG_FGCB 0xD4u
 
+#define LT7680_REG_BTE_CTRL0 0x90u
+#define LT7680_REG_BTE_CTRL1 0x91u
+#define LT7680_REG_BTE_COLR 0x92u
+#define LT7680_REG_BTE_S0_STR 0x93u
+#define LT7680_REG_BTE_S0_WTH 0x97u
+#define LT7680_REG_BTE_S0_X 0x99u
+#define LT7680_REG_BTE_S0_Y 0x9Bu
+#define LT7680_REG_BTE_DT_STR 0xA7u
+#define LT7680_REG_BTE_DT_WTH 0xABu
+#define LT7680_REG_BTE_DT_X 0xADu
+#define LT7680_REG_BTE_DT_Y 0xAFu
+#define LT7680_REG_BTE_SIZE 0xB1u
+
 /* Keep page 1 on a 1 MiB boundary. MISA/CVSSA are four separate register
  * writes on the SPI bus; this alignment makes the first three bytes remain
  * zero when switching from page 0, so the visible address changes only on the
@@ -306,6 +319,46 @@ lt7680_status_t lt7680_gfx_present_page(uint8_t page)
      * the panel and therefore presents the already-complete page atomically. */
     return wr32le(LT7680_REG_MISA0,
                   (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
+}
+
+lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
+{
+    lt7680_status_t st;
+
+    if (source_page > 1u || target_page > 1u || source_page == target_page ||
+        s_panel.width == 0u || s_panel.height == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    /* RGB565 memory-copy-with-ROP: ROP C copies S0; F is whiteness. */
+    st = write_reg(LT7680_REG_BTE_CTRL1, 0xC2u);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_COLR, 0x25u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_S0_STR,
+                (uint32_t)source_page * LT7680_CANVAS_PAGE_BYTES);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_WTH, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_X, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_Y, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_DT_STR,
+                (uint32_t)target_page * LT7680_CANVAS_PAGE_BYTES);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_WTH, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_X, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_Y, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_SIZE, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13((uint8_t)(LT7680_REG_BTE_SIZE + 2u), s_panel.height);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
+    if (st != LT7680_OK) return st;
+    return wait_2d_idle();
 }
 
 lt7680_status_t lt7680_gfx_show_color_bars(void)
