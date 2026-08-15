@@ -307,7 +307,7 @@ static void display_enable_after_initial_frame(void)
     }
 }
 
-static bool begin_hidden_frame(void)
+static bool begin_hidden_frame(bool copy_trend)
 {
     lt7680_status_t st;
 
@@ -325,16 +325,15 @@ static bool begin_hidden_frame(void)
         render_scheduler_init(&s_renderer);
         s_waiting_visible = false;
     }
-    else
+    else if (copy_trend)
     {
-        /* The LT7680 does not shadow MISA. Keep both pages byte-identical
-         * before applying a frame's dirty regions; presenting independently
-         * evolved pages caused transient blank bands on the physical panel. */
-        st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
+        /* State/reading bands are cleared and redrawn locally. Only the
+         * resident trend band must inherit pixels from the visible page before
+         * column-level updates; copying it avoids a stale alternate page
+         * without the 614400-byte full-page BTE cost. */
+        st = lt7680_gfx_copy_trend(s_visible_page, s_render_page);
         if (st != LT7680_OK)
             return false;
-        s_page_text_generation[s_render_page] =
-            s_page_text_generation[s_visible_page];
         s_page_trend_has_data[s_render_page] =
             s_page_trend_has_data[s_visible_page];
         s_page_trend_minimum[s_render_page] =
@@ -864,6 +863,7 @@ static void reading_scene_render(void)
     bool initial_phase;
     bool text_due;
     bool trend_due;
+    bool trend_needed;
     bool page_text_stale;
 
     if (!s_display_ready)
@@ -894,23 +894,30 @@ static void reading_scene_render(void)
         trend_due = (now - s_trend_refresh_tick) >= 200u;
         if (text_due || trend_due)
         {
-            if (begin_hidden_frame())
+            s_render_page = (uint8_t)(s_visible_page ^ 1u);
+            s_render_full_page =
+                (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
+            main_display_format(&s_ui, &s_frame);
+            (void)trend_buffer_project(&s_trend, now, s_trend_columns,
+                                       TREND_MAX_COLUMNS);
+            main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
+            s_trend_full_repaint = s_render_full_page ||
+                /* The non-visible page receives the current visible trend
+                 * band before incremental columns are drawn, so compare this
+                 * snapshot with the visible-page scale. Comparing its stale
+                 * pre-copy cache would force a needless full trend rebuild. */
+                s_page_trend_has_data[s_visible_page] !=
+                    s_frame.trend_has_data ||
+                (s_frame.trend_has_data &&
+                 (s_page_trend_minimum[s_visible_page] !=
+                      s_frame.trend_minimum ||
+                  s_page_trend_maximum[s_visible_page] !=
+                      s_frame.trend_maximum));
+            trend_needed = trend_due || s_trend_full_repaint;
+            if (begin_hidden_frame(!s_trend_full_repaint))
             {
                 if (text_due)
                     s_text_generation++;
-                main_display_format(&s_ui, &s_frame);
-                (void)trend_buffer_project(&s_trend, now, s_trend_columns,
-                                           TREND_MAX_COLUMNS);
-                main_display_format_trend(&s_trend, now, s_frame.unit,
-                                          &s_frame);
-                s_trend_full_repaint = s_render_full_page ||
-                    s_page_trend_has_data[s_render_page] !=
-                        s_frame.trend_has_data ||
-                    (s_frame.trend_has_data &&
-                     (s_page_trend_minimum[s_render_page] !=
-                          s_frame.trend_minimum ||
-                      s_page_trend_maximum[s_render_page] !=
-                          s_frame.trend_maximum));
                 s_frame_text_generation = s_text_generation;
                 page_text_stale = s_render_full_page ||
                     s_page_text_generation[s_render_page] !=
@@ -923,7 +930,7 @@ static void reading_scene_render(void)
                     render_scheduler_request_regions(&s_renderer,
                                                     RENDER_DIRTY_STATUS |
                                                     RENDER_DIRTY_READING);
-                if (!s_render_full_page && trend_due)
+                if (!s_render_full_page && trend_needed)
                 {
                     render_scheduler_request_trend(&s_renderer);
                     s_frame_has_trend_update = true;
