@@ -14,6 +14,9 @@ void hal_uart_send(const uint8_t *data, uint16_t len);
 void hal_uart_send_text(const char *text);
 void hal_uart_send_hex8(uint8_t value);
 int hal_uart_receive_byte(void);
+void hal_uart_rx_irq(void);
+uint32_t hal_uart_rx_overflow_count(void);
+bool hal_uart_rx_recovering(void);
 
 /* Scan the 4x8 key matrix (rows PC13/PC14/PC15/PB10 x cols PB0..PB7) and
  * return the raw position code for one pressed key (KEYPAD_RAW(row,col)),

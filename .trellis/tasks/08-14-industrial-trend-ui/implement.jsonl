@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Feature crosses UART, protocol/model, frame formatting, simulator, and target renderer boundaries."}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Shared constants and pure modules must not diverge between simulator and the two firmware trees."}
+{"file":".trellis/tasks/08-14-industrial-trend-ui/research/keithley-protocol-and-spec.md","reason":"Provides the authenticated terminology, status-map evidence, impedance rules, and known protocol limits."}
+{"file":"docs/superpowers/specs/2026-08-14-k2000-industrial-trend-ui-design.md","reason":"Approved source design defining exact UI, runtime, trend, and acceptance behavior."}

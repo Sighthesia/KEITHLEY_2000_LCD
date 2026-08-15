@@ -6,9 +6,10 @@ cd "$(dirname "$0")/.."
 mkdir -p build
 
 SRCS="src/k2000_proto.c src/ui_model.c src/lt7680_gfx.c src/lt7680_bus.c \
-      src/font_digits.c src/font_text.c src/main_display.c \
+      src/font_digits.c src/font_half.c src/font_text.c src/main_display.c \
       src/panel_transform.c src/reading_split.c src/scene.c \
-      src/status_bar.c src/keypad.c"
+        src/status_bar.c src/trend_buffer.c src/uart_rx_queue.c src/keypad.c \
+        src/render_scheduler.c"
 
 for t in tests/test_*.c; do
     name=$(basename "$t" .c)

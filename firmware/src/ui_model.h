@@ -17,6 +17,19 @@ typedef enum {
     UI_RATE_SLOW,
 } ui_rate_t;
 
+typedef enum {
+    UI_FUNCTION_UNKNOWN = 0,
+    UI_FUNCTION_DC_VOLTAGE,
+    UI_FUNCTION_AC_VOLTAGE,
+    UI_FUNCTION_DC_CURRENT,
+    UI_FUNCTION_AC_CURRENT,
+    UI_FUNCTION_2W_OHM,
+    UI_FUNCTION_4W_OHM,
+    UI_FUNCTION_FREQUENCY,
+    UI_FUNCTION_PERIOD,
+    UI_FUNCTION_TEMPERATURE,
+} ui_function_t;
+
 /* UI model for the reading scene (milestone-1). Pure logic, host-testable.
  * The reading is kept as a split numeric prefix (value) plus unit suffix; the
  * special code flags OVERFLOW / no-reading; the status TAG values live in an
@@ -39,6 +52,10 @@ typedef struct {
     /* Integration rate from the 0x08 status group (FAST=0x04, MED=0x02,
      * SLOW=0x01); UI_RATE_NONE when no rate bit is set. */
     ui_rate_t rate;
+    ui_function_t function_id;
+    bool auto_range;
+    bool filter_on;
+    bool buffer_recall;
     /* 0 = normal reading, 1 = OVERFLOW (red), 2 = "----" no reading (grey). */
     uint8_t special;
     /* VFD digit-segment control tag bits (0x18 first-only, 0x1A 2nd-only,
@@ -62,3 +79,4 @@ void ui_model_apply_symbol(ui_model_t *m, uint8_t ctrl);
 void ui_model_apply_segment(ui_model_t *m, uint8_t ctrl);
 void ui_model_apply_flush(ui_model_t *m);
 void ui_model_render(const ui_model_t *m);
+ui_function_t ui_model_infer_function(const char *unit);

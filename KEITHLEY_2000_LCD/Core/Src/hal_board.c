@@ -3,6 +3,7 @@
 #include "keypad.h"
 #include "lt7680_bus.h"
 #include "stm32f1xx_hal.h"
+#include "uart_rx_queue.h"
 
 #define UART_BAUD 115200u
 
@@ -115,6 +116,8 @@ static const lt7680_bus_io_t s_lt7680_io = {
     .delay_ms = hal_delay_ms,
 };
 
+static uart_rx_queue_t s_uart_rx;
+
 static void init_gpio(void)
 {
     GPIO_InitTypeDef gpio = {0};
@@ -197,7 +200,9 @@ static void init_uart(void)
     __HAL_RCC_USART1_CLK_ENABLE();
     USART1->CR1 = 0;
     USART1->BRR = brr;
-    USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE;
+    USART1->CR1 = USART_CR1_UE | USART_CR1_TE | USART_CR1_RE | USART_CR1_RXNEIE;
+    HAL_NVIC_SetPriority(USART1_IRQn, 4u, 0u);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
 }
 
 #if LT7680_SPI_HW
@@ -223,6 +228,7 @@ static void uart_put_byte(uint8_t b)
 
 void hal_board_init(void)
 {
+    uart_rx_queue_init(&s_uart_rx);
     init_gpio();
     init_uart();
 #if LT7680_SPI_HW
@@ -342,10 +348,33 @@ void hal_uart_send_hex8(uint8_t value)
 
 int hal_uart_receive_byte(void)
 {
-    if ((USART1->SR & USART_SR_RXNE) == 0u) {
-        return -1;
+    int value;
+    /* pop() and the ISR both update queue indices during overflow recovery.
+     * Keep that short transition atomic; disabling the whole IRQ (rather than
+     * global interrupts) does not delay SysTick or display completion. */
+    HAL_NVIC_DisableIRQ(USART1_IRQn);
+    value = uart_rx_queue_pop(&s_uart_rx);
+    HAL_NVIC_EnableIRQ(USART1_IRQn);
+    return value;
+}
+
+void hal_uart_rx_irq(void)
+{
+    uint32_t sr = USART1->SR;
+    if ((sr & (USART_SR_RXNE | USART_SR_ORE | USART_SR_NE | USART_SR_FE)) != 0u) {
+        /* Reading DR after SR clears RXNE and all receive error conditions. */
+        uart_rx_queue_push_isr(&s_uart_rx, (uint8_t)(USART1->DR & 0xFFu));
     }
-    return (int)(USART1->DR & 0xFFu);
+}
+
+uint32_t hal_uart_rx_overflow_count(void)
+{
+    return uart_rx_queue_overflow_count(&s_uart_rx);
+}
+
+bool hal_uart_rx_recovering(void)
+{
+    return uart_rx_queue_recovering(&s_uart_rx);
 }
 
 int hal_keypad_read_code(void)

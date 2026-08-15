@@ -64,10 +64,10 @@ int main(void)
     assert(!m.blink);
 
     /* A status-only update also counts as a host message (exits no-data). */
-    ui_model_apply_status(&m, 0x08u, 0x80u);
-    assert(status_bar_active(&m.status, 0x08u, 0x80u));
-    assert(status_bar_core_active(&m.status, 0));   /* HOLD */
-    assert(!status_bar_core_active(&m.status, 3));  /* TRIG off */
+    ui_model_apply_status(&m, 0x08u, 0x10u);
+    assert(status_bar_active(&m.status, 0x08u, 0x10u));
+    assert(status_bar_core_active(&m.status, 4));   /* HOLD */
+    assert(!status_bar_core_active(&m.status, 5));  /* TRIG off */
     assert(m.any_message);
 
     /* ...and updates the matching legacy mirrors only. */
@@ -75,15 +75,15 @@ int main(void)
     assert(!m.trig);
     assert(!m.remote);
 
-    ui_model_apply_status(&m, 0x06u, 0x80u);   /* REM on */
+    ui_model_apply_status(&m, 0x06u, 0x08u);   /* REM on */
     assert(m.remote);
     assert(m.hold);                            /* HOLD untouched */
-    assert(status_bar_active(&m.status, 0x06u, 0x80u));
+    assert(status_bar_active(&m.status, 0x06u, 0x08u));
 
     /* A REM update must not clear HOLD; a HOLD clear clears its mirrors. */
     ui_model_apply_status(&m, 0x08u, 0x00u);
     assert(!m.hold && !m.trig);
-    assert(status_bar_core_active(&m.status, 1));   /* REM still on */
+    assert(status_bar_core_active(&m.status, 0));   /* REM still on */
 
     /* Inline symbol tags append UTF-8 to the unit, never to the reading. */
     ui_model_apply_reading(&m, "1.234", 5, "V", 1, 0);

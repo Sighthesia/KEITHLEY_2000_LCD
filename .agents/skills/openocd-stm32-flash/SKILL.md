@@ -75,6 +75,36 @@ After flashing, press the board's reset button to start the new firmware
 (software reset unreliable). If the trailing `reset` still errors, the write
 already succeeded — the error is only in resetting.
 
+## When connection fails at init (not reset): "unable to connect to the target"
+
+A second, earlier failure mode exists: OpenOCD fails **before any target
+communication** with:
+
+```
+Info : Target voltage: 3.28V
+Error: init mode failed (unable to connect to the target)
+```
+
+This is NOT the reset-step failure above — nothing was flashed, and no `halt`
+message appeared. The ST-Link is fine (voltage reads correctly, VID:PID known),
+but the MCU does not answer the initial SWD connect. Lowering the adapter speed
+(`-c "adapter speed 100"`) usually does **not** help for this symptom.
+
+### Fix: hold the board's reset button during the connect/halt phase
+
+The reliable workaround on this board (ST-Link V2 clone, no wired NRST, RST
+button present): **press and hold the board's RESET button** while OpenOCD runs
+`init` + `halt`. The target stays in reset so it is not busy running the old
+firmware, and the SWD connect/halt succeeds. Once OpenOCD reports the target
+halted (`Info : [stm32f1x.cpu] halted due to debug-request ...`), release the
+button — the erase/write/program proceeds normally while halted.
+
+This matches the skill's general insight: the problem is that the target is
+still running firmware that interferes with the connect handshake; forcing it
+into reset removes that interference. If the connect ever fails again with
+`unable to connect`, the first thing to reach for is the board reset button, not
+adapter speed or `reset_config` changes.
+
 ## Verification
 
 - Clean flash completes without writing errors; `Preparing Flash` goes through
@@ -82,3 +112,5 @@ already succeeded — the error is only in resetting.
 - Confirm the target halts (`Info : ... halted due to debug-request`).
 - If unsure whether NRST is wired, keep `reset_config none` + halt-sequence —
   that is the most portable and the least to sustain physically.
+- If `init` itself fails with `unable to connect to the target`, hold the board
+  RESET button during `init` + `halt`, then release once halted.

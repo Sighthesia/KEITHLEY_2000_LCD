@@ -4,116 +4,110 @@
 #include <stdint.h>
 
 #include "font_digits.h"
+#include "font_half.h"
 #include "font_text.h"
-#include "status_bar.h"
+#include "trend_buffer.h"
 #include "ui_model.h"
 
-/* Reading-page layout + host-safe render description (milestone-1).
- * PURE LOGIC ONLY: this module computes positions and the strings to draw;
- * it never touches the LT7680 / panel. The hardware renderer (main.c) feeds
- * the produced frame to lt7680_gfx_draw_text / font_digit_bitmap and maps
- * coordinates through panel_transform (ADR-0001).
- *
- * All views are authored in the logical 960x320 landscape space (ADR-0001).
- * Vertical bands, top -> bottom:
- *   top band    y = 0    .. 24   (12x24 text: unit/range left, status right)
- *   big reading y = 24   .. 120  (48x96 digits, right-aligned)
- *   footer      y = 120  .. 320  (cursor underline / secondary info) */
 #define MAIN_DISPLAY_UI_WIDTH 960u
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
-/* Top band merges the former status bar and unit row: the unit/range text
- * sits at the left edge, the lit status indicators right-aligned. */
-#define MAIN_DISPLAY_TOP_BAND_Y 0u
-#define MAIN_DISPLAY_TOP_BAND_H FONT_TEXT_HEIGHT
-#define MAIN_DISPLAY_READING_Y \
-    (MAIN_DISPLAY_TOP_BAND_Y + MAIN_DISPLAY_TOP_BAND_H)
-#define MAIN_DISPLAY_READING_H FONT_DIGIT_HEIGHT
-#define MAIN_DISPLAY_FOOTER_Y (MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_READING_H)
-#define MAIN_DISPLAY_FOOTER_H (MAIN_DISPLAY_UI_HEIGHT - MAIN_DISPLAY_FOOTER_Y)
+/* The deleted function/parameters/graph-header rows free the full y24..192
+ * band for the reading. The unit is drawn at digit size right after the
+ * left-aligned value, then a half-height DC/AC suffix; the right-aligned info
+ * column (Zin / Range / Rate / FILT REL MATH) lives inside the same band. */
+#define MAIN_DISPLAY_STATUS_Y 0u
+#define MAIN_DISPLAY_STATUS_H 24u
+#define MAIN_DISPLAY_READING_Y 24u
+#define MAIN_DISPLAY_READING_H 168u
+#define MAIN_DISPLAY_TREND_Y 192u
+#define MAIN_DISPLAY_TREND_H 128u
 
-/* Big-reading band spans the whole UI width, so 960/48 = 20 digit slots. */
-#define MAIN_DISPLAY_READING_X 0u
-#define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_DIGIT_WIDTH)
-#define MAIN_DISPLAY_UNIT_MAX_SLOTS (MAIN_DISPLAY_UI_WIDTH / FONT_TEXT_WIDTH)
+#define MAIN_DISPLAY_READING_X 12u
+#define MAIN_DISPLAY_INFO_RIGHT 940u
+#define MAIN_DISPLAY_INFO_W 240u
+#define MAIN_DISPLAY_READING_VALUE_W \
+    (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_READING_X)
+#define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_READING_VALUE_W / FONT_DIGIT_WIDTH)
+#define MAIN_DISPLAY_READING_VALUE_Y \
+    (MAIN_DISPLAY_READING_Y + \
+     (MAIN_DISPLAY_READING_H - FONT_DIGIT_HEIGHT) / 2u)
+#define MAIN_DISPLAY_DCAC_Y \
+    (MAIN_DISPLAY_READING_VALUE_Y + FONT_DIGIT_HEIGHT - FONT_HALF_HEIGHT)
+#define MAIN_DISPLAY_INFO_ZIN_Y 40u
+#define MAIN_DISPLAY_INFO_RANGE_Y 72u
+#define MAIN_DISPLAY_INFO_RATE_Y 104u
+#define MAIN_DISPLAY_INFO_STATUS_Y 136u
+#define MAIN_DISPLAY_STATUS_LABEL_GAP 12u
+#define MAIN_DISPLAY_STATUS_LABEL_MAX 8u
+#define MAIN_DISPLAY_FUNCTION_MAX 20u
+#define MAIN_DISPLAY_META_MAX 32u
+#define MAIN_DISPLAY_AXIS_LABEL_MAX 16u
+#define MAIN_DISPLAY_Y_LABEL_COUNT 4u
+#define MAIN_DISPLAY_X_LABEL_COUNT 5u
 
-/* Placeholder prompts (shared grey): seven right-aligned '?' slots in the
- * reading band while no host message has arrived yet, and the "Range ?"
- * unit/range hint while no unit has been received. */
-#define MAIN_DISPLAY_NO_DATA_SLOTS 7u
-#define MAIN_DISPLAY_PLACEHOLDER_COLOR 0xC618u
-#define MAIN_DISPLAY_RANGE_PLACEHOLDER "Range ?"
+#define MAIN_DISPLAY_COLOR_BG 0x0000u
+#define MAIN_DISPLAY_COLOR_BAR 0x18C3u
+#define MAIN_DISPLAY_COLOR_BAR_ALT 0x2945u
+#define MAIN_DISPLAY_COLOR_GREEN 0x07E6u
+#define MAIN_DISPLAY_COLOR_GREEN_DIM 0x0323u
+#define MAIN_DISPLAY_COLOR_CYAN 0x07FFu
+#define MAIN_DISPLAY_COLOR_WHITE 0xFFFFu
+#define MAIN_DISPLAY_COLOR_MUTED 0x632Cu
+#define MAIN_DISPLAY_COLOR_GRID 0x3186u
+#define MAIN_DISPLAY_COLOR_RED 0xF800u
 
-/* Static decoration (Q5-a): one 1px dark-grey separator under the top band,
- * full UI width. Drawn with every frame (it sits under the per-frame
- * background clears), visually static. */
-#define MAIN_DISPLAY_SEP_Y_TOP_BAND MAIN_DISPLAY_READING_Y
-#define MAIN_DISPLAY_SEP_H 1u
-#define MAIN_DISPLAY_SEP_COLOR 0x8410u
+#define MAIN_DISPLAY_PLOT_X 96u
+#define MAIN_DISPLAY_PLOT_Y 196u
+#define MAIN_DISPLAY_PLOT_W 840u
+#define MAIN_DISPLAY_PLOT_H 92u
+#define MAIN_DISPLAY_X_LABEL_Y 296u
 
-#define MAIN_DISPLAY_CURSOR_GAP 4u
-#define MAIN_DISPLAY_CURSOR_Y \
-    (MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_READING_H + MAIN_DISPLAY_CURSOR_GAP)
-#define MAIN_DISPLAY_CURSOR_H 4u
-#define MAIN_DISPLAY_STATUS_LABEL_GAP 4u
-#define MAIN_DISPLAY_STATUS_LABEL_MAX 6u
-
-/* Footer spec line: integration rate -> Read/s (DCV/ohm) or AC bandwidth +
- * Read/s (ACV/ACI), drawn in the footer band under the reading. Left-aligned,
- * one 12x24 text row; y is the top of the text. */
-#define MAIN_DISPLAY_FOOTER_SPEC_Y (MAIN_DISPLAY_CURSOR_Y + \
-                                    MAIN_DISPLAY_CURSOR_H + 8u)
-#define MAIN_DISPLAY_FOOTER_SPEC_X 0u
-#define MAIN_DISPLAY_FOOTER_SPEC_MAX 40u
-
-/* Right-aligned layout of a value into `slots` digit cells starting at
- * `start_x`. start_x is the left edge of the whole slot area; the returned
- * start_x is the left edge of the first glyph so the value ends flush at
- * start_x + slots*FONT_DIGIT_WIDTH. valid is 0 when value_len > slots. */
 typedef struct {
     uint16_t start_x;
     uint16_t end_x;
     uint8_t valid;
 } main_display_layout_t;
 
-/* Value/unit/special/status fully computed from the model: everything the
- * hardware renderer needs, with no dependency on any HAL or LT7680 call. */
 typedef struct {
     char value[UI_MODEL_MAX_FIELD];
-    uint8_t value_len;
     char unit[UI_MODEL_MAX_UNIT];
+    char unit_suffix[4];
+    uint8_t value_len;
     uint8_t unit_len;
-    uint8_t special;          /* 0 normal, 1 OVERFLOW, 2 no-reading */
-    bool no_data;             /* startup: no host message yet; show '?' slots */
-    uint16_t no_data_x;       /* left edge of the right-aligned '?' slot block */
-    uint16_t no_data_y;       /* top of the '?' slot block */
-    uint16_t value_color;     /* RGB565 for the big digits (special aware) */
-    uint16_t start_x;         /* left edge of the right-aligned value block */
-    uint16_t end_x;           /* right edge (exclusive) */
-    uint16_t reading_y;       /* top of the big-reading band */
-    bool unit_placeholder;    /* unit/range empty: show "Range ?" */
-    uint16_t unit_x;          /* left edge of the unit text (top band) */
-    uint16_t unit_y;          /* top of the top band */
-    bool cursor_visible;      /* blink set and a valid value present */
-    uint16_t cursor_x;        /* left edge of the cursor slot */
-    uint16_t cursor_y;        /* top of the cursor underline */
-    uint16_t status_y;        /* top of the status block (top band) */
-    uint16_t status_x;        /* left edge of the right-aligned status block */
-    uint8_t status_count;     /* active core indicators to draw */
+    uint8_t special;
+    bool no_data;
+    uint16_t value_color;
+    uint16_t start_x;
+    uint16_t end_x;
+    uint16_t reading_y;
+    char function[MAIN_DISPLAY_FUNCTION_MAX];
+    char impedance[MAIN_DISPLAY_META_MAX];
+    char range[MAIN_DISPLAY_META_MAX];
+    char filter[MAIN_DISPLAY_META_MAX];
+    char rate[MAIN_DISPLAY_META_MAX];
+    char gpib[MAIN_DISPLAY_META_MAX];
+    char buffer[MAIN_DISPLAY_META_MAX];
+    uint8_t status_count;
     char status_text[STATUS_BAR_CORE_COUNT][MAIN_DISPLAY_STATUS_LABEL_MAX];
-    /* Footer spec: integration-rate dependent reading/bandwidth text
-     * ("500 Read/s", "300 Hz - 300 kHz  500 Read/s"); empty when no rate or
-     * no unit. x/y position the left-aligned 12x24 text row. */
-    char footer_spec[MAIN_DISPLAY_FOOTER_SPEC_MAX];
-    uint8_t footer_spec_len;
-    uint16_t footer_spec_x;
-    uint16_t footer_spec_y;
+    bool status_active[STATUS_BAR_CORE_COUNT];
+    char y_labels[MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
+    char x_labels[MAIN_DISPLAY_X_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
+    bool trend_has_data;
+    float trend_minimum;
+    float trend_maximum;
 } main_display_frame_t;
 
 main_display_layout_t main_display_layout_value(uint8_t value_len,
-                                                uint16_t start_x,
-                                                uint8_t slots);
+                                                 uint16_t start_x,
+                                                 uint8_t slots);
 uint16_t main_display_cursor_x(const main_display_layout_t *layout,
                                uint16_t cursor_pos);
 uint16_t main_display_special_color(uint8_t special);
-void main_display_format(const ui_model_t *m, main_display_frame_t *f);
+const char *main_display_rate_text(ui_rate_t rate);
+const char *main_display_function_text(ui_function_t function);
+void main_display_format_axis(float value, const char *unit, char *out,
+                              uint8_t out_size);
+void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
+void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
+                               const char *unit, main_display_frame_t *frame);

@@ -76,6 +76,7 @@ void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
     } else {
         m->unit[0] = '\0';
     }
+    m->function_id = ui_model_infer_function(m->unit);
 }
 
 void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
@@ -88,8 +89,8 @@ void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
     /* Update only the legacy mirrors owned by this tag; other status groups
      * are independent and must not be reset by an unrelated message. */
     if (tag == K2000_TAG_STATUS_HOLD) {
-        m->hold = (value & 0x80u) != 0u;
-        m->trig = (value & 0x40u) != 0u;
+        m->hold = (value & 0x10u) != 0u;
+        m->trig = (value & 0x08u) != 0u;
         if ((value & 0x04u) != 0u) {
             m->rate = UI_RATE_FAST;
         } else if ((value & 0x02u) != 0u) {
@@ -100,8 +101,33 @@ void ui_model_apply_status(ui_model_t *m, uint8_t tag, uint8_t value)
             m->rate = UI_RATE_NONE;
         }
     } else if (tag == K2000_TAG_STATUS_REM) {
-        m->remote = (value & 0x80u) != 0u;
+        m->remote = (value & 0x08u) != 0u;
+    } else if (tag == K2000_TAG_STATUS_REL) {
+        m->auto_range = (value & 0x10u) != 0u;
+        m->filter_on = (value & 0x20u) != 0u;
+        m->buffer_recall = (value & 0x02u) != 0u;
     }
+}
+
+static bool contains(const char *text, const char *needle)
+{
+    return text != 0 && strstr(text, needle) != 0;
+}
+
+ui_function_t ui_model_infer_function(const char *unit)
+{
+    if (unit == 0 || unit[0] == '\0') return UI_FUNCTION_UNKNOWN;
+    if (contains(unit, "VAC") || contains(unit, "ACV")) return UI_FUNCTION_AC_VOLTAGE;
+    if (contains(unit, "VDC") || contains(unit, "DCV") ||
+        (contains(unit, "V") && !contains(unit, "A"))) return UI_FUNCTION_DC_VOLTAGE;
+    if (contains(unit, "AAC") || contains(unit, "ACA")) return UI_FUNCTION_AC_CURRENT;
+    if (contains(unit, "ADC") || contains(unit, "DCA") || contains(unit, "A")) return UI_FUNCTION_DC_CURRENT;
+    if (contains(unit, "4W") || contains(unit, "FRES")) return UI_FUNCTION_4W_OHM;
+    if (contains(unit, "OHM") || contains(unit, "Ohm") || contains(unit, "\xCE\xA9")) return UI_FUNCTION_2W_OHM;
+    if (contains(unit, "Hz")) return UI_FUNCTION_FREQUENCY;
+    if (contains(unit, "SEC") || contains(unit, " s")) return UI_FUNCTION_PERIOD;
+    if (contains(unit, "DEG") || contains(unit, "\xC2\xB0")) return UI_FUNCTION_TEMPERATURE;
+    return UI_FUNCTION_UNKNOWN;
 }
 
 /* UTF-8 for the two ODS inline symbols. The TFT text font exposes matching

@@ -5,12 +5,19 @@ static const uint8_t s_status_tags[STATUS_BAR_NUM_TAGS] = {
 };
 
 const status_bar_indicator_t status_bar_core_table[STATUS_BAR_CORE_COUNT] = {
-    { "HOLD", 0x08u, 0x80u },
-    { "REM",  0x06u, 0x80u },
-    { "REL",  0x09u, 0x80u },
-    { "TRIG", 0x08u, 0x40u },
-    { "AUTO", 0x09u, 0x20u },
-    { "ERR",  0x09u, 0x10u },
+    { "REM",    0x06u, 0x08u },
+    { "TALK",   0x06u, 0x04u },
+    { "LSTN",   0x06u, 0x02u },
+    { "SRQ",    0x06u, 0x01u },
+    { "HOLD",   0x08u, 0x10u },
+    { "TRIG",   0x08u, 0x08u },
+    { "REL",    0x09u, 0x40u },
+    { "FILT",   0x09u, 0x20u },
+    { "AUTO",   0x09u, 0x10u },
+    { "ERR",    0x09u, 0x08u },
+    { "BUFFER", 0x09u, 0x02u },
+    { "MATH",   0x07u, 0x20u },
+    { "CONT",   0x00u, 0x00u },
 };
 
 void status_bar_init(status_bar_t *sb)
