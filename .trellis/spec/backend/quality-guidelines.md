@@ -62,10 +62,11 @@ model mutation, trend conversion, and drawing belong to the main loop.
   new projection against that page's cached columns and repaint only changed
   columns. A change in data availability or axis limits requires clearing and
   rebuilding the full trend region, including grid and labels.
-- When only the logical trend band must be inherited, BTE-copy its transposed
-  framebuffer rectangle (`x=192`, `y=0`, `w=128`, `h=960`) instead of a whole
-  `320x960` page. Determine whether the scale is stable from the visible page,
-  because that is the source copied into the hidden page.
+- Do not use partial BTE page synchronization for alternate-frame presentation
+  on this LT7680A-R board. A correctly transposed trend-band transfer
+  (`x=192`, `y=0`, `w=128`, `h=960`) still caused physical left-side black
+  flashes. Use the verified full `320x960` page copy before `MISA` present
+  until a controller-level partial-copy acceptance test proves otherwise.
 - For BTE memory-copy-with-ROP of RGB565 pages, `BTE_CTRL1` must be `0xC2`
   (ROP code 12 = copy S0, operation 2 = memory copy) and `BTE_COLR` must be
   `0x25` (S0/S1/destination 16bpp). `0xF2` selects ROP whiteness and produces

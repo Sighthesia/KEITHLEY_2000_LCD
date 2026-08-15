@@ -22,8 +22,8 @@ lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
 /* Atomically make a completed canvas page the visible main image. */
 lt7680_status_t lt7680_gfx_present_page(uint8_t page);
-/* Clone the transposed logical trend band (ui y=192..319) with BTE. */
-lt7680_status_t lt7680_gfx_copy_trend(uint8_t source_page, uint8_t target_page);
+/* Clone one complete RGB565 canvas page with the verified BTE copy ROP. */
+lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page);
 lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);

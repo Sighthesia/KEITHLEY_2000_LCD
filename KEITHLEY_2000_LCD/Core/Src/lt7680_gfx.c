@@ -321,7 +321,7 @@ lt7680_status_t lt7680_gfx_present_page(uint8_t page)
                   (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
 }
 
-lt7680_status_t lt7680_gfx_copy_trend(uint8_t source_page, uint8_t target_page)
+lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
 {
     lt7680_status_t st;
 
@@ -339,9 +339,7 @@ lt7680_status_t lt7680_gfx_copy_trend(uint8_t source_page, uint8_t target_page)
     if (st != LT7680_OK) return st;
     st = wr13(LT7680_REG_BTE_S0_WTH, s_panel.width);
     if (st != LT7680_OK) return st;
-    /* UI is transposed: logical y=192..320 maps to framebuffer x=192..320,
-     * while logical x spans framebuffer y=0..960. */
-    st = wr13(LT7680_REG_BTE_S0_X, 192u);
+    st = wr13(LT7680_REG_BTE_S0_X, 0u);
     if (st != LT7680_OK) return st;
     st = wr13(LT7680_REG_BTE_S0_Y, 0u);
     if (st != LT7680_OK) return st;
@@ -350,11 +348,11 @@ lt7680_status_t lt7680_gfx_copy_trend(uint8_t source_page, uint8_t target_page)
     if (st != LT7680_OK) return st;
     st = wr13(LT7680_REG_BTE_DT_WTH, s_panel.width);
     if (st != LT7680_OK) return st;
-    st = wr13(LT7680_REG_BTE_DT_X, 192u);
+    st = wr13(LT7680_REG_BTE_DT_X, 0u);
     if (st != LT7680_OK) return st;
     st = wr13(LT7680_REG_BTE_DT_Y, 0u);
     if (st != LT7680_OK) return st;
-    st = wr13(LT7680_REG_BTE_SIZE, 128u);
+    st = wr13(LT7680_REG_BTE_SIZE, s_panel.width);
     if (st != LT7680_OK) return st;
     st = wr13((uint8_t)(LT7680_REG_BTE_SIZE + 2u), s_panel.height);
     if (st != LT7680_OK) return st;

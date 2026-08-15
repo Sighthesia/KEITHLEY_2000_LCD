@@ -307,7 +307,7 @@ static void display_enable_after_initial_frame(void)
     }
 }
 
-static bool begin_hidden_frame(bool copy_trend)
+static bool begin_hidden_frame(void)
 {
     lt7680_status_t st;
 
@@ -325,13 +325,12 @@ static bool begin_hidden_frame(bool copy_trend)
         render_scheduler_init(&s_renderer);
         s_waiting_visible = false;
     }
-    else if (copy_trend)
+    else
     {
-        /* State/reading bands are cleared and redrawn locally. Only the
-         * resident trend band must inherit pixels from the visible page before
-         * column-level updates; copying it avoids a stale alternate page
-         * without the 614400-byte full-page BTE cost. */
-        st = lt7680_gfx_copy_trend(s_visible_page, s_render_page);
+        /* The LT7680 needs a complete, matching source page before MISA
+         * presentation. Partial BTE copies caused physical left-side black
+         * flashes even though the copied rectangle and transform were valid. */
+        st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
         if (st != LT7680_OK)
             return false;
         s_page_trend_has_data[s_render_page] =
@@ -914,7 +913,7 @@ static void reading_scene_render(void)
                   s_page_trend_maximum[s_visible_page] !=
                       s_frame.trend_maximum));
             trend_needed = trend_due || s_trend_full_repaint;
-            if (begin_hidden_frame(!s_trend_full_repaint))
+            if (begin_hidden_frame())
             {
                 if (text_due)
                     s_text_generation++;
