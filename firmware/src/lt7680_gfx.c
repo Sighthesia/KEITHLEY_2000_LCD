@@ -54,6 +54,7 @@
 #define REG_SDRMD    0xE1u  /* SDRAM Mode Register */
 #define REG_SDRREF   0xE2u  /* SDRAM Auto Refresh Interval (E2=low, E3=high) */
 #define REG_SDRCR    0xE4u  /* SDRAM Control Register */
+#define REG_SFL_CTRL 0xB7u  /* Serial Flash controller configuration */
 #define REG_SPIDR    0xB8u  /* Serial Flash SPI data FIFO */
 #define REG_SPIMCR2  0xB9u  /* Serial Flash SPI master control */
 #define REG_SPIMSR   0xBAu  /* Serial Flash SPI master status */
@@ -101,6 +102,11 @@ static lt7680_panel_t s_panel;
 #define SPI_STATUS_RX_EMPTY 0x20u
 #define SPI_STATUS_OVERFLOW 0x08u
 #define SPI_DIVISOR_SAFE 0x0Fu
+/* Raw host reads push 03h/9Fh themselves through the FIFO, so SFL_CTRL is not
+ * part of the read transaction. The documented raw-read default (SF0, text
+ * mode, 24-bit address, 03h command) is 0x00; writing it defensively clears
+ * any DMA-mode leftover from the power-on display boot loader. */
+#define SFL_CTRL_RAW_DEFAULT 0x00u
 
 static lt7680_status_t wr(uint8_t reg, uint8_t val)
 {
@@ -149,6 +155,14 @@ static lt7680_status_t spi_begin(void)
         return st;
     }
     st = wr(REG_CCR, (uint8_t)(ccr | CCR_SPI_MASTER));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    /* Defensively reset SFL_CTRL to the documented raw-read default (SF0,
+     * text mode, 24-bit address) in case the power-on display boot loader
+     * left the controller in DMA/font mode. The host sends 03h/9Fh itself,
+     * so no SFL_CTRL command-code setup is required. */
+    st = wr(REG_SFL_CTRL, SFL_CTRL_RAW_DEFAULT);
     if (st != LT7680_OK) {
         return st;
     }

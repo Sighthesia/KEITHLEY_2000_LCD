@@ -71,6 +71,7 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_BTE_DT_X 0xADu
 #define LT7680_REG_BTE_DT_Y 0xAFu
 #define LT7680_REG_BTE_SIZE 0xB1u
+#define LT7680_REG_SFL_CTRL 0xB7u
 #define LT7680_REG_SPIDR 0xB8u
 #define LT7680_REG_SPIMCR2 0xB9u
 #define LT7680_REG_SPIMSR 0xBAu
@@ -94,6 +95,11 @@ static lt7680_panel_t s_panel;
 #define LT7680_SPI_STATUS_RX_EMPTY 0x20u
 #define LT7680_SPI_STATUS_OVERFLOW 0x08u
 #define LT7680_SPI_DIVISOR_SAFE 0x0Fu
+/* Raw host reads push 03h/9Fh themselves through the FIFO, so SFL_CTRL is not
+ * part of the read transaction. The documented raw-read default (SF0, text
+ * mode, 24-bit address, 03h command) is 0x00; writing it defensively clears
+ * any DMA-mode leftover from the power-on display boot loader. */
+#define LT7680_SFL_CTRL_RAW_DEFAULT 0x00u
 
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
@@ -152,6 +158,14 @@ static lt7680_status_t flash_begin(void)
         return st;
     }
     st = write_reg(LT7680_REG_HOST_IF, (uint8_t)(host_if | LT7680_SPI_MASTER));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    /* Defensively reset SFL_CTRL to the documented raw-read default (SF0,
+     * text mode, 24-bit address) in case the power-on display boot loader
+     * left the controller in DMA/font mode. The host sends 03h/9Fh itself,
+     * so no SFL_CTRL command-code setup is required. */
+    st = write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_RAW_DEFAULT);
     if (st != LT7680_OK) {
         return st;
     }
