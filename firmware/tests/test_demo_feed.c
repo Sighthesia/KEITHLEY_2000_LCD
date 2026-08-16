@@ -16,8 +16,14 @@
 #include "trend_buffer.h"
 
 static const char *const units[] = {
-    "VDC","VAC","ADC","AAC","MVDC","MVAC","MADC","MAAC",
-    "OHM","KOHM","MOHM","Hz","kHz","MHz","\xC2\xB0""CEL"
+    "VDC","VAC","ADC","AAC","mVDC","mVAC","mADC","mAAC",
+    "OHM","kOHM","MOHM","Hz","kHz","MHz","\xC2\xB0""CEL"
+};
+/* Expected model.unit after ui_model resistance normalization (OHM -> Ohm
+ * sign); every other unit passes through unchanged. */
+static const char *const expect_units[] = {
+    "VDC","VAC","ADC","AAC","mVDC","mVAC","mADC","mAAC",
+    "\xCE\xA9","k\xCE\xA9","M\xCE\xA9","Hz","kHz","MHz","\xC2\xB0""CEL"
 };
 static const unsigned char intd[] = {2,3,2,2,3,3,2,2,4,3,3,3,3,2,2};
 static const unsigned char fracd[] = {5,5,5,5,5,5,5,5,4,4,4,3,3,3,3};
@@ -112,7 +118,7 @@ static int check_model(uint8_t ui, uint32_t sample)
                units[ui], (unsigned long)sample, model.value, expv);
         return 1;
     }
-    if (strcmp(model.unit, units[ui]) != 0)
+    if (strcmp(model.unit, expect_units[ui]) != 0)
     {
         printf("FAIL unit %s: model.unit=%s\n", units[ui], model.unit);
         return 1;

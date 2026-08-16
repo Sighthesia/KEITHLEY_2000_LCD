@@ -47,6 +47,53 @@ void ui_model_apply_blink(ui_model_t *m, bool on)
     m->any_message = true;
 }
 
+/* Normalize ASCII resistance-unit text to the Ω symbol so the reading shows
+ * Ω / kΩ / MΩ instead of OHM / KOHM / MOHM. K/k and M prefixes survive as SI
+ * kilo / mega; the bare OHM/Ohm/OHMS suffix becomes the UTF-8 Ω bytes. */
+static void normalize_resistance_unit(char *unit, uint8_t size)
+{
+    static const char s_ohm_utf8[] = "\xCE\xA9";
+    const char *tail;
+    char prefix;
+    uint8_t n;
+    size_t len;
+
+    if (unit == 0 || size == 0u) {
+        return;
+    }
+    len = strlen(unit);
+    if (len < 3u) {
+        return;
+    }
+    prefix = '\0';
+    if (unit[0] == 'K' || unit[0] == 'k' || unit[0] == 'M') {
+        prefix = unit[0];
+        tail = unit + 1;
+        len--;
+    } else {
+        tail = unit;
+    }
+    if (len == 3u && memcmp(tail, "OHM", 3u) == 0) {
+        /* ok */
+    } else if (len == 3u && memcmp(tail, "Ohm", 3u) == 0) {
+        /* ok */
+    } else if (len == 4u && memcmp(tail, "OHMS", 4u) == 0) {
+        /* ok */
+    } else if (len == 4u && memcmp(tail, "Ohms", 4u) == 0) {
+        /* ok */
+    } else {
+        return;
+    }
+    n = 0u;
+    if (prefix == 'k' || prefix == 'K') {
+        unit[n++] = 'k';
+    } else if (prefix == 'M') {
+        unit[n++] = 'M';
+    }
+    memcpy(&unit[n], s_ohm_utf8, 2u);
+    unit[n + 2u] = '\0';
+}
+
 void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
                             const char *unit, uint8_t unit_len, uint8_t special)
 {
@@ -76,6 +123,7 @@ void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
     } else {
         m->unit[0] = '\0';
     }
+    normalize_resistance_unit(m->unit, sizeof(m->unit));
     m->function_id = ui_model_infer_function(m->unit);
 }
 

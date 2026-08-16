@@ -131,6 +131,7 @@ int main(void)
          * are both exercised on every pass. */
         k2000_proto_feed(0x0Du);
         k2000_proto_feed(0x01u);
+        k2000_proto_feed('+');
         k2000_proto_feed('1');
         k2000_proto_feed('.');
         k2000_proto_feed('2');

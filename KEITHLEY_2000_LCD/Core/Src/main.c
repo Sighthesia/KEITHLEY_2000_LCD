@@ -56,13 +56,14 @@
 /* Demo feed: synthesize K2000 host frames on a timer so the full
  * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
  * verified on the bench without an instrument. Values ramp up/down while the
- * unit/range table rotates (VDC/VAC/ADC/AAC/OHM/KOHM/MOHM/Hz/kHz/MHz/CEL plus
- * mV/mA variants), exercising the split DC/AC half-height suffix, the
- * digit-size unit letters and the info column lamps (REL/FILT/AUTO/MATH,
+ * unit/range table rotates (VDC/VAC/ADC/AAC/mVDC/mVAC/mADC/mAAC/OHM/kOHM/MOHM/
+ * Hz/kHz/MHz/CEL), exercising the split DC/AC half-height suffix, the
+ * digit-size unit letters and the info panel lamps (REL/FILT/AUTO/MATH,
  * HOLD/TRIG, FAST/MED/SLOW rate). Units are limited to the 64x128 digit
- * charset (no U/Z/S glyphs; Flash too tight to add them). Set to 1 to enable;
- * excluded from the normal build so the Flash budget is unaffected. Keep the
- * unit table in sync with sim/index.html. */
+ * charset (no U/Z/S glyphs; Flash too tight to add them); mV/mA bases use the
+ * half-height font's lowercase m, kΩ/MΩ stay at digit size with the Ω symbol.
+ * Set to 1 to enable; excluded from the normal build so the Flash budget is
+ * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 1U
 
 /* USER CODE END PD */
@@ -100,12 +101,6 @@ static uint8_t s_page_text_generation[2];
 static uint8_t s_frame_text_generation;
 static bool s_frame_has_trend_update;
 
-#if K2000_DEMO_FEED
-static uint32_t s_cnt_demo;
-#endif
-static uint32_t s_cnt_key;
-static uint32_t s_cnt_blink;
-static uint32_t s_cnt_scene;
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
 static uint32_t s_blink_tick;
@@ -165,12 +160,12 @@ static const demo_unit_t s_demo_units[] = {
     {"VAC", 3u, 5u, 20000u, 7000000u, 0x30u, 0x02u},
     {"ADC", 2u, 5u, 10000u, 300000u, 0x10u, 0x01u},
     {"AAC", 2u, 5u, 10000u, 300000u, 0x40u, 0x12u},
-    {"MVDC", 3u, 5u, 10000u, 100000u, 0x30u, 0x04u},
-    {"MVAC", 3u, 5u, 10000u, 100000u, 0x10u, 0x01u},
-    {"MADC", 2u, 5u, 10000u, 200000u, 0x50u, 0x04u},
-    {"MAAC", 2u, 5u, 10000u, 200000u, 0x30u, 0x02u},
+    {"mVDC", 3u, 5u, 10000u, 100000u, 0x30u, 0x04u},
+    {"mVAC", 3u, 5u, 10000u, 100000u, 0x10u, 0x01u},
+    {"mADC", 2u, 5u, 10000u, 200000u, 0x50u, 0x04u},
+    {"mAAC", 2u, 5u, 10000u, 200000u, 0x30u, 0x02u},
     {"OHM", 4u, 4u, 1000u, 2000000u, 0x10u, 0x02u},
-    {"KOHM", 3u, 4u, 1000u, 1000000u, 0x50u, 0x01u},
+    {"kOHM", 3u, 4u, 1000u, 1000000u, 0x50u, 0x01u},
     {"MOHM", 3u, 4u, 1000u, 1000000u, 0x30u, 0x0Cu},
     {"Hz", 3u, 3u, 1000u, 1000000u, 0x10u, 0x04u},
     {"kHz", 3u, 3u, 1000u, 1000000u, 0x00u, 0x14u},
@@ -211,10 +206,11 @@ static void demo_format_value(const demo_unit_t *u, char *out)
     {
         div *= 10u;
     }
-    demo_u32_to_padded(out, mant / div, u->int_digits);
-    out[u->int_digits] = '.';
-    demo_u32_to_padded(out + u->int_digits + 1u, mant % div, u->frac_digits);
-    out[u->int_digits + u->frac_digits + 1u] = '\0';
+    out[0] = '+'; /* demo mantissas are always positive; keep the sign visible */
+    demo_u32_to_padded(out + 1u, mant / div, u->int_digits);
+    out[1u + u->int_digits] = '.';
+    demo_u32_to_padded(out + u->int_digits + 2u, mant % div, u->frac_digits);
+    out[u->int_digits + u->frac_digits + 2u] = '\0';
 }
 
 static void demo_feed_unit(const char *unit)
@@ -628,10 +624,89 @@ static bool ui_draw_half(uint16_t x, uint16_t y, const char *text,
         s_render_item++; \
     } while (0)
 
-/* Right-align a pure-ASCII text line against an x edge (12px text advance). */
-static uint16_t right_text_x(const char *text, uint16_t right_edge)
+/* True when every byte of a unit string has a glyph in the 32x64 half-height
+ * font, i.e. it can be drawn as a compact bottom-aligned base unit. Any
+ * multi-byte/UTF-8 char (e.g. the u micro sign) or un-glyphed ASCII letter
+ * falls back to the digit-size unit path. */
+static bool reading_unit_half_fits(const char *unit)
 {
-    return (uint16_t)(right_edge - (uint16_t)strlen(text) * FONT_TEXT_WIDTH);
+    if (unit == 0)
+        return false;
+    for (; *unit != '\0'; unit++)
+    {
+        if ((uint8_t)*unit >= 0x80u)
+            return false;
+        if (font_half_bitmap(*unit) == 0)
+            return false;
+    }
+    return true;
+}
+
+/* Draw one step of the right-side info panel: a 4-row rectangle of
+ * Excel-style name/value cells (Zin / Range / Rate / Status) with the value
+ * cell of the Status row holding the FILT REL MATH lamps. Step n maps to
+ * row n/4 and action n%4 (fill name, fill value, name text, value text).
+ * Returns false while a resumable bitmap draw still has work pending, so the
+ * caller retries the same step. */
+static bool reading_draw_info(uint8_t n)
+{
+    static const char *const info_names[4] = {"Zin", "Range", "Rate",
+                                              "Status"};
+    static const uint8_t info_ys[4] = {MAIN_DISPLAY_INFO_ZIN_Y,
+                                       MAIN_DISPLAY_INFO_RANGE_Y,
+                                       MAIN_DISPLAY_INFO_RATE_Y,
+                                       MAIN_DISPLAY_INFO_STATUS_Y};
+    static const uint16_t info_color[4] = {MAIN_DISPLAY_COLOR_MUTED,
+                                           MAIN_DISPLAY_COLOR_WHITE,
+                                           MAIN_DISPLAY_COLOR_WHITE,
+                                           MAIN_DISPLAY_COLOR_WHITE};
+    uint8_t row = (uint8_t)(n / 4u);
+    uint8_t sub = (uint8_t)(n % 4u);
+    uint16_t vx = (uint16_t)(MAIN_DISPLAY_INFO_X + MAIN_DISPLAY_INFO_NAME_W);
+    uint16_t ty;
+    if (row >= 4u)
+        return true;
+    ty = (uint16_t)(info_ys[row] +
+                    (MAIN_DISPLAY_INFO_ROW_H - FONT_TEXT_HEIGHT) / 2u);
+    switch (sub)
+    {
+    case 0u:
+        (void)ui_fill_rect(MAIN_DISPLAY_INFO_X, info_ys[row],
+                           MAIN_DISPLAY_INFO_NAME_W, MAIN_DISPLAY_INFO_ROW_H,
+                           MAIN_DISPLAY_COLOR_BAR);
+        return true;
+    case 1u:
+        (void)ui_fill_rect(vx, info_ys[row], MAIN_DISPLAY_INFO_VALUE_W,
+                           MAIN_DISPLAY_INFO_ROW_H, MAIN_DISPLAY_COLOR_BAR_ALT);
+        return true;
+    case 2u:
+        return ui_draw_text(MAIN_DISPLAY_INFO_X, ty, info_names[row],
+                            info_color[row]);
+    default:
+        switch (row)
+        {
+        case 0u:
+            return ui_draw_text(vx, ty, s_frame.impedance,
+                                MAIN_DISPLAY_COLOR_MUTED);
+        case 1u:
+            return ui_draw_text(vx, ty, s_frame.range,
+                                MAIN_DISPLAY_COLOR_WHITE);
+        case 2u:
+            return ui_draw_text(vx, ty, s_frame.rate,
+                                MAIN_DISPLAY_COLOR_WHITE);
+        default:
+            if (!ui_draw_text(vx, ty, "FILT",
+                              s_frame.status_active[7] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
+                return false;
+            if (!ui_draw_text((uint16_t)(vx + 4u * FONT_TEXT_WIDTH), ty, "REL",
+                              s_frame.status_active[6] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
+                return false;
+            if (!ui_draw_text((uint16_t)(vx + 8u * FONT_TEXT_WIDTH), ty, "MATH",
+                              s_frame.status_active[11] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
+                return false;
+            return true;
+        }
+    }
 }
 
 static bool trend_drawn_occupied(uint16_t column)
@@ -683,120 +758,6 @@ static uint16_t trend_y_label_y(uint8_t index)
      * refresh erases the bottom of the reading band at y=188..191. */
     return label_y < MAIN_DISPLAY_TREND_Y ? MAIN_DISPLAY_TREND_Y : label_y;
 }
-
-#if K2000_DEMO_FEED
-static uint8_t dbg_put_u16(char *b, uint16_t v)
-{
-    char tmp[6];
-    uint8_t i = 0u, n = 0u;
-    do
-    {
-        tmp[i++] = (char)('0' + (v % 10u));
-        v /= 10u;
-    } while (v != 0u);
-    while (i > 0u)
-        b[n++] = tmp[--i];
-    return n;
-}
-
-static uint8_t dbg_put_u32(char *b, uint32_t v)
-{
-    char tmp[11];
-    uint8_t i = 0u, n = 0u;
-    do
-    {
-        tmp[i++] = (char)('0' + (v % 10u));
-        v /= 10u;
-    } while (v != 0u);
-    while (i > 0u)
-        b[n++] = tmp[--i];
-    return n;
-}
-
-static void dbg_progress(uint32_t now, uint8_t item, uint16_t column)
-{
-    static uint8_t s_dbg_last_phase = 0xFFu;
-    static uint32_t s_dbg_last_beat;
-    bool phase_changed = s_renderer.phase != s_dbg_last_phase;
-    bool beat_due = (now - s_dbg_last_beat) >= 1000u;
-    if (!phase_changed && !beat_due)
-    {
-        return;
-    }
-    s_dbg_last_phase = s_renderer.phase;
-    s_dbg_last_beat = now;
-    {
-        char b[48];
-        uint8_t n = 0u;
-        b[n++] = '\r';
-        b[n++] = '\n';
-        if (phase_changed)
-            memcpy(b + n, "DBGP", 4u);
-        else
-            memcpy(b + n, "DBG.", 4u);
-        n += 4u;
-        b[n++] = (char)('0' + (uint8_t)s_renderer.phase);
-        b[n++] = ' ';
-        b[n++] = 'I';
-        b[n++] = '=';
-        n += dbg_put_u16(b + n, item);
-        b[n++] = ' ';
-        b[n++] = 'C';
-        b[n++] = '=';
-        n += dbg_put_u16(b + n, column);
-        b[n++] = ' ';
-        b[n++] = 'T';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, now);
-        b[n++] = '\r';
-        b[n++] = '\n';
-        b[n] = '\0';
-        hal_uart_send_text(b);
-    }
-}
-static void dbg_main_beat(uint32_t now)
-{
-    static bool s_dbg_first = true;
-    static uint32_t s_dbg_last_beat;
-    if (!s_dbg_first && (now - s_dbg_last_beat) < 1000u)
-    {
-        return;
-    }
-    s_dbg_first = false;
-    s_dbg_last_beat = now;
-    {
-        char b[64];
-        uint8_t n = 0u;
-        b[n++] = '\r';
-        b[n++] = '\n';
-        memcpy(b + n, "LOOP ", 5u);
-        n += 5u;
-        b[n++] = 'D';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, s_cnt_demo);
-        b[n++] = ' ';
-        b[n++] = 'K';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, s_cnt_key);
-        b[n++] = ' ';
-        b[n++] = 'U';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, s_cnt_blink);
-        b[n++] = ' ';
-        b[n++] = 'S';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, s_cnt_scene);
-        b[n++] = ' ';
-        b[n++] = 'T';
-        b[n++] = '=';
-        n += dbg_put_u32(b + n, now);
-        b[n++] = '\r';
-        b[n++] = '\n';
-        b[n] = '\0';
-        hal_uart_send_text(b);
-    }
-}
-#endif /* K2000_DEMO_FEED */
 
 static void trend_draw_column(uint16_t column, bool erase_previous)
 {
@@ -869,9 +830,6 @@ static void reading_scene_render(void)
     {
         return;
     }
-#if K2000_DEMO_FEED
-    dbg_progress(now, s_render_item, s_render_column);
-#endif
     trend_buffer_update(&s_trend, now);
     if (s_renderer.phase == RENDER_PHASE_IDLE && s_frame_rendering)
     {
@@ -991,9 +949,12 @@ static void reading_scene_render(void)
     case RENDER_PHASE_UPDATE_READING:
     {
         /* The reading band owns y24..192: left-aligned value at digit size,
-         * unit at digit size, half-height DC/AC suffix, and the right-aligned
-         * info column (Zin / Range / Rate / FILT REL MATH). */
+         * then a compact bottom-aligned DC/AC unit (half-height base + suffix)
+         * or a digit-size unit, and the right info panel as a 4-row rectangle
+         * of Excel-style cells (Zin / Range / Rate / Status lamps). */
         uint8_t first_info;
+        bool half_unit = s_frame.unit_suffix[0] != '\0' &&
+                         reading_unit_half_fits(s_frame.unit);
         if (s_render_item == 0u)
         {
             (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
@@ -1022,6 +983,12 @@ static void reading_scene_render(void)
             }
             if (s_render_item == 2u)
             {
+                if (half_unit)
+                {
+                    DRAW_ITEM(ui_draw_half(s_frame.end_x, MAIN_DISPLAY_DCAC_Y,
+                                           s_frame.unit, s_frame.value_color));
+                    return;
+                }
                 DRAW_ITEM(ui_draw_digits(s_frame.end_x, s_frame.reading_y,
                                          s_frame.unit, s_frame.value_color));
                 return;
@@ -1030,53 +997,20 @@ static void reading_scene_render(void)
             {
                 DRAW_ITEM(ui_draw_half(
                     (uint16_t)(s_frame.end_x +
-                               (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH),
+                               (uint16_t)s_frame.unit_len *
+                                   (half_unit ? FONT_HALF_WIDTH
+                                              : FONT_DIGIT_WIDTH)),
                     MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
                     s_frame.value_color));
                 return;
             }
             first_info = s_frame.unit_suffix[0] != '\0' ? 4u : 3u;
         }
-        if (s_render_item == first_info)
+        if (s_render_item >= first_info)
         {
-            DRAW_ITEM(ui_draw_text(
-                right_text_x(s_frame.impedance, MAIN_DISPLAY_INFO_RIGHT),
-                MAIN_DISPLAY_INFO_ZIN_Y, s_frame.impedance,
-                MAIN_DISPLAY_COLOR_MUTED));
-            return;
-        }
-        if (s_render_item == first_info + 1u)
-        {
-            DRAW_ITEM(ui_draw_text(
-                right_text_x(s_frame.range, MAIN_DISPLAY_INFO_RIGHT),
-                MAIN_DISPLAY_INFO_RANGE_Y, s_frame.range,
-                MAIN_DISPLAY_COLOR_WHITE));
-            return;
-        }
-        if (s_render_item == first_info + 2u)
-        {
-            DRAW_ITEM(ui_draw_text(
-                right_text_x(s_frame.rate, MAIN_DISPLAY_INFO_RIGHT),
-                MAIN_DISPLAY_INFO_RATE_Y, s_frame.rate,
-                MAIN_DISPLAY_COLOR_WHITE));
-            return;
-        }
-        if (s_render_item == first_info + 3u)
-        {
-            DRAW_ITEM(ui_draw_text(748u, MAIN_DISPLAY_INFO_STATUS_Y, "FILT",
-                                   s_frame.status_active[7] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED));
-            return;
-        }
-        if (s_render_item == first_info + 4u)
-        {
-            DRAW_ITEM(ui_draw_text(820u, MAIN_DISPLAY_INFO_STATUS_Y, "REL",
-                                   s_frame.status_active[6] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED));
-            return;
-        }
-        if (s_render_item == first_info + 5u)
-        {
-            DRAW_ITEM(ui_draw_text(892u, MAIN_DISPLAY_INFO_STATUS_Y, "MATH",
-                                   s_frame.status_active[11] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED));
+            if (!reading_draw_info((uint8_t)(s_render_item - first_info)))
+                return;
+            s_render_item++;
             return;
         }
         render_scheduler_complete_phase(&s_renderer);
@@ -1423,9 +1357,6 @@ int main(void)
     /* USER CODE BEGIN WHILE */
     while (1)
     {
-#if K2000_DEMO_FEED
-        dbg_main_beat(HAL_GetTick());
-#endif
 #if !K2000_DEMO_FEED
         {
             uint16_t rx_budget = 128u;
@@ -1439,7 +1370,6 @@ int main(void)
 #endif
 #if K2000_DEMO_FEED
         k2000_demo_feed();
-        s_cnt_demo++;
 #endif
 
         /* Scan the key matrix, debounce, and passthrough press/release codes to
@@ -1448,7 +1378,6 @@ int main(void)
         {
             int code = keypad_scan(&s_keypad, hal_keypad_read_code(),
                                    HAL_GetTick());
-            s_cnt_key++;
             if (code != 0)
             {
                 uint8_t b = (uint8_t)code;
@@ -1457,9 +1386,7 @@ int main(void)
         }
 
         update_blink();
-        s_cnt_blink++;
         scene_mgr_render();
-        s_cnt_scene++;
         /* USER CODE END WHILE */
 
         /* USER CODE BEGIN 3 */

@@ -13,9 +13,11 @@
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
 /* The deleted function/parameters/graph-header rows free the full y24..192
- * band for the reading. The unit is drawn at digit size right after the
- * left-aligned value, then a half-height DC/AC suffix; the right-aligned info
- * column (Zin / Range / Rate / FILT REL MATH) lives inside the same band. */
+ * band for the reading. The value is drawn at digit size left-aligned; a
+ * DC/AC unit is rendered as a compact half-height block (base unit + suffix)
+ * bottom-aligned with the reading, all other units stay at digit size. The
+ * right-aligned info panel is a 4-row rectangle of Excel-style name/value
+ * cells (Zin / Range / Rate / Status) inside the same band. */
 #define MAIN_DISPLAY_STATUS_Y 0u
 #define MAIN_DISPLAY_STATUS_H 24u
 #define MAIN_DISPLAY_READING_Y 24u
@@ -25,7 +27,13 @@
 
 #define MAIN_DISPLAY_READING_X 12u
 #define MAIN_DISPLAY_INFO_RIGHT 940u
-#define MAIN_DISPLAY_INFO_W 240u
+#define MAIN_DISPLAY_INFO_X 720u
+#define MAIN_DISPLAY_INFO_W \
+    (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_X)
+#define MAIN_DISPLAY_INFO_NAME_W 72u
+#define MAIN_DISPLAY_INFO_VALUE_W \
+    (MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_INFO_NAME_W)
+#define MAIN_DISPLAY_INFO_ROW_H 32u
 #define MAIN_DISPLAY_READING_VALUE_W \
     (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_READING_X)
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_READING_VALUE_W / FONT_DIGIT_WIDTH)

@@ -64,8 +64,8 @@ const char *main_display_function_text(ui_function_t function)
     case UI_FUNCTION_AC_VOLTAGE: return "AC VOLTAGE";
     case UI_FUNCTION_DC_CURRENT: return "DC CURRENT";
     case UI_FUNCTION_AC_CURRENT: return "AC CURRENT";
-    case UI_FUNCTION_2W_OHM: return "2W OHM";
-    case UI_FUNCTION_4W_OHM: return "4W OHM";
+    case UI_FUNCTION_2W_OHM: return "2W \xCE\xA9";
+    case UI_FUNCTION_4W_OHM: return "4W \xCE\xA9";
     case UI_FUNCTION_FREQUENCY: return "FREQUENCY";
     case UI_FUNCTION_PERIOD: return "PERIOD";
     case UI_FUNCTION_TEMPERATURE: return "TEMPERATURE";
@@ -108,9 +108,11 @@ void main_display_format_axis(float value, const char *unit, char *out,
 static void format_impedance(const ui_model_t *model, char *out, uint8_t size)
 {
     /* The observed panel protocol does not provide range. Even AC impedance
-     * must remain unknown until both function and range are authoritative. */
+     * must remain unknown until both function and range are authoritative.
+     * The bare value is rendered inside the info panel's value cell with the
+     * fixed "Zin" name drawn by the renderer. */
     (void)model;
-    copy_text(out, size, "Zin: --");
+    copy_text(out, size, "--");
 }
 
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
@@ -155,10 +157,9 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     copy_text(frame->function, sizeof(frame->function),
               main_display_function_text(model->function_id));
     format_impedance(model, frame->impedance, sizeof(frame->impedance));
-    copy_text(frame->range, sizeof(frame->range), model->auto_range ? "Range: AUTO" : "Range: MANUAL");
+    copy_text(frame->range, sizeof(frame->range), model->auto_range ? "AUTO" : "MANUAL");
     copy_text(frame->filter, sizeof(frame->filter), model->filter_on ? "Filter: ON" : "Filter: OFF");
-    copy_text(frame->rate, sizeof(frame->rate), "Rate: ");
-    append_text(frame->rate, sizeof(frame->rate), main_display_rate_text(model->rate));
+    copy_text(frame->rate, sizeof(frame->rate), main_display_rate_text(model->rate));
     copy_text(frame->gpib, sizeof(frame->gpib), "GPIB: --");
     copy_text(frame->buffer, sizeof(frame->buffer), model->buffer_recall ?
               "BUFFER: RECALL" : "BUFFER: IDLE (1024 MAX)");

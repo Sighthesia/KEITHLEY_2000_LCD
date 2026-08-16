@@ -19,13 +19,15 @@ html,body{margin:0;background:#111;color:#bbb;font:13px monospace}body{display:f
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
-const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,plotX:96,plotY:196,plotW:840,plotH:92};
+const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,plotX:96,plotY:196,plotW:840,plotH:92};
 const COLORS={bg:"#000",bar:"#182126",bar2:"#263238",green:"#00ff33",greenDim:"#006c25",cyan:"#00d9ff",white:"#fff",muted:"#5d666b",grid:"#263238",red:"#f22"};
 const X_LABELS=["0.00s","2.50s","5.00s","7.50s","10.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
 function textBitmap(c){const symbols={"µ":0,"Ω":1,"°":2,"±":3};if(Object.hasOwn(symbols,c))return SYMBOL_BITMAPS[symbols[c]];const n=c.charCodeAt(0);return n<TEXT_FIRST||n>TEXT_LAST?null:TEXT_BITMAPS[n-TEXT_FIRST]}
 function digitBitmap(c){const syms={"µ":0,"°":1,"Ω":2};if(Object.hasOwn(syms,c))return DIGIT_SYMBOL_BITMAPS[syms[c]];const i=DIGIT_CHARS.indexOf(c);return i<0?null:DIGIT_BITMAPS[i]}
 function halfBitmap(c){const i=HALF_CHARS.indexOf(c);return i<0?null:HALF_BITMAPS[i]}
+function halfFits(s){for(const c of s)if(!halfBitmap(c))return false;return s.length>0}
+function normalizeUnit(s){return (s||"").replace("MVDC","mVDC").replace("MVAC","mVAC").replace("MADC","mADC").replace("MAAC","mAAC").replace("KOHM","k\u03A9").replace("MOHM","M\u03A9").replace("OHM","\u03A9")}
 function glyph(ctx,b,w,h,bpr,x,y,color){if(!b)return;ctx.fillStyle=color;for(let r=0;r<h;r++)for(let c=0;c<w;c++)if(b[r*bpr+(c>>3)]&(0x80>>(c&7)))ctx.fillRect(x+c,y+r,1,1)}
 function text(ctx,s,x,y,color){for(const c of s){glyph(ctx,textBitmap(c),TEXT_W,TEXT_H,TEXT_BPR,x,y,color);x+=TEXT_W}}
 function digits(ctx,s,x,y,color){for(const c of s){glyph(ctx,digitBitmap(c),DIGIT_W,DIGIT_H,DIGIT_BPR,x,y,color);x+=DIGIT_W}}
@@ -37,22 +39,26 @@ function render(){
  const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
  let x=10;STATUS.forEach((s,i)=>{text(ctx,s,x,0,i===4||i===5?COLORS.white:COLORS.green);x+=s.length*12+18});
- const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=document.getElementById("unit").value;
- const color=overflow?COLORS.red:COLORS.green;
- let base=unit,suffix="";
- if(unit.length>=3&&unit.endsWith("DC")){base=unit.slice(0,-2);suffix="DC"}
- else if(unit.length>=3&&unit.endsWith("AC")){base=unit.slice(0,-2);suffix="AC"}
- const ry=L.readingY+(L.readingH-DIGIT_H)/2;
- let dx=L.readingX;digits(ctx,value,dx,ry,color);dx+=value.length*DIGIT_W;digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W;
- if(suffix)half(ctx,suffix,dx,ry+DIGIT_H-HALF_H,color);
- const info=(s,y,c)=>text(ctx,s,L.infoRight-s.length*TEXT_W,y,c);
- info("Zin: >10GΩ",L.infoZinY,COLORS.muted);
- info(demo.on?demo.range:"Range: 10V AUTO",L.infoRangeY,COLORS.white);
- info(demo.on?demo.rate:"Rate: 500 Read/s",L.infoRateY,COLORS.white);
- const lamp=(on)=>on?COLORS.green:COLORS.muted;
- text(ctx,"FILT",748,L.infoStatusY,lamp(demo.on?demo.filt:true));
- text(ctx,"REL",820,L.infoStatusY,lamp(demo.on?demo.rel:true));
- text(ctx,"MATH",892,L.infoStatusY,lamp(demo.on?demo.math:true));
+const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
+  const color=overflow?COLORS.red:COLORS.green;
+  let base=unit,suffix="";
+  if(unit.length>=3&&unit.endsWith("DC")){base=unit.slice(0,-2);suffix="DC"}
+  else if(unit.length>=3&&unit.endsWith("AC")){base=unit.slice(0,-2);suffix="AC"}
+  const ry=L.readingY+(L.readingH-DIGIT_H)/2;
+  let dx=L.readingX;digits(ctx,value,dx,ry,color);dx+=value.length*DIGIT_W;
+  if(suffix&&halfFits(base)){half(ctx,base,dx,ry+DIGIT_H-HALF_H,color);dx+=base.length*HALF_W}
+  else{digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W}
+  if(suffix)half(ctx,suffix,dx,ry+DIGIT_H-HALF_H,color);
+  const infoX=L.infoX,infoNameW=L.infoNameW,infoRowH=L.infoRowH,valueX=infoX+infoNameW,valueW=L.infoRight-valueX,infoY=[L.infoZinY,L.infoRangeY,L.infoRateY,L.infoStatusY];
+  const cell=(name,val,vc,ci)=>{ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,ci,infoNameW,infoRowH);ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,ci,valueW,infoRowH);text(ctx,name,infoX,ci+(infoRowH-TEXT_H)/2,vc);text(ctx,val,valueX,ci+(infoRowH-TEXT_H)/2,vc)};
+  cell("Zin",demo.on?"--":"--",COLORS.muted,infoY[0]);
+  cell("Range",demo.on?demo.rangeVal:"AUTO",COLORS.white,infoY[1]);
+  cell("Rate",demo.on?demo.rateVal:"500 Read/s",COLORS.white,infoY[2]);
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,infoY[3],infoNameW,infoRowH);ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,infoY[3],valueW,infoRowH);text(ctx,"Status",infoX,infoY[3]+(infoRowH-TEXT_H)/2,COLORS.white);
+  const lamp=(on)=>on?COLORS.green:COLORS.muted;
+  text(ctx,"FILT",valueX,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.filt:true));
+  text(ctx,"REL",valueX+4*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.rel:true));
+  text(ctx,"MATH",valueX+8*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.math:true));
  ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
  const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),pad=(hi-lo)*.1,ylo=lo-pad,yhi=hi+pad;
  const fmtAxis=(v)=>v>=1000?v.toFixed(0):v>=100?v.toFixed(1):v.toFixed(2);
@@ -63,36 +69,36 @@ function render(){
  renderFB(document.getElementById("fb").getContext("2d"),ctx);
 }
 const DEMO_UNITS=[
- {unit:"VDC",int:2,frac:5,lo:20000,hi:1250000,s9:0x10,s8:0x04},
- {unit:"VAC",int:3,frac:5,lo:20000,hi:7000000,s9:0x30,s8:0x02},
- {unit:"ADC",int:2,frac:5,lo:10000,hi:300000,s9:0x10,s8:0x01},
- {unit:"AAC",int:2,frac:5,lo:10000,hi:300000,s9:0x40,s8:0x12},
- {unit:"MVDC",int:3,frac:5,lo:10000,hi:100000,s9:0x30,s8:0x04},
- {unit:"MVAC",int:3,frac:5,lo:10000,hi:100000,s9:0x10,s8:0x01},
- {unit:"MADC",int:2,frac:5,lo:10000,hi:200000,s9:0x50,s8:0x04},
- {unit:"MAAC",int:2,frac:5,lo:10000,hi:200000,s9:0x30,s8:0x02},
- {unit:"OHM",int:4,frac:4,lo:1000,hi:2000000,s9:0x10,s8:0x02},
- {unit:"KOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x50,s8:0x01},
- {unit:"MOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x30,s8:0x0c},
- {unit:"Hz",int:3,frac:3,lo:1000,hi:1000000,s9:0x10,s8:0x04},
- {unit:"kHz",int:3,frac:3,lo:1000,hi:1000000,s9:0x00,s8:0x14},
- {unit:"MHz",int:2,frac:3,lo:1000,hi:50000,s9:0x40,s8:0x02},
- {unit:"°CEL",int:2,frac:3,lo:1000,hi:50000,s9:0x30,s8:0x01},
+  {unit:"VDC",int:2,frac:5,lo:20000,hi:1250000,s9:0x10,s8:0x04},
+  {unit:"VAC",int:3,frac:5,lo:20000,hi:7000000,s9:0x30,s8:0x02},
+  {unit:"ADC",int:2,frac:5,lo:10000,hi:300000,s9:0x10,s8:0x01},
+  {unit:"AAC",int:2,frac:5,lo:10000,hi:300000,s9:0x40,s8:0x12},
+  {unit:"mVDC",int:3,frac:5,lo:10000,hi:100000,s9:0x30,s8:0x04},
+  {unit:"mVAC",int:3,frac:5,lo:10000,hi:100000,s9:0x10,s8:0x01},
+  {unit:"mADC",int:2,frac:5,lo:10000,hi:200000,s9:0x50,s8:0x04},
+  {unit:"mAAC",int:2,frac:5,lo:10000,hi:200000,s9:0x30,s8:0x02},
+  {unit:"OHM",int:4,frac:4,lo:1000,hi:2000000,s9:0x10,s8:0x02},
+  {unit:"kOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x50,s8:0x01},
+  {unit:"MOHM",int:3,frac:4,lo:1000,hi:1000000,s9:0x30,s8:0x0c},
+  {unit:"Hz",int:3,frac:3,lo:1000,hi:1000000,s9:0x10,s8:0x04},
+  {unit:"kHz",int:3,frac:3,lo:1000,hi:1000000,s9:0x00,s8:0x14},
+  {unit:"MHz",int:2,frac:3,lo:1000,hi:50000,s9:0x40,s8:0x02},
+  {unit:"°CEL",int:2,frac:3,lo:1000,hi:50000,s9:0x30,s8:0x01},
 ];
 const DEMO_UNIT_COUNT=DEMO_UNITS.length,DEMO_SAMPLES_PER_UNIT=40,DEMO_FEED_PERIOD_MS=100;
 const DEMO_RATE_TEXT={0x04:"500 Read/s",0x02:"50 Read/s",0x01:"5 Read/s"};
-const demo={on:false,timer:null,sample:0,range:"Range: AUTO",rate:"Rate: -- Read/s",filt:false,rel:false,math:false,trend:[]};
+const demo={on:false,timer:null,sample:0,rangeVal:"AUTO",rateVal:"500 Read/s",filt:false,rel:false,math:false,trend:[]};
 function demoPad(v,d){return String(v).padStart(d,"0")}
 function demoAxisUnit(){const u=document.getElementById("unit").value;const b=u.replace(/(DC|AC)$/,"");if(b.includes("V"))return "V";if(b.includes("A"))return "A";if(b.includes("Ω"))return "Ω";if(b.endsWith("Hz"))return "Hz";if(b.includes("°"))return "°C";if(b.includes("s"))return "s";return ""}
 function demoStep(){
  const u=DEMO_UNITS[Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%DEMO_UNIT_COUNT];
  const ph=demo.sample%DEMO_SAMPLES_PER_UNIT,tri=(ph<DEMO_SAMPLES_PER_UNIT/2?ph:DEMO_SAMPLES_PER_UNIT-ph)*2;
  const div=10**u.frac,mant=u.lo+Math.round((u.hi-u.lo)*tri/DEMO_SAMPLES_PER_UNIT);
- const value=demoPad(Math.floor(mant/div),u.int)+"."+demoPad(mant%div,u.frac);
- document.getElementById("reading").value=value;
- document.getElementById("unit").value=u.unit;
- demo.range=(u.s9&0x10)?"Range: AUTO":"Range: MANUAL";
- demo.rate="Rate: "+(DEMO_RATE_TEXT[u.s8&0x07]||"-- Read/s");
+const value="+"+demoPad(Math.floor(mant/div),u.int)+"."+demoPad(mant%div,u.frac);
+  document.getElementById("reading").value=value;
+  document.getElementById("unit").value=normalizeUnit(u.unit);
+  demo.rangeVal=(u.s9&0x10)?"AUTO":"MANUAL";
+  demo.rateVal=DEMO_RATE_TEXT[u.s8&0x07]||"-- Read/s";
  demo.filt=!!(u.s9&0x20);demo.rel=!!(u.s9&0x40);
  demo.math=Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%4===3;
  demo.trend.push(parseFloat(value));

@@ -37,10 +37,10 @@ int main(void)
     assert(frame.unit_len == 1u);
     assert(frame.reading_y == MAIN_DISPLAY_READING_VALUE_Y);
     assert(strcmp(frame.function, "DC VOLTAGE") == 0);
-    assert(strcmp(frame.impedance, "Zin: --") == 0);
-    assert(strcmp(frame.range, "Range: AUTO") == 0);
+    assert(strcmp(frame.impedance, "--") == 0);
+    assert(strcmp(frame.range, "AUTO") == 0);
     assert(strcmp(frame.filter, "Filter: ON") == 0);
-    assert(strcmp(frame.rate, "Rate: 500 Read/s") == 0);
+    assert(strcmp(frame.rate, "500 Read/s") == 0);
     assert(strcmp(frame.gpib, "GPIB: --") == 0);
     assert(strcmp(frame.buffer, "BUFFER: RECALL") == 0);
     assert(frame.status_active[0] && frame.status_active[1] &&
@@ -74,6 +74,27 @@ int main(void)
     assert(ui_model_infer_function("4W OHM") == UI_FUNCTION_4W_OHM);
     assert(ui_model_infer_function("Hz") == UI_FUNCTION_FREQUENCY);
     assert(ui_model_infer_function("DEGC") == UI_FUNCTION_TEMPERATURE);
+    assert(strcmp(main_display_function_text(UI_FUNCTION_2W_OHM),
+                  "2W \xCE\xA9") == 0);
+    assert(strcmp(main_display_function_text(UI_FUNCTION_4W_OHM),
+                  "4W \xCE\xA9") == 0);
+    assert(strcmp(main_display_function_text(UI_FUNCTION_DC_VOLTAGE),
+                  "DC VOLTAGE") == 0);
+
+    /* Resistance units are normalized to the UTF-8 Ohm sign so the display
+     * shows Ω / kΩ / MΩ; the function is inferred after normalization. */
+    ui_model_init(&model);
+    ui_model_apply_reading(&model, "2000.0000", 9u, "OHM", 3u, 0u);
+    assert(strcmp(model.unit, "\xCE\xA9") == 0);
+    assert(ui_model_infer_function(model.unit) == UI_FUNCTION_2W_OHM);
+    ui_model_init(&model);
+    ui_model_apply_reading(&model, "2000.0000", 9u, "KOHM", 4u, 0u);
+    assert(strcmp(model.unit, "k\xCE\xA9") == 0);
+    assert(ui_model_infer_function(model.unit) == UI_FUNCTION_2W_OHM);
+    ui_model_init(&model);
+    ui_model_apply_reading(&model, "2000.0000", 9u, "MOHM", 4u, 0u);
+    assert(strcmp(model.unit, "M\xCE\xA9") == 0);
+    assert(ui_model_infer_function(model.unit) == UI_FUNCTION_2W_OHM);
 
     trend_buffer_init(&trend);
     assert(trend_buffer_add(&trend, 0u, "1.0", "V"));
