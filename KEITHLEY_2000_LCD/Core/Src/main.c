@@ -60,8 +60,8 @@
  * Hz/kHz/MHz/CEL), exercising the split DC/AC half-height suffix, the
  * digit-size unit letters and the info panel lamps (REL/FILT/AUTO/MATH,
  * HOLD/TRIG, FAST/MED/SLOW rate). Units are limited to the 64x128 digit
- * charset (no U/Z/S glyphs; Flash too tight to add them); mV/mA bases use the
- * half-height font's lowercase m, kΩ/MΩ stay at digit size with the Ω symbol.
+ * charset (no U/Z/S glyphs; Flash too tight to add them). The DC/AC suffix is
+ * the only half-height text; the mV/mA base units stay at digit size.
  * Set to 1 to enable; excluded from the normal build so the Flash budget is
  * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 1U
@@ -624,24 +624,6 @@ static bool ui_draw_half(uint16_t x, uint16_t y, const char *text,
         s_render_item++; \
     } while (0)
 
-/* True when every byte of a unit string has a glyph in the 32x64 half-height
- * font, i.e. it can be drawn as a compact bottom-aligned base unit. Any
- * multi-byte/UTF-8 char (e.g. the u micro sign) or un-glyphed ASCII letter
- * falls back to the digit-size unit path. */
-static bool reading_unit_half_fits(const char *unit)
-{
-    if (unit == 0)
-        return false;
-    for (; *unit != '\0'; unit++)
-    {
-        if ((uint8_t)*unit >= 0x80u)
-            return false;
-        if (font_half_bitmap(*unit) == 0)
-            return false;
-    }
-    return true;
-}
-
 /* Draw one step of the right-side info panel: a 4-row rectangle of
  * Excel-style name/value cells (Zin / Range / Rate / Status) with the value
  * cell of the Status row holding the FILT REL MATH lamps. Step n maps to
@@ -949,12 +931,11 @@ static void reading_scene_render(void)
     case RENDER_PHASE_UPDATE_READING:
     {
         /* The reading band owns y24..192: left-aligned value at digit size,
-         * then a compact bottom-aligned DC/AC unit (half-height base + suffix)
-         * or a digit-size unit, and the right info panel as a 4-row rectangle
-         * of Excel-style cells (Zin / Range / Rate / Status lamps). */
+         * the unit at digit size (aligned with the value), a half-height
+         * DC/AC suffix bottom-aligned with the reading, and the right info
+         * panel as a 4-row rectangle of Excel-style cells (Zin / Range /
+         * Rate / Status lamps). */
         uint8_t first_info;
-        bool half_unit = s_frame.unit_suffix[0] != '\0' &&
-                         reading_unit_half_fits(s_frame.unit);
         if (s_render_item == 0u)
         {
             (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
@@ -983,12 +964,6 @@ static void reading_scene_render(void)
             }
             if (s_render_item == 2u)
             {
-                if (half_unit)
-                {
-                    DRAW_ITEM(ui_draw_half(s_frame.end_x, MAIN_DISPLAY_DCAC_Y,
-                                           s_frame.unit, s_frame.value_color));
-                    return;
-                }
                 DRAW_ITEM(ui_draw_digits(s_frame.end_x, s_frame.reading_y,
                                          s_frame.unit, s_frame.value_color));
                 return;
@@ -997,9 +972,7 @@ static void reading_scene_render(void)
             {
                 DRAW_ITEM(ui_draw_half(
                     (uint16_t)(s_frame.end_x +
-                               (uint16_t)s_frame.unit_len *
-                                   (half_unit ? FONT_HALF_WIDTH
-                                              : FONT_DIGIT_WIDTH)),
+                               (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH),
                     MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
                     s_frame.value_color));
                 return;

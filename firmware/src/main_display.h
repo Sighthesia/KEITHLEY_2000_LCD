@@ -13,11 +13,10 @@
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
 /* The deleted function/parameters/graph-header rows free the full y24..192
- * band for the reading. The value is drawn at digit size left-aligned; a
- * DC/AC unit is rendered as a compact half-height block (base unit + suffix)
- * bottom-aligned with the reading, all other units stay at digit size. The
- * right-aligned info panel is a 4-row rectangle of Excel-style name/value
- * cells (Zin / Range / Rate / Status) inside the same band. */
+ * band for the reading. The value and unit are drawn at digit size
+ * left-aligned, then a half-height DC/AC suffix sits bottom-aligned with the
+ * reading. The right info panel is a 4-row rectangle of Excel-style
+ * name/value cells (Zin / Range / Rate / Status) inside the same band. */
 #define MAIN_DISPLAY_STATUS_Y 0u
 #define MAIN_DISPLAY_STATUS_H 24u
 #define MAIN_DISPLAY_READING_Y 24u

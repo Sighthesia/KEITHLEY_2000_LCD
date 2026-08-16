@@ -26,7 +26,6 @@ const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CO
 function textBitmap(c){const symbols={"µ":0,"Ω":1,"°":2,"±":3};if(Object.hasOwn(symbols,c))return SYMBOL_BITMAPS[symbols[c]];const n=c.charCodeAt(0);return n<TEXT_FIRST||n>TEXT_LAST?null:TEXT_BITMAPS[n-TEXT_FIRST]}
 function digitBitmap(c){const syms={"µ":0,"°":1,"Ω":2};if(Object.hasOwn(syms,c))return DIGIT_SYMBOL_BITMAPS[syms[c]];const i=DIGIT_CHARS.indexOf(c);return i<0?null:DIGIT_BITMAPS[i]}
 function halfBitmap(c){const i=HALF_CHARS.indexOf(c);return i<0?null:HALF_BITMAPS[i]}
-function halfFits(s){for(const c of s)if(!halfBitmap(c))return false;return s.length>0}
 function normalizeUnit(s){return (s||"").replace("MVDC","mVDC").replace("MVAC","mVAC").replace("MADC","mADC").replace("MAAC","mAAC").replace("KOHM","k\u03A9").replace("MOHM","M\u03A9").replace("OHM","\u03A9")}
 function glyph(ctx,b,w,h,bpr,x,y,color){if(!b)return;ctx.fillStyle=color;for(let r=0;r<h;r++)for(let c=0;c<w;c++)if(b[r*bpr+(c>>3)]&(0x80>>(c&7)))ctx.fillRect(x+c,y+r,1,1)}
 function text(ctx,s,x,y,color){for(const c of s){glyph(ctx,textBitmap(c),TEXT_W,TEXT_H,TEXT_BPR,x,y,color);x+=TEXT_W}}
@@ -46,8 +45,7 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   else if(unit.length>=3&&unit.endsWith("AC")){base=unit.slice(0,-2);suffix="AC"}
   const ry=L.readingY+(L.readingH-DIGIT_H)/2;
   let dx=L.readingX;digits(ctx,value,dx,ry,color);dx+=value.length*DIGIT_W;
-  if(suffix&&halfFits(base)){half(ctx,base,dx,ry+DIGIT_H-HALF_H,color);dx+=base.length*HALF_W}
-  else{digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W}
+  digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W;
   if(suffix)half(ctx,suffix,dx,ry+DIGIT_H-HALF_H,color);
   const infoX=L.infoX,infoNameW=L.infoNameW,infoRowH=L.infoRowH,valueX=infoX+infoNameW,valueW=L.infoRight-valueX,infoY=[L.infoZinY,L.infoRangeY,L.infoRateY,L.infoStatusY];
   const cell=(name,val,vc,ci)=>{ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,ci,infoNameW,infoRowH);ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,ci,valueW,infoRowH);text(ctx,name,infoX,ci+(infoRowH-TEXT_H)/2,vc);text(ctx,val,valueX,ci+(infoRowH-TEXT_H)/2,vc)};

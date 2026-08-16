@@ -2,11 +2,10 @@
 
 #include "font_half.h"
 
-/* The half-height AC/DC unit font is static data; the host test verifies the
- * module contract: known chars resolve to a 32x64 MSB-first bitmap, the
- * DC/AC base-unit letters 'D'/'C'/'A'/'V'/'m' are not blank, and unknown
- * chars resolve to NULL. (k/M ohm units stay at digit size, so they are not
- * in this font.) */
+/* The half-height DC/AC suffix font is static data; the host test verifies
+ * the module contract: 'D'/'C'/'A' resolve to a 32x64 MSB-first bitmap and
+ * are not blank, and unknown chars resolve to NULL. The base unit stays at
+ * digit size, so only the DC/AC suffix uses this font. */
 int main(void)
 {
     assert(font_half_width() == 32);
@@ -16,8 +15,6 @@ int main(void)
     assert(b != 0);
     assert(font_half_bitmap('C') != 0);
     assert(font_half_bitmap('A') != 0);
-    assert(font_half_bitmap('m') != 0);
-    assert(font_half_bitmap('V') != 0);
 
     unsigned nonzero = 0;
     int i;

@@ -5,7 +5,7 @@ const html=fs.readFileSync(path.join(__dirname,"index.html"),"utf8");
 const fonts=fs.readFileSync(path.join(__dirname,"font_data.js"),"utf8");
 const source=html.match(/<script>([\s\S]*)<\/script>/)[1];
 let failures=0;const check=(name,value)=>{console.log((value?"ok   ":"FAIL ")+name);if(!value)failures++};
-const sandbox={console,Math,Uint8ClampedArray,document:undefined};vm.createContext(sandbox);vm.runInContext(fonts+"\n"+source+"\nthis.EXPORTS={UI_W,UI_H,L,X_LABELS,STATUS,traceData,textBitmap,digitBitmap,halfBitmap,halfFits,normalizeUnit};",sandbox);
+const sandbox={console,Math,Uint8ClampedArray,document:undefined};vm.createContext(sandbox);vm.runInContext(fonts+"\n"+source+"\nthis.EXPORTS={UI_W,UI_H,L,X_LABELS,STATUS,traceData,textBitmap,digitBitmap,halfBitmap,normalizeUnit};",sandbox);
 const e=sandbox.EXPORTS;
 check("layout width",e.UI_W===960);check("layout height",e.UI_H===320);
 check("three regions total",e.L.statusH+e.L.readingH+e.L.trendH===320);
@@ -17,8 +17,7 @@ check("no DMM6500 vocabulary",!["DIGITIZE","defbuffer1","No Script","DCCPL"].som
 check("simulator-only preset note",html.includes("不代表面板协议"));
 check("resistance unit normalizer",e.normalizeUnit("OHM")==="Ω"&&e.normalizeUnit("KOHM")==="kΩ"&&e.normalizeUnit("MOHM")==="MΩ"&&e.normalizeUnit("MVAC")==="mVAC");
 check("digit unit symbols",["µ","°","Ω"].every(c=>e.digitBitmap(c)!=null));
-check("half-height unit font",["D","C","A","m","V"].every(c=>e.halfBitmap(c)!=null));
-check("half-font gates AC/DC base",e.halfFits("mV")&&e.halfFits("V")&&!e.halfFits("µV"));
+check("half-height suffix font",["D","C","A"].every(c=>e.halfBitmap(c)!=null));
 check("info panel cells",e.L.infoX+e.L.infoNameW<e.L.infoRight&&e.L.infoRowH===32&&html.includes('cell("Zin"')&&html.includes('"Status"'));
 check("left-aligned reading",e.L.readingX===12);
 if(failures)process.exit(1);console.log("sim/verify.js: ALL CHECKS PASS");
