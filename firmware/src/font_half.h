@@ -13,6 +13,7 @@
 #define FONT_HALF_BYTES_PER_ROW 4u
 #define FONT_HALF_BYTES_PER_GLYPH 256u
 #define FONT_HALF_CHAR_COUNT 3u
+#define FONT_HALF_BASELINE 51u
 
 
 /* Bitmap for character c (1bpp, MSB first), or NULL if c is not

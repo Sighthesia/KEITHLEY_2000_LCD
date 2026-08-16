@@ -187,6 +187,7 @@ def emit_c(out_dir, name, w, h, charset, glyphs, symbols, font, baseline_y):
             "#define %s_BYTES_PER_ROW %du\n"
             "#define %s_BYTES_PER_GLYPH %du\n"
             "#define %s_CHAR_COUNT %du\n"
+            "#define %s_BASELINE %du\n"
             "%s\n"
             "\n"
             "/* Bitmap for character c (1bpp, MSB first), or NULL if c is not\n"
@@ -198,6 +199,7 @@ def emit_c(out_dir, name, w, h, charset, glyphs, symbols, font, baseline_y):
             "uint16_t %s_height(void);\n"
             % (w, h, bpr, bpg, charset,
                prefix, w, prefix, h, prefix, bpr, prefix, bpg, prefix, count,
+               prefix, baseline_y,
                sym_defs,
                fn, sym_proto, fn, fn))
 

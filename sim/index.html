@@ -46,7 +46,7 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   const ry=L.readingY+(L.readingH-DIGIT_H)/2;
   let dx=L.readingX;digits(ctx,value,dx,ry,color);dx+=value.length*DIGIT_W;
   digits(ctx,base,dx,ry,color);dx+=base.length*DIGIT_W;
-  if(suffix)half(ctx,suffix,dx,ry+DIGIT_H-HALF_H,color);
+  if(suffix)half(ctx,suffix,dx,ry+DIGIT_BASELINE-HALF_BASELINE,color);
   const infoX=L.infoX,infoNameW=L.infoNameW,infoRowH=L.infoRowH,valueX=infoX+infoNameW,valueW=L.infoRight-valueX,infoY=[L.infoZinY,L.infoRangeY,L.infoRateY,L.infoStatusY];
   const cell=(name,val,vc,ci)=>{ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,ci,infoNameW,infoRowH);ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,ci,valueW,infoRowH);text(ctx,name,infoX,ci+(infoRowH-TEXT_H)/2,vc);text(ctx,val,valueX,ci+(infoRowH-TEXT_H)/2,vc)};
   cell("Zin",demo.on?"--":"--",COLORS.muted,infoY[0]);

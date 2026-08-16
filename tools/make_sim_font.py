@@ -29,13 +29,15 @@ def parse_bitmaps(path):
 
 
 def read_dim(name, header_path):
-    """Pull WIDTH/HEIGHT/BYTES_PER_ROW from the generated .h."""
+    """Pull WIDTH/HEIGHT/BYTES_PER_ROW/BASELINE from the generated .h."""
     with open(header_path, "r", encoding="utf-8") as fh:
         src = fh.read()
     w = int(re.search(r"#define %s_WIDTH (\d+)u" % name, src).group(1))
     h = int(re.search(r"#define %s_HEIGHT (\d+)u" % name, src).group(1))
     bpr = int(re.search(r"#define %s_BYTES_PER_ROW (\d+)u" % name, src).group(1))
-    return w, h, bpr
+    base = re.search(r"#define %s_BASELINE (\d+)u" % name, src)
+    base = int(base.group(1)) if base else None
+    return w, h, bpr, base
 
 
 def emit_array(var, glyphs, indent="  "):
@@ -45,7 +47,7 @@ def emit_array(var, glyphs, indent="  "):
 
 def digits_js(src_dir):
     glyphs = parse_bitmaps(src_dir + "/font_digits.c")
-    w, h, bpr = read_dim("FONT_DIGIT", src_dir + "/font_digits.h")
+    w, h, bpr, base = read_dim("FONT_DIGIT", src_dir + "/font_digits.h")
     chars = re.search(r's_digit_chars\[\] = "([^"]*)"',
                       open(src_dir + "/font_digits.c", encoding="utf-8").read()).group(1)
     ascii_n = len(chars)
@@ -54,7 +56,7 @@ def digits_js(src_dir):
     sym_glyphs = glyphs[ascii_n:]
     out = []
     out.append("const DIGIT_CHARS = %r;" % chars)
-    out.append("const DIGIT_W = %d, DIGIT_H = %d, DIGIT_BPR = %d;" % (w, h, bpr))
+    out.append("const DIGIT_W = %d, DIGIT_H = %d, DIGIT_BPR = %d, DIGIT_BASELINE = %d;" % (w, h, bpr, base))
     out.append("const DIGIT_BITMAPS = [")
     out.append(emit_array("d", ascii_glyphs) + ",")
     out.append("];")
@@ -66,12 +68,12 @@ def digits_js(src_dir):
 
 def half_js(src_dir):
     glyphs = parse_bitmaps(src_dir + "/font_half.c")
-    w, h, bpr = read_dim("FONT_HALF", src_dir + "/font_half.h")
+    w, h, bpr, base = read_dim("FONT_HALF", src_dir + "/font_half.h")
     chars = re.search(r's_half_chars\[\] = "([^"]*)"',
                       open(src_dir + "/font_half.c", encoding="utf-8").read()).group(1)
     out = []
     out.append("const HALF_CHARS = %r;" % chars)
-    out.append("const HALF_W = %d, HALF_H = %d, HALF_BPR = %d;" % (w, h, bpr))
+    out.append("const HALF_W = %d, HALF_H = %d, HALF_BPR = %d, HALF_BASELINE = %d;" % (w, h, bpr, base))
     out.append("const HALF_BITMAPS = [")
     out.append(emit_array("hf", glyphs) + ",")
     out.append("];")
