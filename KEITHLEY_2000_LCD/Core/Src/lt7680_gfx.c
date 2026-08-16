@@ -2,6 +2,9 @@
 #include "font_text.h"
 
 static lt7680_panel_t s_panel;
+static lt7680_flash_b7_probe_t s_flash_b7_probe = {
+    0u, 0u, 0u, LT7680_ERR_BUS, LT7680_ERR_BUS
+};
 
 /* LT7680A-R register map. Display timings follow the values reverse-engineered
  * from the original V16 display firmware (see DEBUG_NOTES / panel protocol). */
@@ -155,6 +158,7 @@ static lt7680_status_t flash_read_fifo(uint8_t *value)
 static lt7680_status_t flash_begin(void)
 {
     uint8_t host_if;
+    uint8_t b7_readback;
     lt7680_status_t st = lt7680_read_reg(LT7680_REG_HOST_IF, &host_if);
     if (st != LT7680_OK) {
         return st;
@@ -167,15 +171,33 @@ static lt7680_status_t flash_begin(void)
      * text mode, 24-bit address) in case the power-on display boot loader
      * left the controller in DMA/font mode. The host sends 03h/9Fh itself,
      * so no SFL_CTRL command-code setup is required. */
+    s_flash_b7_probe.attempted = 1u;
+    s_flash_b7_probe.requested = LT7680_SFL_CTRL_RAW_DEFAULT;
+    s_flash_b7_probe.readback = 0u;
+    s_flash_b7_probe.write_status = LT7680_ERR_BUS;
+    s_flash_b7_probe.read_status = LT7680_ERR_BUS;
     st = write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_RAW_DEFAULT);
+    s_flash_b7_probe.write_status = st;
     if (st != LT7680_OK) {
         return st;
+    }
+    s_flash_b7_probe.read_status = lt7680_read_reg(LT7680_REG_SFL_CTRL,
+                                                   &b7_readback);
+    if (s_flash_b7_probe.read_status == LT7680_OK) {
+        s_flash_b7_probe.readback = b7_readback;
     }
     st = write_reg(LT7680_REG_SPI_DIV, LT7680_SPI_DIVISOR_SAFE);
     if (st != LT7680_OK) {
         return st;
     }
     return write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_READ_ACTIVE);
+}
+
+void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe)
+{
+    if (probe != 0) {
+        *probe = s_flash_b7_probe;
+    }
 }
 
 static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,

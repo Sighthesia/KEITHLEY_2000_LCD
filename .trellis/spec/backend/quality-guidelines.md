@@ -230,6 +230,11 @@ verifier; it validates the image slice at the recorded base.
   `01`, `B9=1F` (or the selected documented mode), and a non-error `BA`
   distinguish controller setup from an external no-response; the snapshots
   themselves never prove U5 connectivity.
+- The B7 write probe is initialized as "not attempted" with both operation
+  statuses set to `LT7680_ERR_BUS`. Set `attempted` before calling the B7 write,
+  then record the write result and immediate B7 readback result independently.
+  This distinguishes an uncalled probe, a failed write, an unreadable register,
+  and a successful immediate `0x00` readback that is later overwritten.
 - U5 programming is a separate, read-back-verified operation. Do not modify
   bytes outside `[base-offset, base-offset + image_size)`.
 

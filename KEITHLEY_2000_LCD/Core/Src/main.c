@@ -807,6 +807,7 @@ static void rif_init(void)
     uint8_t id[3];
     uint8_t spi_status;
     lt7680_status_t st;
+    lt7680_flash_b7_probe_t b7_probe;
 
     s_rif_ready = false;
     rif_log_spi_registers("regs");
@@ -814,6 +815,25 @@ static void rif_init(void)
     /* Capture the controller after the JEDEC transaction has returned. This
      * is deliberately read-only: do not touch SPIDR or clear SPIMSR flags. */
     rif_log_spi_registers("post");
+    lt7680_flash_get_b7_probe(&b7_probe);
+    hal_uart_send_text("RIF B7 write-probe attempted=");
+    hal_uart_send_hex8(b7_probe.attempted);
+    hal_uart_send_text(" requested=0x");
+    hal_uart_send_hex8(b7_probe.requested);
+    hal_uart_send_text(" readback=0x");
+    if (b7_probe.read_status == LT7680_OK)
+    {
+        hal_uart_send_hex8(b7_probe.readback);
+    }
+    else
+    {
+        hal_uart_send_text("ERR");
+    }
+    hal_uart_send_text(" write-status=0x");
+    hal_uart_send_hex8((uint8_t)b7_probe.write_status);
+    hal_uart_send_text(" read-status=0x");
+    hal_uart_send_hex8((uint8_t)b7_probe.read_status);
+    hal_uart_send_text("\r\n");
     if (st != LT7680_OK)
     {
         hal_uart_send_text("RIF JEDEC read failed=0x");

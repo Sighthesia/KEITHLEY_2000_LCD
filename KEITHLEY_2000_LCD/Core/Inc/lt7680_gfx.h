@@ -17,6 +17,14 @@ typedef struct {
     uint16_t h;
 } lt7680_rect_t;
 
+typedef struct {
+    uint8_t attempted;
+    uint8_t requested;
+    uint8_t readback;
+    lt7680_status_t write_status;
+    lt7680_status_t read_status;
+} lt7680_flash_b7_probe_t;
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
@@ -41,3 +49,4 @@ lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565);
 lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                   uint16_t length);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
+void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
