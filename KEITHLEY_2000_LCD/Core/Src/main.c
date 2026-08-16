@@ -766,6 +766,40 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                        : ui_draw_text(x, y, text, color);
 }
 
+static void rif_log_spi_registers(void)
+{
+    static const struct {
+        uint8_t address;
+        const char *name;
+    } registers[] = {
+        {0xB7u, "SFL_CTRL"},
+        {0xB9u, "SPIMCR2"},
+        {0xBAu, "SPIMSR"},
+        {0xBBu, "DIVISOR"},
+        {0x01u, "HOST_IF/CCR"},
+    };
+    uint8_t i;
+
+    hal_uart_send_text("RIF LT7680 SPI regs");
+    for (i = 0u; i < (uint8_t)(sizeof(registers) / sizeof(registers[0])); i++)
+    {
+        uint8_t value;
+
+        hal_uart_send_text(" ");
+        hal_uart_send_text(registers[i].name);
+        hal_uart_send_text("=0x");
+        if (lt7680_read_reg(registers[i].address, &value) == LT7680_OK)
+        {
+            hal_uart_send_hex8(value);
+        }
+        else
+        {
+            hal_uart_send_text("ERR");
+        }
+    }
+    hal_uart_send_text("\r\n");
+}
+
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -774,6 +808,7 @@ static void rif_init(void)
     lt7680_status_t st;
 
     s_rif_ready = false;
+    rif_log_spi_registers();
     st = lt7680_flash_read_jedec_id(id);
     if (st != LT7680_OK)
     {
