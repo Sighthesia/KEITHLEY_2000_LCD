@@ -65,8 +65,9 @@
 - `KEITHLEY_2000_LCD/`：自研 STM32CubeMX 工程（真机固件，唯一烧录来源）。
 - `firmware/`：离线骨架 + 宿主测试（`firmware/src/` 是镜像源，`tests/` 单测）。
 - `sim/`：布局仿真器（`index.html` + 生成的 `font_data.js` + `verify.js`）。
-- `tools/`：字体生成器（`make_digit_font.py`、`make_text_font.py`、`make_sim_font.py`）。
+- `tools/`：字体生成器（`make_digit_font.py`、`make_text_font.py`、`make_sim_font.py`）与 W25Q128 资源镜像打包/校验（`pack_resource_flash.py`、`verify_resource_flash.py`、`rif_common.py`，见 `tools/README.md`）。
 - `docs/`：确定性网表 `KEITHLEY2000_2026-08-08.tel`（权威）、ODS 协议表、`adr/` 决策记录、`superpowers/plans|specs/` 范围与验收、2026-08-14 仿真器 vs ODS 核对笔记。
+- **W25Q128 资源镜像约定**：U5 挂在 LT7680 SPI 上、不经 STM32；`tools/pack_resource_flash.py` 只从 `firmware/src` 的生成 C 数组产出 RGB565 字形瓦片镜像（4 KiB 对齐，自描述头 + 目录 + CRC32），写入前必须先备份原片并确认 `--base-offset`，验收见 `tools/README.md`；不要向 `firmware/`、`sim/` 或硬件驱动混入该内容。
 - `Firmware STM32_K2000 DisplayBoard TFT_V16/`：上游 V16 HEX 与变更日志；根目录另有 V15 Flash 数据与 ODS。
 - 自研技能在 `.agents/skills/`（lt7680-st7701、openocd-stm32-flash 等）。
 <!-- TRELLIS:START -->

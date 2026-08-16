@@ -159,3 +159,102 @@ void USART1_IRQHandler(void) {
 - [ ] Renderer returns to RX draining between bounded steps.
 - [ ] Flash remains within 64KB and RAM within 20KB, including heap/stack
       reservations.
+
+## Scenario: W25Q128 Resource Image
+
+### 1. Scope / Trigger
+
+Apply this contract when generating, validating, or programming the W25Q128JV
+resource image connected to the LT7680A-R SPI bus. The resource flash is not
+part of the STM32 image and must be handled as a separate artifact.
+
+### 2. Signatures
+
+```sh
+python3 tools/pack_resource_flash.py \
+  --src-dir firmware/src --output resources.img \
+  [--base-offset 0x000000] [--fg '#00FF33'] [--bg '#000000']
+
+python3 tools/verify_resource_flash.py resources.img \
+  [--src-dir firmware/src]
+```
+
+The packer emits a deterministic `K2RF` image. The default image is
+`0xBE000` bytes, 4 KiB sector-aligned, and records its absolute
+`flash_base` in the header. A full 16 MiB dump is also accepted by the
+verifier; it validates the image slice at the recorded base.
+
+### 3. Contracts
+
+- W25Q128 capacity is 16 MiB; `base-offset` must be 4 KiB aligned and
+  `base-offset + image_size <= 0x1000000`.
+- The image contains a 64-byte header, 44 directory entries, RGB565
+  little-endian glyph tiles, a diagnostic tile, and `0xFF`-filled reserved
+  `font_text` and `ui_assets` regions.
+- Payload entries are 4 KiB aligned and carry dimensions, character identity,
+  colors, size, and CRC32. Source glyphs are extracted from generated arrays
+  under `firmware/src`, matching the simulator extraction contract.
+- Only sectors in `[base-offset, base-offset + image_size)` may be erased or
+  programmed. Bytes outside that interval are preserved.
+- Before the first write, save a complete 16 MiB dump and verify two reads with
+  `cmp` and SHA-256. Confirm that the selected base does not overlap unknown
+  data in the original dump.
+- The STM32 firmware, LT7680 driver, and simulator do not automatically read
+  this image; programming it alone cannot prove external-font integration.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required behavior |
+| --- | --- |
+| Missing source glyph or malformed generated C array | Packer fails before writing output |
+| Non-4 KiB base or image outside 16 MiB | Packer and verifier reject it |
+| Bad magic/version, header CRC, image CRC, entry CRC, size, overlap, or alignment | Verifier rejects the image |
+| Full dump with image at recorded base | Verifier slices and validates the image |
+| Full dump with image at another base | Reject unless exported as the matching target range |
+| Source glyph round-trip differs | `--src-dir` verification fails |
+| Duplicate or unknown hardware data outside image range | Do not erase or modify it |
+| Diagnostic tile fails visual display check | Stop before testing glyph tiles |
+
+### 5. Good/Base/Bad Cases
+
+- Good: read U5 twice, obtain identical 16 MiB dumps, generate the image,
+  erase only its sectors, read back, and run the verifier on the readback.
+- Base: generate at `0x000000` only after the complete original dump confirms
+  that the first `0xBE000` bytes are disposable or intentionally replaced.
+- Bad: use the STM32 ELF as the W25Q128 input, assume LT7680 GTFNT layout, or
+  flash the image before isolating U5 from the LT7680 bus.
+
+### 6. Tests Required
+
+- Assert deterministic two-pass packing and exact `0xBE000` image size.
+- Assert all 44 entries, payload alignment, CRCs, reserved fill, and diagnostic
+  color bands.
+- Assert source glyph 1bpp to RGB565 to 1bpp round-trip for every tile.
+- Verify a complete 16 MiB dump and reject tampered bytes, bad magic, size
+  mismatch, misaligned base, and capacity overflow.
+- After hardware programming, read back the target range and show the
+  diagnostic tile followed by glyph `8`; judge color and orientation from the
+  panel, not LT7680 SPI framebuffer readback.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```sh
+flashrom -p ... -w resources.img
+```
+
+This risks replacing unrelated flash content and assumes a programmer-side
+chip layout that is not part of the resource image contract.
+
+#### Correct
+
+```sh
+flashrom -p ... -r u5-before-1.bin
+flashrom -p ... -r u5-before-2.bin
+cmp u5-before-1.bin u5-before-2.bin
+python3 tools/verify_resource_flash.py resources-readback.bin --src-dir firmware/src
+```
+
+Then use the programmer's sector-range operation to erase and write only the
+verified image range, and validate the readback before visual acceptance.

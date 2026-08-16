@@ -4,6 +4,10 @@ build/
 build-check/
 firmware/build/
 
+# Python cache
+__pycache__/
+*.pyc
+
 # Compiled object/ELF
 *.o
 *.elf
