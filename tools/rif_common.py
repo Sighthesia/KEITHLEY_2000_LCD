@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Shared host-side definitions for the K2000 resource flash image (RIF).
 
-The RIF is the proposed content layout for the LT7680-attached W25Q128JV
+The RIF is the proposed content layout for the LT7680-attached W25Q64JV
 resource flash (U5 on the K2000 display board; connected to the LT7680 SPI,
 not to the STM32). It is a self-describing binary image:
 
@@ -15,9 +15,9 @@ not to the STM32). It is a self-describing binary image:
 
 Design rules (see tools/README.md for the full flash map):
 
-* Everything is host-side and deterministic. The packer parses the generated
-  C arrays in firmware/src; it never executes firmware and never touches
-  hardware.
+* Everything is host-side and deterministic. The packer parses the archived
+  big-digit source in tools/font_source and the active half-font source in
+  firmware/src; it never executes firmware and never touches hardware.
 * 1bpp source bitmaps are row-packed MSB-first (bit set = ink). RGB565 tiles
   keep the same orientation: row 0 = top, MSB = left pixel. Each 16-bit pixel
   is stored little-endian (low byte first), matching the LT7680 MRWDP pixel
@@ -45,8 +45,8 @@ VERSION_MINOR = 0
 
 HEADER_SIZE = 64
 ENTRY_SIZE = 48
-ALIGN = 4096                 # W25Q128JV sector size; every payload is aligned
-FLASH_SIZE = 16 * 1024 * 1024  # W25Q128JV capacity (128 Mbit)
+ALIGN = 4096                 # W25Q64JV sector size; every payload is aligned
+FLASH_SIZE = 8 * 1024 * 1024  # W25Q64JV capacity (64 Mbit)
 
 # Directory entry kinds (4 ASCII chars each)
 KIND_DIGIT_CHAR = b"DGTC"    # font_digits ASCII character glyph
@@ -650,11 +650,15 @@ def _verify_expectations(data, header, entries, expect):
     return problems
 
 
-def collect_expectations(src_dir):
-    """Parse firmware/src and return the expected-content dictionary used by
-    verify_image, or None when no font sources are present."""
+def collect_expectations(src_dir, digit_src_dir=None):
+    """Return the expected-content dictionary used by verify_image.
+
+    `src_dir` supplies active target fonts such as font_half. Big-digit source
+    lives outside the target tree after the RIF migration, so callers may pass
+    `digit_src_dir` (defaulting to src_dir for older standalone uses).
+    """
     expect = {}
-    digit = load_font(src_dir, "font_digits")
+    digit = load_font(digit_src_dir or src_dir, "font_digits")
     if digit:
         expect["digit"] = digit
     half = load_font(src_dir, "font_half")

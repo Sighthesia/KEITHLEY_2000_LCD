@@ -71,6 +71,10 @@ static lt7680_panel_t s_panel;
 #define LT7680_REG_BTE_DT_X 0xADu
 #define LT7680_REG_BTE_DT_Y 0xAFu
 #define LT7680_REG_BTE_SIZE 0xB1u
+#define LT7680_REG_SPIDR 0xB8u
+#define LT7680_REG_SPIMCR2 0xB9u
+#define LT7680_REG_SPIMSR 0xBAu
+#define LT7680_REG_SPI_DIV 0xBBu
 
 /* Keep page 1 on a 1 MiB boundary. MISA/CVSSA are four separate register
  * writes on the SPI bus; this alignment makes the first three bytes remain
@@ -82,6 +86,14 @@ static lt7680_panel_t s_panel;
  * Filled rectangles go through DCR1 (REG[76h]): bit7=start, bit6=fill,
  * bit[5:4]=10b rectangle; DCR0 (REG[67h]) only handles line/triangle. */
 #define LT7680_DCR1_RECT_FILL 0xE0u
+
+#define LT7680_SPI_MASTER 0x02u
+#define LT7680_SPI_CTRL_READ_ACTIVE 0x1Cu
+#define LT7680_SPI_CTRL_IDLE 0x0Cu
+#define LT7680_SPI_STATUS_TX_EMPTY 0x80u
+#define LT7680_SPI_STATUS_RX_EMPTY 0x20u
+#define LT7680_SPI_STATUS_OVERFLOW 0x08u
+#define LT7680_SPI_DIVISOR_SAFE 0x0Fu
 
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
@@ -100,6 +112,150 @@ static lt7680_status_t wait_2d_idle(void);
 static lt7680_status_t write_reg(uint8_t reg, uint8_t value)
 {
     return lt7680_write_reg(reg, value);
+}
+
+static lt7680_status_t flash_wait(uint8_t mask, uint8_t asserted)
+{
+    uint16_t i;
+    uint8_t status;
+
+    for (i = 0u; i < 2000u; i++) {
+        lt7680_status_t st = lt7680_read_reg(LT7680_REG_SPIMSR, &status);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((status & LT7680_SPI_STATUS_OVERFLOW) != 0u) {
+            (void)write_reg(LT7680_REG_SPIMSR, LT7680_SPI_STATUS_OVERFLOW);
+            return LT7680_ERR_BUS;
+        }
+        if ((status & mask) == asserted) {
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+static lt7680_status_t flash_read_fifo(uint8_t *value)
+{
+    lt7680_status_t st = flash_wait(LT7680_SPI_STATUS_RX_EMPTY, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return lt7680_read_reg(LT7680_REG_SPIDR, value);
+}
+
+static lt7680_status_t flash_begin(void)
+{
+    uint8_t host_if;
+    lt7680_status_t st = lt7680_read_reg(LT7680_REG_HOST_IF, &host_if);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_HOST_IF, (uint8_t)(host_if | LT7680_SPI_MASTER));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_SPI_DIV, LT7680_SPI_DIVISOR_SAFE);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_READ_ACTIVE);
+}
+
+static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,
+                                            uint8_t discard, uint8_t *data)
+{
+    uint8_t i;
+    lt7680_status_t st;
+
+    if (count == 0u || count > 16u || discard > count) {
+        return LT7680_ERR_PARAM;
+    }
+    for (i = 0u; i < count; i++) {
+        st = write_reg(LT7680_REG_SPIDR, tx[i]);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    st = flash_wait(LT7680_SPI_STATUS_TX_EMPTY, LT7680_SPI_STATUS_TX_EMPTY);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    for (i = 0u; i < count; i++) {
+        uint8_t value;
+        st = flash_read_fifo(&value);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if (i >= discard) {
+            data[i - discard] = value;
+        }
+    }
+    return LT7680_OK;
+}
+
+lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
+                                  uint16_t length)
+{
+    uint8_t command[16];
+    uint16_t remaining;
+    lt7680_status_t st;
+
+    if (data == 0 || length == 0u || address > 0x00FFFFFFu ||
+        length > 0x01000000u - address) {
+        return LT7680_ERR_PARAM;
+    }
+    st = flash_begin();
+    if (st == LT7680_OK) {
+        command[0] = 0x03u;
+        command[1] = (uint8_t)(address >> 16);
+        command[2] = (uint8_t)(address >> 8);
+        command[3] = (uint8_t)address;
+        remaining = length;
+        while (remaining > 0u) {
+            uint8_t chunk = remaining > 12u ? 12u : (uint8_t)remaining;
+            uint8_t i;
+            for (i = 0u; i < chunk; i++) {
+                command[4u + i] = 0u;
+            }
+            st = flash_push_and_drain(command, (uint8_t)(4u + chunk), 4u, data);
+            if (st != LT7680_OK) {
+                break;
+            }
+            data += chunk;
+            remaining = (uint16_t)(remaining - chunk);
+            while (remaining > 0u) {
+                chunk = remaining > 16u ? 16u : (uint8_t)remaining;
+                for (i = 0u; i < chunk; i++) {
+                    command[i] = 0u;
+                }
+                st = flash_push_and_drain(command, chunk, 0u, data);
+                if (st != LT7680_OK) {
+                    break;
+                }
+                data += chunk;
+                remaining = (uint16_t)(remaining - chunk);
+            }
+        }
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+    return st;
+}
+
+lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
+{
+    const uint8_t command[4] = {0x9Fu, 0u, 0u, 0u};
+    lt7680_status_t st;
+
+    if (id == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    st = flash_begin();
+    if (st == LT7680_OK) {
+        st = flash_push_and_drain(command, sizeof(command), 1u, id);
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+    return st;
 }
 
 /* Read-modify-write, as the original V16 firmware does: preserve untouched

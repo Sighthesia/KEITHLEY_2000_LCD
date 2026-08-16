@@ -50,8 +50,8 @@
 - **离线裸机编译**：`firmware/` 下 `make`（arm-none-eabi-gcc `-mcpu=cortex-m3 -mthumb`，`-Werror`），产物 `firmware/build/firmware.elf`。与 CubeMX 工程**无关**，只验证骨架能过编译。
 - **布局仿真器**：`sim/index.html`（单文件，逐像素预览 `main_display_format` 输出，无需烧录）。数据与逻辑全部来自 `firmware/src`，加载 `sim/font_data.js`。用法见 `sim/README.md`。
 - **无头一致性验证**：`node sim/verify.js`（验证布局常量、右对齐、特殊色、字形墨点数、render() 冒烟）。改字体或布局后必须跑。
-- **字体再生成**：`python3 tools/make_sim_font.py firmware/src sim/font_data.js`（从 C 位图提取，勿手改 `font_data.js`）。大数字库由 `tools/make_digit_font.py` 从 JetBrains Mono TTF 栅格化（`python3 tools/make_digit_font.py /usr/share/fonts/TTF/JetBrainsMono-Regular.ttf firmware/src`）；`font_half`（半高 DC/AC，32x64）用 `--width 32 --height 64 --charset "DCA" --symbols ""` 重新生成。两者生成的 `.c/.h` 都要 `cp` 进 CubeMX 树（`Core/Src`+`Core/Inc`），并同步 `make_sim_font.py` 的 JS。
-- **⚠️ 大数字库基线约束**：字形按共享基线栅格化，**加入新字符可能移动基线、改变所有既有字形**。build13 起为 64x128 单元（旧 48x96），字符集含 `H z s` 与独立符号表 `µ ° Ω`（`font_digit_symbol_bitmap`）；半高 `D C A` 在 `font_half.c`。扩字符集后务必 `diff` 确认既有字形未变、并重跑 `verify.js`。
+- **字体再生成**：MCU 不再内置 64x128 大数字位图；其归档生成源在 `tools/font_source/font_digits.[ch]`，用于 RIF 打包与仿真器。运行 `python3 tools/make_sim_font.py firmware/src sim/font_data.js` 时，大数字取自该目录，半高/文本仍取自 `firmware/src`（勿手改 `font_data.js`）。`font_half`（半高 DC/AC，32x64）用 `--width 32 --height 64 --charset "DCA" --symbols ""` 重新生成后仍须 `cp` 到 CubeMX 树。
+- **⚠️ 大数字库基线约束**：RIF 大字仍使用 64x128 单元与 `FONT_DIGIT_BASELINE=103`，字符集含 `H z s` 与独立符号表 `µ ° Ω`；半高 `D C A` 在 `font_half.c`。修改 `tools/font_source` 字形后，重新打包 RIF 并重跑 `verify.js`。
 - **布局工作台**：仿真器内置「布局参数」面板可拖/调布局并导出 `main_display.h` 覆盖宏；「重置布局」恢复与 `main_display.h` 一致的默认值。设计目标 1920×1080 视口。
 - 场景/状态相关决策记录在 `docs/adr/`（如 0001 视图空间 vs 帧缓冲变换）；范围与验收清单在 `docs/superpowers/plans|specs/`；术语表在 `CONTEXT.md`。
 
@@ -65,9 +65,9 @@
 - `KEITHLEY_2000_LCD/`：自研 STM32CubeMX 工程（真机固件，唯一烧录来源）。
 - `firmware/`：离线骨架 + 宿主测试（`firmware/src/` 是镜像源，`tests/` 单测）。
 - `sim/`：布局仿真器（`index.html` + 生成的 `font_data.js` + `verify.js`）。
-- `tools/`：字体生成器（`make_digit_font.py`、`make_text_font.py`、`make_sim_font.py`）与 W25Q128 资源镜像打包/校验（`pack_resource_flash.py`、`verify_resource_flash.py`、`rif_common.py`，见 `tools/README.md`）。
+- `tools/`：字体生成器（`make_digit_font.py`、`make_text_font.py`、`make_sim_font.py`）与资源镜像打包/校验（`pack_resource_flash.py`、`verify_resource_flash.py`、`rif_common.py`，见 `tools/README.md`）。
 - `docs/`：确定性网表 `KEITHLEY2000_2026-08-08.tel`（权威）、ODS 协议表、`adr/` 决策记录、`superpowers/plans|specs/` 范围与验收、2026-08-14 仿真器 vs ODS 核对笔记。
-- **W25Q128 资源镜像约定**：U5 挂在 LT7680 SPI 上、不经 STM32；`tools/pack_resource_flash.py` 只从 `firmware/src` 的生成 C 数组产出 RGB565 字形瓦片镜像（4 KiB 对齐，自描述头 + 目录 + CRC32），写入前必须先备份原片并确认 `--base-offset`，验收见 `tools/README.md`；不要向 `firmware/`、`sim/` 或硬件驱动混入该内容。
+- **RIF 资源镜像约定**：U5 挂在 LT7680 SPI 上、不经 STM32；实物以 flashrom 的 `EF4017` 识别为 W25Q64JV（8MiB），尽管网表记录 W25Q128JV。`tools/pack_resource_flash.py` 从 `tools/font_source` 的归档大数字位图与 `firmware/src` 的半高字库产出 RGB565 瓦片镜像（4 KiB 对齐，自描述头 + 目录 + CRC32）。运行时由 LT7680 SPI-master FIFO 只读目录和瓦片；写入前必须先备份原片并确认 `--base-offset`，验收见 `tools/README.md`。
 - `Firmware STM32_K2000 DisplayBoard TFT_V16/`：上游 V16 HEX 与变更日志；根目录另有 V15 Flash 数据与 ODS。
 - 自研技能在 `.agents/skills/`（lt7680-st7701、openocd-stm32-flash 等）。
 <!-- TRELLIS:START -->

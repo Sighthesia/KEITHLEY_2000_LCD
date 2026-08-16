@@ -34,6 +34,7 @@
 #include "panel_transform.h"
 #include "reading_split.h"
 #include "render_scheduler.h"
+#include "rif_reader.h"
 #include "scene.h"
 #include "ui_model.h"
 #include "trend_buffer.h"
@@ -133,11 +134,37 @@ typedef struct
     uint16_t cx;
     uint8_t row;
     uint8_t col;
-    uint8_t mode; /* 0 = text, 1 = digits (with unit symbols), 2 = half */
+    uint8_t mode; /* 0 = text, 2 = half */
     bool active;
 } bitmap_job_t;
 
 static bitmap_job_t s_bitmap_job;
+
+typedef struct
+{
+    const char *text;
+    uint16_t x;
+    uint16_t y;
+    uint16_t cx;
+    uint16_t row;
+    uint16_t column;
+    uint16_t chunk_width;
+    uint16_t directory_index;
+    uint32_t kind;
+    uint16_t code;
+    uint8_t advance;
+    uint8_t pixel;
+    bool resolving;
+    bool chunk_ready;
+    bool active;
+    rif_tile_t tile;
+    uint8_t entry[RIF_READER_ENTRY_SIZE];
+    uint8_t pixels[64];
+} rif_draw_job_t;
+
+static rif_image_t s_rif_image;
+static rif_draw_job_t s_rif_draw_job;
+static bool s_rif_ready;
 
 #if K2000_DEMO_FEED
 /* One entry per demo "range". lo_mant/hi_mant are the ramp low/high mantissas
@@ -486,32 +513,6 @@ static const uint8_t *text_glyph(const char *text, uint8_t *advance)
     return bitmap != 0 ? bitmap : font_text_bitmap('?');
 }
 
-/* The unit is rendered at digit size; it may contain the µ / ° / Ω symbols
- * (2-byte UTF-8) that live in the digit font's symbol table. */
-static const uint8_t *digit_glyph(const char *text, uint8_t *advance)
-{
-    const uint8_t *bitmap;
-    *advance = 1u;
-    if ((uint8_t)text[0] == 0xC2u && (uint8_t)text[1] == 0xB5u)
-    {
-        bitmap = font_digit_symbol_bitmap(FONT_DIGIT_SYM_MICRO);
-        *advance = 2u;
-    }
-    else if ((uint8_t)text[0] == 0xC2u && (uint8_t)text[1] == 0xB0u)
-    {
-        bitmap = font_digit_symbol_bitmap(FONT_DIGIT_SYM_DEGREE);
-        *advance = 2u;
-    }
-    else if ((uint8_t)text[0] == 0xCEu && (uint8_t)text[1] == 0xA9u)
-    {
-        bitmap = font_digit_symbol_bitmap(FONT_DIGIT_SYM_OHM);
-        *advance = 2u;
-    }
-    else
-        bitmap = font_digit_bitmap(*text);
-    return bitmap != 0 ? bitmap : font_digit_bitmap('?');
-}
-
 /* Draw at most twelve horizontal bitmap runs. A run maps to one transformed
  * GE rectangle, bounding every call independently of string/glyph size. */
 static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
@@ -546,13 +547,6 @@ static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
             width = FONT_HALF_WIDTH;
             height = FONT_HALF_HEIGHT;
             bpr = FONT_HALF_BYTES_PER_ROW;
-        }
-        else if (s_bitmap_job.mode == 1u)
-        {
-            bitmap = digit_glyph(s_bitmap_job.text, &advance);
-            width = FONT_DIGIT_WIDTH;
-            height = FONT_DIGIT_HEIGHT;
-            bpr = FONT_DIGIT_BYTES_PER_ROW;
         }
         else
         {
@@ -604,10 +598,208 @@ static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
     return ui_draw_bitmap_slice(x, y, text, color, 0u);
 }
 
+static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
+                          uint8_t *advance)
+{
+    if ((uint8_t)text[0] == 0xC2u && (uint8_t)text[1] == 0xB5u)
+    {
+        *advance = 2u;
+        return font_digit_rif_symbol_code(FONT_DIGIT_SYM_MICRO, kind, code);
+    }
+    if ((uint8_t)text[0] == 0xC2u && (uint8_t)text[1] == 0xB0u)
+    {
+        *advance = 2u;
+        return font_digit_rif_symbol_code(FONT_DIGIT_SYM_DEGREE, kind, code);
+    }
+    if ((uint8_t)text[0] == 0xCEu && (uint8_t)text[1] == 0xA9u)
+    {
+        *advance = 2u;
+        return font_digit_rif_symbol_code(FONT_DIGIT_SYM_OHM, kind, code);
+    }
+    *advance = 1u;
+    return font_digit_rif_code(*text, kind, code);
+}
+
+static void rif_draw_fail(lt7680_status_t st)
+{
+    s_rif_draw_job.active = false;
+    s_rif_ready = false;
+    hal_uart_send_text("RIF fallback=");
+    hal_uart_send_hex8((uint8_t)st);
+    hal_uart_send_text("\r\n");
+}
+
+static bool rif_find_next_tile(void)
+{
+    rif_entry_t entry;
+    lt7680_status_t st;
+
+    if (s_rif_draw_job.directory_index >= s_rif_image.directory_count)
+    {
+        rif_draw_fail(LT7680_ERR_PARAM);
+        return false;
+    }
+    st = lt7680_flash_read(s_rif_image.flash_base + s_rif_image.directory_offset +
+                               (uint32_t)s_rif_draw_job.directory_index * RIF_READER_ENTRY_SIZE,
+                           s_rif_draw_job.entry, RIF_READER_ENTRY_SIZE);
+    if (st != LT7680_OK ||
+        rif_reader_parse_entry(&s_rif_image, s_rif_draw_job.entry,
+                               RIF_READER_ENTRY_SIZE, &entry) != RIF_OK)
+    {
+        rif_draw_fail(st);
+        return false;
+    }
+    s_rif_draw_job.directory_index++;
+    if (rif_reader_find_glyph(&s_rif_image, &entry, s_rif_draw_job.kind,
+                              s_rif_draw_job.code, &s_rif_draw_job.tile) == RIF_OK)
+    {
+        s_rif_draw_job.resolving = false;
+        s_rif_draw_job.row = 0u;
+        s_rif_draw_job.column = 0u;
+    }
+    return false;
+}
+
+static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
+{
+    lt7680_status_t st;
+    uint16_t budget = 8u;
+
+    if (!s_rif_draw_job.active)
+    {
+        s_rif_draw_job.text = text;
+        s_rif_draw_job.x = x;
+        s_rif_draw_job.y = y;
+        s_rif_draw_job.cx = x;
+        s_rif_draw_job.active = true;
+        s_rif_draw_job.resolving = true;
+        s_rif_draw_job.directory_index = 0u;
+        if (!rif_text_code(text, &s_rif_draw_job.kind, &s_rif_draw_job.code,
+                           &s_rif_draw_job.advance))
+        {
+            rif_draw_fail(LT7680_ERR_PARAM);
+            return false;
+        }
+    }
+    if (s_rif_draw_job.resolving)
+        return rif_find_next_tile();
+
+    if (!s_rif_draw_job.chunk_ready)
+    {
+        uint16_t remaining =
+            (uint16_t)(s_rif_draw_job.tile.width - s_rif_draw_job.column);
+        s_rif_draw_job.chunk_width = remaining > 32u ? 32u : remaining;
+        st = lt7680_flash_read(s_rif_draw_job.tile.offset +
+                                   (uint32_t)s_rif_draw_job.row * s_rif_draw_job.tile.stride +
+                                   (uint32_t)s_rif_draw_job.column * 2u,
+                               s_rif_draw_job.pixels,
+                               (uint16_t)(s_rif_draw_job.chunk_width * 2u));
+        if (st != LT7680_OK)
+        {
+            rif_draw_fail(st);
+            return false;
+        }
+        s_rif_draw_job.pixel = 0u;
+        s_rif_draw_job.chunk_ready = true;
+    }
+    while (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width && budget > 0u)
+    {
+        uint8_t start;
+        uint16_t color;
+        while (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width &&
+               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u + 1u] << 8)) ==
+                   s_rif_draw_job.tile.background)
+            s_rif_draw_job.pixel++;
+        if (s_rif_draw_job.pixel == s_rif_draw_job.chunk_width)
+            break;
+        start = s_rif_draw_job.pixel;
+        color = (uint16_t)s_rif_draw_job.pixels[start * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[start * 2u + 1u] << 8);
+        while (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width &&
+               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u + 1u] << 8)) == color)
+            s_rif_draw_job.pixel++;
+        if (ui_fill_rect((uint16_t)(s_rif_draw_job.cx + s_rif_draw_job.column + start),
+                         (uint16_t)(s_rif_draw_job.y + s_rif_draw_job.row),
+                         (uint16_t)(s_rif_draw_job.pixel - start), 1u, color) != LT7680_OK)
+        {
+            rif_draw_fail(LT7680_ERR_BUS);
+            return false;
+        }
+        budget--;
+    }
+    if (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width)
+        return false;
+
+    s_rif_draw_job.chunk_ready = false;
+    s_rif_draw_job.column = (uint16_t)(s_rif_draw_job.column + s_rif_draw_job.chunk_width);
+    if (s_rif_draw_job.column < s_rif_draw_job.tile.width)
+        return false;
+    s_rif_draw_job.column = 0u;
+    s_rif_draw_job.row++;
+    if (s_rif_draw_job.row < s_rif_draw_job.tile.height)
+        return false;
+
+    s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx + s_rif_draw_job.tile.width);
+    s_rif_draw_job.text += s_rif_draw_job.advance;
+    if (*s_rif_draw_job.text == '\0')
+    {
+        s_rif_draw_job.active = false;
+        return true;
+    }
+    if (!rif_text_code(s_rif_draw_job.text, &s_rif_draw_job.kind,
+                       &s_rif_draw_job.code, &s_rif_draw_job.advance))
+    {
+        rif_draw_fail(LT7680_ERR_PARAM);
+        return false;
+    }
+    s_rif_draw_job.resolving = true;
+    s_rif_draw_job.directory_index = 0u;
+    return false;
+}
+
 static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color)
 {
-    return ui_draw_bitmap_slice(x, y, text, color, 1u);
+    return s_rif_ready ? ui_draw_external_digits(x, y, text)
+                       : ui_draw_text(x, y, text, color);
+}
+
+static void rif_init(void)
+{
+    uint8_t header[RIF_READER_HEADER_SIZE];
+    uint8_t id[3];
+    lt7680_status_t st;
+
+    s_rif_ready = false;
+    st = lt7680_flash_read_jedec_id(id);
+    if (st != LT7680_OK)
+    {
+        hal_uart_send_text("RIF JEDEC read failed=0x");
+        hal_uart_send_hex8((uint8_t)st);
+        hal_uart_send_text("\r\n");
+        return;
+    }
+    hal_uart_send_text("RIF JEDEC=");
+    hal_uart_send_hex8(id[0]);
+    hal_uart_send_hex8(id[1]);
+    hal_uart_send_hex8(id[2]);
+    hal_uart_send_text("\r\n");
+    if (id[0] != 0xEFu || id[1] != 0x40u || id[2] != 0x17u)
+    {
+        hal_uart_send_text("RIF unavailable: unexpected flash\r\n");
+        return;
+    }
+    st = lt7680_flash_read(0u, header, sizeof(header));
+    if (st != LT7680_OK ||
+        rif_reader_parse_header(header, sizeof(header), &s_rif_image) != RIF_OK)
+    {
+        hal_uart_send_text("RIF unavailable: invalid header\r\n");
+        return;
+    }
+    s_rif_ready = true;
+    hal_uart_send_text("RIF external digits ready\r\n");
 }
 
 static bool ui_draw_half(uint16_t x, uint16_t y, const char *text,
@@ -1320,6 +1512,7 @@ int main(void)
                     }
                     else
                     {
+                        rif_init();
                         /* Keep the display blank while SDRAM is cleared. Without this
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */

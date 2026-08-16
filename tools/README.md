@@ -1,8 +1,10 @@
 # K2000 Resource Flash Image (RIF)
 
 Host-side tools that produce and verify a **resource content image** for the
-LT7680-attached `W25Q128JV` serial flash (U5 on the K2000 display board).
-The W25Q128 hangs off the LT7680 SPI (U2.20-23), **not** the STM32, so the
+LT7680-attached `W25Q64JV` serial flash (U5 on the verified K2000 display
+board). The board netlist calls out W25Q128JV, but the installed device was
+identified as `EF 40 17` by flashrom and is therefore treated as W25Q64JV
+(8 MiB). U5 hangs off the LT7680 SPI (U2.20-23), **not** the STM32, so the
 STM32 firmware cannot write it directly. This toolchain only generates and
 validates the *content*; programming the device is a separate step (LT7680
 serial-flash programming interface or an external chip programmer).
@@ -14,10 +16,10 @@ assets.
 
 ## Design rules
 
-- **Deterministic, host-only.** The packer parses the generated C arrays in
-  `firmware/src` (`font_digits.c/.h`, `font_half.c/.h`) with the same
-  extraction used by `tools/make_sim_font.py`. It never executes firmware and
-  never touches hardware.
+- **Deterministic, host-only.** The packer parses archived large digit arrays
+  in `tools/font_source` and the active half-font arrays in `firmware/src`,
+  with the same extraction used by `tools/make_sim_font.py`. It never executes
+  firmware and never touches hardware.
 - **Bit/row order preserved.** The 1bpp source is row-packed MSB-first
   (bit set = ink). Tiles keep row 0 = top, MSB = left pixel.
 - **Explicit palette.** RGB565 foreground/background values are chosen at
@@ -25,7 +27,7 @@ assets.
   Every 16-bit pixel is stored little-endian (low byte first), matching the
   LT7680 MRWDP pixel byte order, so tiles can be streamed to display RAM
   without byte swaps.
-- **4 KiB alignment everywhere.** W25Q128JV sector size. Every payload and
+- **4 KiB alignment everywhere.** W25Q64JV sector size. Every payload and
   every reserved region starts on a 4 KiB boundary; reserved regions are a
   multiple of 4 KiB, pre-filled with the fill byte (default `0xFF`, the
   erased-flash state) so later content can be programmed in place after a
@@ -33,7 +35,7 @@ assets.
 - **Self-describing and checkable.** Header + directory + per-entry CRC32 +
   whole-image CRC32. `verify_resource_flash.py` validates a file or a flash
   dump without any hardware.
-- **Original flash contents are NOT assumed.** The W25Q128 on a harvested
+- **Original flash contents are NOT assumed.** The U5 serial flash on a harvested
   board may contain the original firmware's resource data (the repository
   only has a 200704-byte `Flash Data_K2000 Display Board TFT_V15.bin` dump
   whose internal layout is not documented). Writing this image **overwrites**
@@ -91,7 +93,7 @@ full flash map. Exit codes: 0 = valid, 1 = problems found.
 
 ## Safety / verification workflow
 
-1. **Back up the current W25Q128 contents first.** Dump the whole 16 MB (or
+1. **Back up the current W25Q64 contents first.** Dump the whole 8 MB (or
    at least the sector range the image will occupy) through the LT7680
    serial-flash read interface or a chip programmer, and keep the dump
    off-board. The original layout is not documented; this backup is the only
@@ -161,7 +163,7 @@ this image's reserved regions.
 
 ## Scope
 
-The tools intentionally do **not** modify the STM32 firmware, the LT7680
-driver, or the simulator. They only produce and verify content for the
-resource flash. Do not commit the generated `.img` files; they live under
-`build/` (git-ignored) and are reproducible from the font sources.
+The tools produce and verify U5 content. The firmware separately reads RIF
+digit tiles through the LT7680 serial-flash FIFO; the tools never execute that
+firmware or touch hardware. Do not commit generated `.img` files; they live
+under `build/` (git-ignored) and are reproducible from the archived sources.

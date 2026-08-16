@@ -54,6 +54,10 @@
 #define REG_SDRMD    0xE1u  /* SDRAM Mode Register */
 #define REG_SDRREF   0xE2u  /* SDRAM Auto Refresh Interval (E2=low, E3=high) */
 #define REG_SDRCR    0xE4u  /* SDRAM Control Register */
+#define REG_SPIDR    0xB8u  /* Serial Flash SPI data FIFO */
+#define REG_SPIMCR2  0xB9u  /* Serial Flash SPI master control */
+#define REG_SPIMSR   0xBAu  /* Serial Flash SPI master status */
+#define REG_SPI_DIV  0xBBu  /* Serial Flash SPI clock divisor */
 
 /* Chip configuration bits (REG[01h]). */
 #define CCR_TFT_16BIT   (0x02u << 3)  /* bit[4:3] = 10b: 16-bit TFT output */
@@ -91,9 +95,164 @@
 
 static lt7680_panel_t s_panel;
 
+#define SPI_CTRL_READ_ACTIVE 0x1Cu
+#define SPI_CTRL_IDLE 0x0Cu
+#define SPI_STATUS_TX_EMPTY 0x80u
+#define SPI_STATUS_RX_EMPTY 0x20u
+#define SPI_STATUS_OVERFLOW 0x08u
+#define SPI_DIVISOR_SAFE 0x0Fu
+
 static lt7680_status_t wr(uint8_t reg, uint8_t val)
 {
     return lt7680_write_reg(reg, val);
+}
+
+static lt7680_status_t spi_wait(uint8_t mask, uint8_t asserted)
+{
+    uint16_t i;
+    uint8_t status;
+
+    for (i = 0u; i < 2000u; i++) {
+        lt7680_status_t st = lt7680_read_reg(REG_SPIMSR, &status);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if ((status & SPI_STATUS_OVERFLOW) != 0u) {
+            (void)wr(REG_SPIMSR, SPI_STATUS_OVERFLOW);
+            return LT7680_ERR_BUS;
+        }
+        if ((status & mask) == asserted) {
+            return LT7680_OK;
+        }
+    }
+    return LT7680_ERR_TIMEOUT;
+}
+
+static lt7680_status_t spi_read_fifo(uint8_t *value)
+{
+    lt7680_status_t st;
+
+    st = spi_wait(SPI_STATUS_RX_EMPTY, 0u);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return lt7680_read_reg(REG_SPIDR, value);
+}
+
+static lt7680_status_t spi_begin(void)
+{
+    lt7680_status_t st;
+    uint8_t ccr;
+
+    st = lt7680_read_reg(REG_CCR, &ccr);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_CCR, (uint8_t)(ccr | CCR_SPI_MASTER));
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = wr(REG_SPI_DIV, SPI_DIVISOR_SAFE);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return wr(REG_SPIMCR2, SPI_CTRL_READ_ACTIVE);
+}
+
+static lt7680_status_t spi_push_and_drain(const uint8_t *tx, uint8_t count,
+                                          uint8_t discard, uint8_t *data)
+{
+    uint8_t i;
+    lt7680_status_t st;
+
+    if (count == 0u || count > 16u || discard > count) {
+        return LT7680_ERR_PARAM;
+    }
+    for (i = 0u; i < count; i++) {
+        st = wr(REG_SPIDR, tx[i]);
+        if (st != LT7680_OK) {
+            return st;
+        }
+    }
+    st = spi_wait(SPI_STATUS_TX_EMPTY, SPI_STATUS_TX_EMPTY);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    for (i = 0u; i < count; i++) {
+        uint8_t value;
+        st = spi_read_fifo(&value);
+        if (st != LT7680_OK) {
+            return st;
+        }
+        if (i >= discard) {
+            data[i - discard] = value;
+        }
+    }
+    return LT7680_OK;
+}
+
+lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
+                                  uint16_t length)
+{
+    uint8_t command[16];
+    uint16_t remaining;
+    lt7680_status_t st;
+
+    if (data == 0 || length == 0u || address > 0x00FFFFFFu ||
+        length > 0x01000000u - address) {
+        return LT7680_ERR_PARAM;
+    }
+    st = spi_begin();
+    if (st == LT7680_OK) {
+        command[0] = 0x03u;
+        command[1] = (uint8_t)(address >> 16);
+        command[2] = (uint8_t)(address >> 8);
+        command[3] = (uint8_t)address;
+        remaining = length;
+        while (remaining > 0u) {
+            uint8_t chunk = remaining > 12u ? 12u : (uint8_t)remaining;
+            uint8_t i;
+            for (i = 0u; i < chunk; i++) {
+                command[4u + i] = 0u;
+            }
+            st = spi_push_and_drain(command, (uint8_t)(4u + chunk), 4u, data);
+            if (st != LT7680_OK) {
+                break;
+            }
+            data += chunk;
+            remaining = (uint16_t)(remaining - chunk);
+            while (remaining > 0u) {
+                chunk = remaining > 16u ? 16u : (uint8_t)remaining;
+                for (i = 0u; i < chunk; i++) {
+                    command[i] = 0u;
+                }
+                st = spi_push_and_drain(command, chunk, 0u, data);
+                if (st != LT7680_OK) {
+                    break;
+                }
+                data += chunk;
+                remaining = (uint16_t)(remaining - chunk);
+            }
+        }
+    }
+    (void)wr(REG_SPIMCR2, SPI_CTRL_IDLE);
+    return st;
+}
+
+lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
+{
+    const uint8_t command[4] = {0x9Fu, 0u, 0u, 0u};
+    lt7680_status_t st;
+
+    if (id == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    st = spi_begin();
+    if (st == LT7680_OK) {
+        st = spi_push_and_drain(command, sizeof(command), 1u, id);
+    }
+    (void)wr(REG_SPIMCR2, SPI_CTRL_IDLE);
+    return st;
 }
 
 /* Write a 13-bit value (coordinate or width) to a register pair, LSB first. */

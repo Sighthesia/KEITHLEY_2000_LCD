@@ -1,7 +1,7 @@
 CC = arm-none-eabi-gcc
 CFLAGS = -mcpu=cortex-m3 -mthumb -std=gnu11 -Os -Wall -Wextra -Werror \
          -ffreestanding -I src
-OBJ = build/hal_stub.o build/lt7680_bus.o build/lt7680_gfx.o \
+OBJ = build/hal_stub.o build/lt7680_bus.o build/lt7680_gfx.o build/rif_reader.o \
       build/font_digits.o build/font_half.o build/font_text.o build/keypad.o \
       build/k2000_proto.o \
       build/main.o build/main_display.o build/panel_transform.o \

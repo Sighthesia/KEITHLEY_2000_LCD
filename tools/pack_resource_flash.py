@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Pack the K2000 resource flash image (RIF) from the generated font sources.
 
-Reads the generated font C arrays in firmware/src (font_digits.c/.h and
-font_half.c/.h) and emits one self-describing binary image for the
-LT7680-attached W25Q128JV resource flash (U5). The image contains:
+Reads the archived big-digit source and active half-font C arrays and emits
+one self-describing binary image for the LT7680-attached W25Q64JV resource
+flash (U5). The image contains:
 
   * a 64-byte header (magic "K2RF", version, sizes, CRC32 fields,
     intended flash base, fill byte),
@@ -22,8 +22,10 @@ Usage:
     python3 tools/pack_resource_flash.py [options]
 
 Options:
-    --src-dir DIR      directory with the generated font .c/.h (default
-                       firmware/src)
+    --src-dir DIR      directory with the active half-font .c/.h (default
+                        firmware/src)
+    --digit-src-dir DIR directory with archived font_digits .c/.h (default
+                        tools/font_source)
     --output PATH      output image path (default
                        build/resource/k2000_resource_v{MAJOR}_{base}.img)
     --base-offset ADDR intended absolute flash address (hex, e.g. 0x000000;
@@ -51,7 +53,9 @@ from rif_common import (ALIGN, DEFAULT_BG_RGB, DEFAULT_FG_RGB, DEFAULT_FILL,
                         rgb888_to_rgb565, verify_image)
 
 DEFAULT_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "..", "firmware", "src")
+                                "..", "firmware", "src")
+DEFAULT_DIGIT_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                      "font_source")
 
 # Reserved regions: (name, byte size). Both are 4 KiB aligned.
 RSVD_REGIONS = [
@@ -141,6 +145,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Pack the K2000 resource flash image from generated fonts")
     parser.add_argument("--src-dir", default=DEFAULT_SRC_DIR)
+    parser.add_argument("--digit-src-dir", default=DEFAULT_DIGIT_SRC_DIR)
     parser.add_argument("--output")
     parser.add_argument("--base-offset", type=parse_addr, default=0x000000,
                         help="intended absolute flash address (hex)")
@@ -158,7 +163,8 @@ def main(argv=None):
         raise SystemExit("--base-offset must be 4 KiB aligned")
 
     src_dir = os.path.abspath(args.src_dir)
-    digit = load_font(src_dir, "font_digits")
+    digit_src_dir = os.path.abspath(args.digit_src_dir)
+    digit = load_font(digit_src_dir, "font_digits")
     half = load_font(src_dir, "font_half")
 
     # Layout: header | directory | pad to 4 KiB | 4 KiB-aligned payload slots.
@@ -170,7 +176,7 @@ def main(argv=None):
     image_size = payload_start + payload_bytes
     if args.base_offset + image_size > FLASH_SIZE:
         raise SystemExit(
-            "image [0x%X, 0x%X) exceeds W25Q128JV capacity 0x%X; "
+            "image [0x%X, 0x%X) exceeds W25Q64JV capacity 0x%X; "
             "choose a smaller --base-offset"
             % (args.base_offset, args.base_offset + image_size, FLASH_SIZE))
 
@@ -214,12 +220,12 @@ def main(argv=None):
           % (args.output, len(image), len(entries), args.base_offset))
     if digit:
         print("  font_digits: %d chars + %d symbols (%dx%d, %d B/tile)"
-              % (len(digit[1]), len(digit[3]), digit[0][0], digit[0][1],
-                 digit[0][2] * digit[0][1] * 2))
+               % (len(digit[1]), len(digit[3]), digit[0][0], digit[0][1],
+                  digit[0][0] * digit[0][1] * 2))
     if half:
         print("  font_half  : %d chars (%dx%d, %d B/tile)"
-              % (len(half[1]), half[0][0], half[0][1],
-                 half[0][2] * half[0][1] * 2))
+               % (len(half[1]), half[0][0], half[0][1],
+                  half[0][0] * half[0][1] * 2))
     return 0
 
 

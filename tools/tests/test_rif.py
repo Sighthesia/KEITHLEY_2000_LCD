@@ -18,6 +18,7 @@ import unittest
 
 TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SRC_DIR = os.path.join(TOOLS_DIR, "..", "firmware", "src")
+DIGIT_SRC_DIR = os.path.join(TOOLS_DIR, "font_source")
 sys.path.insert(0, TOOLS_DIR)
 
 import rif_common
@@ -45,7 +46,7 @@ def _load_packer():
 def build_sample_image(**kw):
     """Build a RIF through the packer's public pipeline and return bytes."""
     mod = _load_packer()
-    digit = load_font(SRC_DIR, "font_digits")
+    digit = load_font(DIGIT_SRC_DIR, "font_digits")
     half = load_font(SRC_DIR, "font_half")
     fg = kw.pop("fg", rgb888_to_rgb565(0x00, 0xFF, 0x33))
     bg = kw.pop("bg", 0)
@@ -80,7 +81,7 @@ def build_sample_image(**kw):
 class TestCParse(unittest.TestCase):
 
     def test_digit_font_parsed(self):
-        font = load_font(SRC_DIR, "font_digits")
+        font = load_font(DIGIT_SRC_DIR, "font_digits")
         self.assertIsNotNone(font)
         dim, chars, glyphs, symbols = font
         self.assertEqual(dim[0], 64)          # width
@@ -119,7 +120,7 @@ class TestRender(unittest.TestCase):
 
     def test_round_trip_1bpp(self):
         # Use the first digit glyph as a real sample.
-        _dim, _chars, glyphs, _symbols = load_font(SRC_DIR, "font_digits")
+        _dim, _chars, glyphs, _symbols = load_font(DIGIT_SRC_DIR, "font_digits")
         fg, bg = 0x07E6, 0x0000
         tile = render_tile(glyphs[0], 64, 128, 8, fg, bg)
         self.assertEqual(len(tile), 64 * 128 * 2)
@@ -219,7 +220,7 @@ class TestImage(unittest.TestCase):
         self.assertEqual(verify_image(self.image), [])
 
     def test_cross_check_clean(self):
-        expect = rif_common.collect_expectations(SRC_DIR)
+        expect = rif_common.collect_expectations(SRC_DIR, DIGIT_SRC_DIR)
         self.assertEqual(verify_image(self.image, expect=expect), [])
 
     def test_verify_detects_tamper(self):
@@ -254,20 +255,20 @@ class TestImage(unittest.TestCase):
     def test_verify_accepts_full_flash_dump(self):
         # A whole-chip dump whose image starts at the recorded base (0 here)
         # must verify as if it were the standalone image file.
-        dump = bytearray([DEFAULT_FILL]) * (16 * 1024 * 1024)
+        dump = bytearray([DEFAULT_FILL]) * (8 * 1024 * 1024)
         dump[0:len(self.image)] = self.image
         self.assertEqual(verify_image(bytes(dump)), [])
 
     def test_verify_rejects_overflowing_base(self):
-        # base 0xFF0000 + 0xBE000 image > 16 MB W25Q128JV capacity.
-        img = build_sample_image(base=0xFF0000)
+        # base 0x780000 + 0xBE000 image > 8 MB W25Q64JV capacity.
+        img = build_sample_image(base=0x780000)
         problems = verify_image(img)
         self.assertTrue(any("exceeds flash capacity" in p for p in problems))
 
     def test_packer_rejects_overflowing_base(self):
         mod = _load_packer()
         with self.assertRaises(SystemExit):
-            mod.main(["--base-offset", "0xFF0000", "--output",
+            mod.main(["--base-offset", "0x780000", "--output",
                       os.path.join(tempfile.gettempdir(),
                                    "rif_overflow_test.img")])
 

@@ -160,69 +160,85 @@ void USART1_IRQHandler(void) {
 - [ ] Flash remains within 64KB and RAM within 20KB, including heap/stack
       reservations.
 
-## Scenario: W25Q128 Resource Image
+## Scenario: RIF External Font Runtime
 
 ### 1. Scope / Trigger
 
-Apply this contract when generating, validating, or programming the W25Q128JV
-resource image connected to the LT7680A-R SPI bus. The resource flash is not
-part of the STM32 image and must be handled as a separate artifact.
+Apply this contract when generating or reading the K2RF resource image through
+the LT7680A-R serial-flash master. The netlist names W25Q128JV, but the
+installed and verified device is W25Q64JV (`EF 40 17`, 8 MiB); runtime bounds
+must use the detected device capacity. U5 is not on the STM32 SPI bus.
 
 ### 2. Signatures
 
 ```sh
 python3 tools/pack_resource_flash.py \
-  --src-dir firmware/src --output resources.img \
+  --src-dir firmware/src --digit-src-dir tools/font_source --output resources.img \
   [--base-offset 0x000000] [--fg '#00FF33'] [--bg '#000000']
 
 python3 tools/verify_resource_flash.py resources.img \
-  [--src-dir firmware/src]
+  [--src-dir firmware/src] [--digit-src-dir tools/font_source]
+
+lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
+                                   uint16_t length);
+lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
+rif_status_t rif_reader_parse_header(const uint8_t *data, uint16_t len,
+                                     rif_image_t *out);
+rif_status_t rif_reader_parse_entry(const rif_image_t *image,
+                                    const uint8_t *data, uint16_t len,
+                                    rif_entry_t *out);
+rif_status_t rif_reader_find_glyph(const rif_image_t *image,
+                                   const rif_entry_t *entry, uint32_t kind,
+                                   uint16_t code, rif_tile_t *out);
 ```
 
 The packer emits a deterministic `K2RF` image. The default image is
 `0xBE000` bytes, 4 KiB sector-aligned, and records its absolute
-`flash_base` in the header. A full 16 MiB dump is also accepted by the
+`flash_base` in the header. A full 8 MiB dump is also accepted by the
 verifier; it validates the image slice at the recorded base.
 
 ### 3. Contracts
 
-- W25Q128 capacity is 16 MiB; `base-offset` must be 4 KiB aligned and
-  `base-offset + image_size <= 0x1000000`.
+- The physical W25Q64 capacity is 8 MiB; `base-offset` must be 4 KiB aligned
+  and `base-offset + image_size <= 0x800000`.
 - The image contains a 64-byte header, 44 directory entries, RGB565
   little-endian glyph tiles, a diagnostic tile, and `0xFF`-filled reserved
   `font_text` and `ui_assets` regions.
 - Payload entries are 4 KiB aligned and carry dimensions, character identity,
-  colors, size, and CRC32. Source glyphs are extracted from generated arrays
-  under `firmware/src`, matching the simulator extraction contract.
-- Only sectors in `[base-offset, base-offset + image_size)` may be erased or
-  programmed. Bytes outside that interval are preserved.
-- Before the first write, save a complete 16 MiB dump and verify two reads with
-  `cmp` and SHA-256. Confirm that the selected base does not overlap unknown
-  data in the original dump.
-- The STM32 firmware, LT7680 driver, and simulator do not automatically read
-  this image; programming it alone cannot prove external-font integration.
+  colors, size, and CRC32. Archived 64x128 digit bitmaps live in
+  `tools/font_source`; active small fonts remain in `firmware/src`.
+- `lt7680_flash_read()` uses W25Q command `0x03` with a 24-bit address through
+  LT7680 B8/B9/BA/BB. It activates CS with B9=`0x1C`, transfers no more than
+  16 FIFO bytes per batch, and writes B9=`0x0C` on every exit.
+- Firmware must probe `0x9F` and require `EF 40 17`, parse the RIF header, and
+  scan directory entries before using a glyph. It streams no more than 64 tile
+  bytes at once, renders only non-background RGB565 runs on the hidden page,
+  and falls back to `font_text` when any probe/read/format step fails.
+- U5 programming is a separate, read-back-verified operation. Do not modify
+  bytes outside `[base-offset, base-offset + image_size)`.
 
 ### 4. Validation & Error Matrix
 
 | Condition | Required behavior |
 | --- | --- |
 | Missing source glyph or malformed generated C array | Packer fails before writing output |
-| Non-4 KiB base or image outside 16 MiB | Packer and verifier reject it |
+| Non-4 KiB base or image outside 8 MiB | Packer and verifier reject it |
 | Bad magic/version, header CRC, image CRC, entry CRC, size, overlap, or alignment | Verifier rejects the image |
 | Full dump with image at recorded base | Verifier slices and validates the image |
 | Full dump with image at another base | Reject unless exported as the matching target range |
 | Source glyph round-trip differs | `--src-dir` verification fails |
-| Duplicate or unknown hardware data outside image range | Do not erase or modify it |
-| Diagnostic tile fails visual display check | Stop before testing glyph tiles |
+| JEDEC is not `EF 40 17`, FIFO overflows/times out, or RIF parse fails | Disable RIF and render the reading with `font_text` |
+| Directory entry has wrong kind/code/64x128 geometry | Continue scanning; fall back if no matching glyph exists |
+| Tile read or GE run fails | Abort the RIF job, preserve responsiveness, and fall back on its next draw step |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: read U5 twice, obtain identical 16 MiB dumps, generate the image,
-  erase only its sectors, read back, and run the verifier on the readback.
-- Base: generate at `0x000000` only after the complete original dump confirms
-  that the first `0xBE000` bytes are disposable or intentionally replaced.
-- Bad: use the STM32 ELF as the W25Q128 input, assume LT7680 GTFNT layout, or
-  flash the image before isolating U5 from the LT7680 bus.
+- Good: boot logs `RIF JEDEC=EF4017` and `RIF external digits ready`; the
+  hidden page receives bounded RGB565 runs from a matching 64x128 tile.
+- Base: an unknown character or unavailable flash renders an upright, visible
+  12x24 `font_text` reading instead of blanking the reading area.
+- Bad: access U5 from STM32 SPI, send more than 16 FIFO bytes without draining,
+  leave LT7680 CS active after an error, or allocate a full 16 KiB tile buffer.
 
 ### 6. Tests Required
 
@@ -230,31 +246,34 @@ verifier; it validates the image slice at the recorded base.
 - Assert all 44 entries, payload alignment, CRCs, reserved fill, and diagnostic
   color bands.
 - Assert source glyph 1bpp to RGB565 to 1bpp round-trip for every tile.
-- Verify a complete 16 MiB dump and reject tampered bytes, bad magic, size
+- Verify a complete 8 MiB dump and reject tampered bytes, bad magic, size
   mismatch, misaligned base, and capacity overflow.
-- After hardware programming, read back the target range and show the
-  diagnostic tile followed by glyph `8`; judge color and orientation from the
-  panel, not LT7680 SPI framebuffer readback.
+- Assert RIF parser header/entry range and glyph-identity rejection cases, plus
+  flash-read null, zero-length, and 24-bit-address rejection cases.
+- Build the target below 64 KiB Flash and 20 KiB RAM. On hardware, confirm
+  JEDEC/header logs, external glyph `8`, a live reading, and the small-font
+  fallback path; judge color and orientation from the panel.
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
-```sh
-flashrom -p ... -w resources.img
+```c
+uint8_t tile[16384];
+lt7680_flash_read(entry.offset, tile, sizeof(tile));
 ```
 
-This risks replacing unrelated flash content and assumes a programmer-side
-chip layout that is not part of the resource image contract.
+This exceeds the bounded-RAM renderer contract and does not guarantee U5 CS
+cleanup after a failed transfer.
 
 #### Correct
 
-```sh
-flashrom -p ... -r u5-before-1.bin
-flashrom -p ... -r u5-before-2.bin
-cmp u5-before-1.bin u5-before-2.bin
-python3 tools/verify_resource_flash.py resources-readback.bin --src-dir firmware/src
+```c
+uint8_t pixels[64];
+if (lt7680_flash_read(tile.offset + row_offset, pixels, sizeof(pixels)) != LT7680_OK) {
+    disable_rif_and_fall_back();
+}
 ```
 
-Then use the programmer's sector-range operation to erase and write only the
-verified image range, and validate the readback before visual acceptance.
+The renderer draws each non-background run onto the hidden page, returns to the
+main loop between bounded slices, and never writes U5 during normal operation.

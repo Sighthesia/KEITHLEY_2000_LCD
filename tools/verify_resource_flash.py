@@ -10,7 +10,7 @@ Checks, in order:
   * header magic "K2RF" and version 1.0
   * header CRC32 and whole-image CRC32 (each computed with both CRC fields
     zeroed, exactly as the packer wrote them)
-  * flash capacity: flash_base + image_size must fit inside the 16 MB chip
+   * flash capacity: flash_base + image_size must fit inside the 8 MB chip
   * directory bounds (offset/size within the file, entry size and count
     consistent, payload_start 4 KiB aligned)
   * every entry: known kind, 4 KiB-aligned payload offset, payload inside
@@ -26,7 +26,8 @@ Exit code is 0 when the image is valid, 1 otherwise. The script never
 touches hardware; it validates a file (or a flash dump) on the host.
 
 Usage:
-    python3 tools/verify_resource_flash.py [--src-dir firmware/src] IMAGE
+    python3 tools/verify_resource_flash.py [--src-dir firmware/src]
+        [--digit-src-dir tools/font_source] IMAGE
 """
 import argparse
 import os
@@ -37,7 +38,9 @@ import rif_common
 from rif_common import verify_image, collect_expectations
 
 DEFAULT_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                               "..", "firmware", "src")
+                                "..", "firmware", "src")
+DEFAULT_DIGIT_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                     "font_source")
 
 
 def main(argv=None):
@@ -47,7 +50,9 @@ def main(argv=None):
     parser.add_argument("--src-dir", default=None,
                         help="firmware/src with generated fonts; enables "
                              "exact glyph-count, char-code and round-trip "
-                             "checks (default: none)")
+                              "checks (default: none)")
+    parser.add_argument("--digit-src-dir", default=None,
+                        help="archived font_digits source; used with --src-dir")
     args = parser.parse_args(argv)
 
     if not os.path.isfile(args.image):
@@ -59,7 +64,9 @@ def main(argv=None):
     expect = None
     if args.src_dir:
         src_dir = os.path.abspath(args.src_dir)
-        expect = collect_expectations(src_dir)
+        expect = collect_expectations(
+            src_dir, os.path.abspath(args.digit_src_dir)
+            if args.digit_src_dir else DEFAULT_DIGIT_SRC_DIR)
         if expect:
             print("cross-check source: %s" % src_dir)
 

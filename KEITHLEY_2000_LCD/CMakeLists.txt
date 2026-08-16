@@ -58,6 +58,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/panel_transform.c
     Core/Src/reading_split.c
     Core/Src/render_scheduler.c
+    Core/Src/rif_reader.c
     Core/Src/scene.c
     Core/Src/status_bar.c
     Core/Src/trend_buffer.c
