@@ -49,8 +49,8 @@ int main(void)
            frame.status_active[7] && frame.status_active[8] &&
            frame.status_active[10] && frame.status_active[11] &&
            frame.status_active[12]);
-    assert(strcmp(frame.x_labels[0], "0.00s") == 0);
-    assert(strcmp(frame.x_labels[4], "10.00s") == 0);
+    assert(strcmp(frame.x_labels[0], "10.00s") == 0);
+    assert(strcmp(frame.x_labels[4], "0.00s") == 0);
 
     /* DC/AC suffix split: "AAC" -> base "A" + suffix "AC"; "mV" keeps the
      * whole unit; the model still infers from the original unit string. */
@@ -106,7 +106,22 @@ int main(void)
     trend_buffer_reset(&trend);
     assert(trend_buffer_add(&trend, 40u, "1000", "mV"));
     main_display_format_trend(&trend, 40u, "mV", &frame);
-    assert(strstr(frame.y_labels[0], "mV") == 0);
-    assert(strstr(frame.y_labels[0], "V") != 0);
+    assert(strstr(frame.y_labels[0], "mV") != 0);
+    assert(strstr(frame.y_labels[0], "1000") == 0);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 60u, "1", "A"));
+    assert(trend_buffer_add(&trend, 80u, "1.2", "A"));
+    main_display_format_trend(&trend, 80u, "A", &frame);
+    assert(strstr(frame.y_labels[0], "A") != 0);
+    assert(strstr(frame.y_labels[0], "6.89") == 0);
+
+    /* Negative and sub-unit values must keep a finite, ordered scale. */
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 100u, "-0.002", "mA"));
+    assert(trend_buffer_add(&trend, 120u, "-0.001", "mA"));
+    main_display_format_trend(&trend, 120u, "mA", &frame);
+    assert(frame.trend_has_data);
+    assert(strstr(frame.y_labels[0], "mA") != 0);
+    assert(strstr(frame.y_labels[3], "mA") != 0);
     return 0;
 }

@@ -24,7 +24,7 @@ DCCPL as Keithley 2000 state.
 | Terminology | Original Keithley labels: REM, TALK, LSTN, SRQ, TRIG, FILT, REL, MATH |
 | Authority | Host protocol is authoritative; unavailable values are shown as unknown or reduced forms |
 | Trend window | Save and display the most recent 10 seconds |
-| X axis | 0.00s, 2.50s, 5.00s, 7.50s, 10.00s |
+| X axis | 10.00s, 7.50s, 5.00s, 2.50s, 0.00s; newest sample is on the right |
 | Y axis | Automatic range from visible samples with 10% padding |
 | Rate display | FAST=500 Read/s, MED=50 Read/s, SLOW=5 Read/s |
 | Protocol bits | Migrate status indicators to the literal ODS bit values, then verify on hardware |
@@ -55,7 +55,8 @@ y=192..319 Trend plot, Y labels at left, X labels at bottom
 - Parameter controls use compact 4px-radius rectangles, not oversized pills.
   On target, the radius is rendered with clipped corner pixels around a filled
   rectangle; it does not require a new LT7680 rounded-rectangle primitive.
-- Grid lines are subtle 1px dashed dark grey.
+- Grid lines are subtle 1px dashed dark grey inside a black plot window with
+  a neutral-grey chart panel and thin plot boundary/divider lines.
 - The trend plot's X and Y axes sit in L-shaped deep-grey cells matching the
   reading area's info-panel cells (`MAIN_DISPLAY_COLOR_BAR`): a full-height
   left strip (x0..95) for the Y labels and a bottom strip (y296..319, plot
@@ -143,25 +144,31 @@ for graph projection; the exact host reading remains the original string in
 pull `strtof`, formatted I/O, or heap allocation into the target image.
 
 Every valid numeric reading is parsed once and normalized to a base physical
-unit before insertion. Prefix changes such as mV to V do not clear the history
-when they represent the same physical quantity. A function or physical-dimension
-change clears the history. `OVERFLOW`, `----`, startup placeholders, and invalid
-numeric text are not sampled.
+unit before insertion. The complete displayed unit/function token is also kept
+as the trend sequence identity: repeated `mA` samples retain history, while
+switching `mA` to `A` or `VDC` to `VAC` clears history before inserting the new
+sample. `OVERFLOW`, `----`, startup placeholders, and invalid numeric text are
+not sampled.
 
 The ring also resets after ten seconds without a valid sample or if local tick
 handling detects a discontinuity that cannot be represented safely.
 
 ### Axes and Projection
 
-- The visible X range is always the latest 10 seconds. Before it fills, the
-  trace grows from left to right; afterward it scrolls continuously.
-- X labels are fixed at 0.00s, 2.50s, 5.00s, 7.50s, and 10.00s.
-- Y range is visible minimum/maximum plus 10% padding.
+- The visible X range is always the latest 10 seconds. The oldest sample is on
+  the left and the newest sample is fixed on the right; before the window fills,
+  the trace grows toward the right and afterward it scrolls left.
+- X labels are fixed at 10.00s, 7.50s, 5.00s, 2.50s, and 0.00s, with 0.00s at
+  the newest-sample edge. Endpoint labels are centered and clamped inside the
+  plot gutter.
+- Y range is visible minimum/maximum plus 10% padding, then expanded to
+  engineering-friendly 1/2/5 x 10^n tick spacing.
 - A flat signal gets a nonzero span based on its magnitude and display
   resolution, so the line remains centered and labels do not collapse.
 - Four Y labels are generated in engineering notation with the active unit.
   Precision is reduced only as needed to fit the fixed label column; sign and
-  unit are never clipped.
+  unit are never clipped. Axis values use the sequence's displayed unit and
+  scale normalized storage values accordingly.
 - The 500 storage buckets are aggregated into at most 240 evenly spaced render
   columns. Each projected column retains its minimum and maximum; connections
   between columns retain the trend shape. This bounds target line-command work

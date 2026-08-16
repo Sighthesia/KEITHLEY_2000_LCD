@@ -19,9 +19,9 @@ html,body{margin:0;background:#111;color:#bbb;font:13px monospace}body{display:f
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
-const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,plotX:96,plotY:196,plotW:840,plotH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:840,xAxisY:296,xAxisH:24};
+const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:840,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:840,xAxisY:296,xAxisH:24};
 const COLORS={bg:"#000",bar:"#182126",bar2:"#263238",green:"#00ff33",greenDim:"#006c25",cyan:"#00d9ff",white:"#fff",muted:"#5d666b",grid:"#263238",red:"#f22"};
-const X_LABELS=["0.00s","2.50s","5.00s","7.50s","10.00s"];
+const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
 function textBitmap(c){const symbols={"µ":0,"Ω":1,"°":2,"±":3};if(Object.hasOwn(symbols,c))return SYMBOL_BITMAPS[symbols[c]];const n=c.charCodeAt(0);return n<TEXT_FIRST||n>TEXT_LAST?null:TEXT_BITMAPS[n-TEXT_FIRST]}
 function digitBitmap(c){const syms={"µ":0,"°":1,"Ω":2};if(Object.hasOwn(syms,c))return DIGIT_SYMBOL_BITMAPS[syms[c]];const i=DIGIT_CHARS.indexOf(c);return i<0?null:DIGIT_BITMAPS[i]}
@@ -57,13 +57,20 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   text(ctx,"FILT",valueX,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.filt:true));
   text(ctx,"REL",valueX+4*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.rel:true));
   text(ctx,"MATH",valueX+8*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.math:true));
-  ctx.fillStyle=COLORS.bar;ctx.fillRect(L.yAxisX,L.yAxisY,L.yAxisW,L.yAxisH);ctx.fillRect(L.xAxisX,L.xAxisY,L.xAxisW,L.xAxisH);
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH);
+  ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotBgY,L.plotW,L.plotBgH);
+  ctx.fillStyle=COLORS.bar2;ctx.fillRect(L.plotX,L.plotDividerY,L.plotW,L.plotDividerH);ctx.fillRect(L.plotX,L.plotY,L.plotW,1);ctx.fillRect(L.plotX+L.plotW-1,L.plotY,1,L.plotH);
   ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
- const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),pad=(hi-lo)*.1,ylo=lo-pad,yhi=hi+pad;
- const fmtAxis=(v)=>v>=1000?v.toFixed(0):v>=100?v.toFixed(1):v.toFixed(2);
- const axisUnit=demo.on?demoAxisUnit():"V";
-  for(let i=0;i<4;i++){const s=fmtAxis(yhi-(yhi-ylo)*i/3)+axisUnit;text(ctx,s,Math.max(0,L.plotX-4-s.length*TEXT_W),L.plotY+i*L.plotH/3-10,COLORS.cyan)}
- X_LABELS.forEach((s,i)=>text(ctx,s,L.plotX+i*L.plotW/4-(i?30:0),296,COLORS.cyan));
+  const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
+  const axisUnit=demo.on?demoAxisUnit():"V";
+  /* Demo samples are already in the displayed unit; target samples are
+     normalized internally before the shared formatter applies this scale. */
+  const axisScale=1;
+  const niceStep=(span)=>{let s=span/3,p=1;while(s>=10){s/=10;p*=10}while(s<1){s*=10;p/=10}return (s<=1?p:s<=2?2*p:s<=5?5*p:10*p)};
+  const scaledLo=ylo*axisScale,scaledHi=yhi*axisScale,step=niceStep(scaledHi-scaledLo),top=Math.ceil(scaledHi/step)*step;
+  const fmtAxis=(v)=>Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Math.abs(v)>=1?v.toFixed(2):v.toFixed(3);
+   for(let i=0;i<4;i++){const s=fmtAxis(top-step*i)+axisUnit;const x=Math.max(0,Math.min(L.plotX-s.length*TEXT_W-4,L.plotX-4-s.length*TEXT_W));text(ctx,s,x,L.plotY+i*L.plotH/3-10,COLORS.cyan)}
+  X_LABELS.forEach((s,i)=>{const center=L.plotX+i*L.plotW/4;const x=Math.max(L.plotX,Math.min(L.plotX+L.plotW-s.length*TEXT_W,center-s.length*TEXT_W/2));text(ctx,s,x,L.xAxisY,COLORS.cyan)});
  for(const [color,dy] of [[COLORS.greenDim,-1],[COLORS.greenDim,1],[COLORS.green,0]]){ctx.strokeStyle=color;ctx.beginPath();data.forEach((v,i)=>{const px=L.plotX+i*(L.plotW-1)/239,py=L.plotY+(yhi-v)/(yhi-ylo)*L.plotH+dy;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});ctx.stroke()}
  renderFB(document.getElementById("fb").getContext("2d"),ctx);
 }

@@ -799,6 +799,29 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     trend_set_drawn(column, occupied, y0, y1);
 }
 
+static void trend_draw_background(void)
+{
+    (void)ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
+                       MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CHART_PANEL_H,
+                       MAIN_DISPLAY_COLOR_BAR);
+    (void)ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_BG_Y,
+                       MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_BG_H,
+                       MAIN_DISPLAY_COLOR_BG);
+    (void)ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_DIVIDER_Y,
+                       MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_DIVIDER_H,
+                       MAIN_DISPLAY_COLOR_BAR_ALT);
+}
+
+static uint16_t trend_x_label_x(uint16_t center, const char *label)
+{
+    size_t width = strlen(label) * FONT_TEXT_WIDTH;
+    uint16_t x = center > width / 2u ? (uint16_t)(center - width / 2u)
+                                    : MAIN_DISPLAY_PLOT_X;
+    if (x + width > MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
+        x = (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W - width);
+    return x;
+}
+
 static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -996,13 +1019,7 @@ static void reading_scene_render(void)
         {
             /* Clear the trend region, then restore the info-style L-shaped
              * axis cells before drawing the grid and labels. */
-            (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y, 960u, 128u, MAIN_DISPLAY_COLOR_BG);
-            (void)ui_fill_rect(MAIN_DISPLAY_Y_AXIS_X, MAIN_DISPLAY_Y_AXIS_Y,
-                               MAIN_DISPLAY_Y_AXIS_W, MAIN_DISPLAY_Y_AXIS_H,
-                               MAIN_DISPLAY_COLOR_BAR);
-            (void)ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
-                               MAIN_DISPLAY_X_AXIS_W, MAIN_DISPLAY_X_AXIS_H,
-                               MAIN_DISPLAY_COLOR_BAR);
+            trend_draw_background();
             s_render_item++;
             return;
         }
@@ -1024,7 +1041,9 @@ static void reading_scene_render(void)
         {
             uint8_t i = (uint8_t)(s_render_item - 5u);
             uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X + i * MAIN_DISPLAY_PLOT_W / 4u);
-            if (!ui_draw_text((uint16_t)(x > 24u ? x - 24u : x), MAIN_DISPLAY_X_LABEL_Y, s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
+            if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
+                              MAIN_DISPLAY_X_LABEL_Y,
+                                  s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             (void)ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x, MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H, MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
@@ -1049,14 +1068,7 @@ static void reading_scene_render(void)
             /* Pages are rendered independently after their one-time base
              * build. Clear the canvas and restore the info-style L-shaped
              * axis cells before drawing the new projection. */
-            (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y, 960u,
-                               MAIN_DISPLAY_TREND_H, MAIN_DISPLAY_COLOR_BG);
-            (void)ui_fill_rect(MAIN_DISPLAY_Y_AXIS_X, MAIN_DISPLAY_Y_AXIS_Y,
-                               MAIN_DISPLAY_Y_AXIS_W, MAIN_DISPLAY_Y_AXIS_H,
-                               MAIN_DISPLAY_COLOR_BAR);
-            (void)ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
-                               MAIN_DISPLAY_X_AXIS_W, MAIN_DISPLAY_X_AXIS_H,
-                               MAIN_DISPLAY_COLOR_BAR);
+            trend_draw_background();
             s_render_item = 1u;
             return;
         }
@@ -1105,9 +1117,9 @@ static void reading_scene_render(void)
                 s_render_item++;
                 return;
             }
-            if (!ui_draw_text((uint16_t)(x > 24u ? x - 24u : x),
-                              MAIN_DISPLAY_X_LABEL_Y, s_frame.x_labels[i],
-                              MAIN_DISPLAY_COLOR_CYAN))
+            if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
+                              MAIN_DISPLAY_X_LABEL_Y,
+                                  s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
             return;

@@ -71,6 +71,12 @@
 #define MAIN_DISPLAY_PLOT_W 840u
 #define MAIN_DISPLAY_PLOT_H 92u
 #define MAIN_DISPLAY_X_LABEL_Y 296u
+#define MAIN_DISPLAY_CHART_PANEL_Y MAIN_DISPLAY_TREND_Y
+#define MAIN_DISPLAY_CHART_PANEL_H MAIN_DISPLAY_TREND_H
+#define MAIN_DISPLAY_PLOT_DIVIDER_H 4u
+#define MAIN_DISPLAY_PLOT_DIVIDER_Y MAIN_DISPLAY_TREND_Y
+#define MAIN_DISPLAY_PLOT_BG_Y MAIN_DISPLAY_PLOT_Y
+#define MAIN_DISPLAY_PLOT_BG_H MAIN_DISPLAY_PLOT_H
 
 /* Axis cells use the same deep-grey name-cell treatment as the info panel. */
 #define MAIN_DISPLAY_Y_AXIS_X 0u
@@ -125,8 +131,6 @@ uint16_t main_display_cursor_x(const main_display_layout_t *layout,
 uint16_t main_display_special_color(uint8_t special);
 const char *main_display_rate_text(ui_rate_t rate);
 const char *main_display_function_text(ui_function_t function);
-void main_display_format_axis(float value, const char *unit, char *out,
-                              uint8_t out_size);
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
                                const char *unit, main_display_frame_t *frame);

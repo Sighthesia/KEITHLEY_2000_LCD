@@ -73,8 +73,35 @@ static bool ends_with(const char *text, const char *suffix)
     return a >= b && memcmp(text + a - b, suffix, b) == 0;
 }
 
-bool trend_parse_reading(const char *text, const char *unit, float *base_value,
-                         trend_dimension_t *dimension, const char **base_unit)
+static void copy_unit(char *out, uint8_t size, const char *unit)
+{
+    uint8_t i = 0u;
+    if (out == 0 || size == 0u) return;
+    while (unit != 0 && unit[i] != '\0' && i + 1u < size) {
+        out[i] = unit[i];
+        i++;
+    }
+    out[i] = '\0';
+}
+
+static void normalize_display_unit(const char *unit, char *out, uint8_t size)
+{
+    char tmp[TREND_UNIT_ID_MAX];
+    copy_unit(tmp, sizeof(tmp), unit);
+    if (strcmp(tmp, "MVDC") == 0) copy_unit(out, size, "mVDC");
+    else if (strcmp(tmp, "MVAC") == 0) copy_unit(out, size, "mVAC");
+    else if (strcmp(tmp, "MADC") == 0) copy_unit(out, size, "mADC");
+    else if (strcmp(tmp, "MAAC") == 0) copy_unit(out, size, "mAAC");
+    else if (strcmp(tmp, "KOHM") == 0) copy_unit(out, size, "k\xCE\xA9");
+    else if (strcmp(tmp, "MOHM") == 0) copy_unit(out, size, "M\xCE\xA9");
+    else if (strcmp(tmp, "OHM") == 0) copy_unit(out, size, "\xCE\xA9");
+    else copy_unit(out, size, unit);
+}
+
+bool trend_parse_reading_display(const char *text, const char *unit,
+                                 float *base_value, trend_dimension_t *dimension,
+                                 const char **base_unit, char *display_unit,
+                                 uint8_t display_unit_size)
 {
     float value, factor = 1.0f;
     const char *u = unit;
@@ -88,6 +115,8 @@ bool trend_parse_reading(const char *text, const char *unit, float *base_value,
         u += (uint8_t)unit[0] == 0xC2u ? 2 : 1;
     } else if (unit[0] == 'k') { factor = 1000.0f; u++; }
     else if (unit[0] == 'M') { factor = 1000000.0f; u++; }
+    if (factor > 1.0f && value > FLT_MAX / factor) return false;
+    if (factor > 1.0f && value < -FLT_MAX / factor) return false;
     if (strstr(u, "V") != 0) { dim = TREND_DIM_VOLTAGE; base = "V"; }
     else if (strstr(u, "A") != 0) { dim = TREND_DIM_CURRENT; base = "A"; }
     else if (strstr(u, "OHM") != 0 || strstr(u, "Ohm") != 0 || strstr(u, "\xCE\xA9") != 0) { dim = TREND_DIM_RESISTANCE; base = "\xCE\xA9"; }
@@ -98,6 +127,7 @@ bool trend_parse_reading(const char *text, const char *unit, float *base_value,
     if (base_value != 0) *base_value = value * factor;
     if (dimension != 0) *dimension = dim;
     if (base_unit != 0) *base_unit = base;
+    normalize_display_unit(unit, display_unit, display_unit_size);
     return true;
 }
 
@@ -119,14 +149,18 @@ bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
 {
     float value;
     trend_dimension_t dim;
+    char display_unit[TREND_UNIT_ID_MAX];
     uint32_t bucket;
     uint16_t index;
-    if (trend == 0 || !trend_parse_reading(text, unit, &value, &dim, 0)) return false;
+    if (trend == 0 || !trend_parse_reading_display(text, unit, &value, &dim, 0,
+                                                    display_unit, sizeof(display_unit))) return false;
     /* A backwards local tick (including the SysTick wrap) cannot be mapped to
      * the monotonically numbered bucket ring without ambiguity. */
     if (trend->has_sample && now_ms < trend->last_sample_ms)
         trend_buffer_reset(trend);
-    if (trend->has_sample && dim != trend->dimension) trend_buffer_reset(trend);
+    if (trend->has_sample && (dim != trend->dimension ||
+                              strcmp(display_unit, trend->unit_identity) != 0))
+        trend_buffer_reset(trend);
     if (trend->has_sample && (now_ms - trend->last_sample_ms) >= TREND_WINDOW_MS)
         trend_buffer_reset(trend);
     bucket = now_ms / TREND_BUCKET_MS;
@@ -141,10 +175,26 @@ bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
         if (value > trend->maximum[index]) trend->maximum[index] = value;
     }
     trend->dimension = dim;
+    copy_unit(trend->unit_identity, sizeof(trend->unit_identity), display_unit);
     trend->newest_bucket = bucket;
     trend->last_sample_ms = now_ms;
     trend->has_sample = true;
     return true;
+}
+
+const char *trend_buffer_display_unit(const trend_buffer_t *trend)
+{
+    return trend != 0 && trend->unit_identity[0] != '\0' ? trend->unit_identity : "";
+}
+
+float trend_buffer_display_scale(const trend_buffer_t *trend)
+{
+    const char *unit = trend_buffer_display_unit(trend);
+    if (unit[0] == 'm') return 1000.0f;
+    if (unit[0] == 'u' || ((uint8_t)unit[0] == 0xC2u && (uint8_t)unit[1] == 0xB5u)) return 1000000.0f;
+    if (unit[0] == 'k') return 0.001f;
+    if (unit[0] == 'M' && unit[1] != '\0') return 0.000001f;
+    return 1.0f;
 }
 
 void trend_buffer_update(trend_buffer_t *trend, uint32_t now_ms)

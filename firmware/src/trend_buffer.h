@@ -7,6 +7,7 @@
 #define TREND_BUCKET_COUNT 500u
 #define TREND_WINDOW_MS (TREND_BUCKET_MS * TREND_BUCKET_COUNT)
 #define TREND_MAX_COLUMNS 240u
+#define TREND_UNIT_ID_MAX 8u
 
 typedef enum {
     TREND_DIM_NONE = 0,
@@ -32,13 +33,18 @@ typedef struct {
     uint32_t newest_bucket;
     uint32_t last_sample_ms;
     trend_dimension_t dimension;
+    char unit_identity[TREND_UNIT_ID_MAX];
     bool has_sample;
 } trend_buffer_t;
 
 void trend_buffer_init(trend_buffer_t *trend);
 void trend_buffer_reset(trend_buffer_t *trend);
-bool trend_parse_reading(const char *text, const char *unit, float *base_value,
-                         trend_dimension_t *dimension, const char **base_unit);
+bool trend_parse_reading_display(const char *text, const char *unit,
+                                 float *base_value, trend_dimension_t *dimension,
+                                 const char **base_unit, char *display_unit,
+                                 uint8_t display_unit_size);
+const char *trend_buffer_display_unit(const trend_buffer_t *trend);
+float trend_buffer_display_scale(const trend_buffer_t *trend);
 bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
                       const char *unit);
 void trend_buffer_update(trend_buffer_t *trend, uint32_t now_ms);

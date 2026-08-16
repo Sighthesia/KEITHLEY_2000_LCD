@@ -83,26 +83,36 @@ static void append_unsigned(char *out, uint8_t size, uint32_t value,
     while (n > 0u) { char c[2] = {reverse[--n], '\0'}; append_text(out, size, c); }
 }
 
-void main_display_format_axis(float value, const char *unit, char *out,
-                              uint8_t out_size)
+static float nice_step(float span)
 {
-    static const char *const prefixes[] = {"u", "m", "", "k", "M"};
-    int8_t prefix = 2;
-    float absolute = value < 0.0f ? -value : value;
+    float step = 1.0f;
+    float scaled = span / 3.0f;
+    while (scaled >= 10.0f) { scaled *= 0.1f; step *= 10.0f; }
+    while (scaled < 1.0f) { scaled *= 10.0f; step *= 0.1f; }
+    if (scaled <= 1.0f) return step;
+    if (scaled <= 2.0f) return step * 2.0f;
+    if (scaled <= 5.0f) return step * 5.0f;
+    return step * 10.0f;
+}
+
+static void format_fixed_axis(float value, const char *unit, float step,
+                              char *out, uint8_t out_size)
+{
+    uint8_t decimals = 0u;
+    float scale = 1.0f, rounded;
     uint32_t whole, fraction;
-    if (out == 0 || out_size == 0u) return;
-    out[0] = '\0';
-    while (absolute >= 1000.0f && prefix < 4) { value *= 0.001f; absolute *= 0.001f; prefix++; }
-    while (absolute > 0.0f && absolute < 1.0f && prefix > 0) { value *= 1000.0f; absolute *= 1000.0f; prefix--; }
-    if (value < 0.0f) { append_text(out, out_size, "-"); value = -value; }
-    whole = (uint32_t)value;
-    fraction = (uint32_t)((value - (float)whole) * 100.0f + 0.5f);
-    if (fraction >= 100u) { whole++; fraction = 0u; }
+    while (step * scale < 1.0f && decimals < 6u) { scale *= 10.0f; decimals++; }
+    rounded = value * scale;
+    if (rounded < 0.0f) { append_text(out, out_size, "-"); rounded = -rounded; }
+    rounded += 0.5f;
+    whole = (uint32_t)(rounded / scale);
+    fraction = (uint32_t)rounded - whole * (uint32_t)scale;
     append_unsigned(out, out_size, whole, 1u);
-    append_text(out, out_size, ".");
-    append_unsigned(out, out_size, fraction, 2u);
-    append_text(out, out_size, prefixes[prefix]);
-    append_text(out, out_size, unit != 0 ? unit : "");
+    if (decimals != 0u) {
+        append_text(out, out_size, ".");
+        append_unsigned(out, out_size, fraction, decimals);
+    }
+    append_text(out, out_size, unit);
 }
 
 static void format_impedance(const ui_model_t *model, char *out, uint8_t size)
@@ -122,11 +132,11 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     const status_bar_indicator_t *indicator;
     if (frame == 0) return;
     memset(frame, 0, sizeof(*frame));
-    copy_text(frame->x_labels[0], MAIN_DISPLAY_AXIS_LABEL_MAX, "0.00s");
-    copy_text(frame->x_labels[1], MAIN_DISPLAY_AXIS_LABEL_MAX, "2.50s");
+    copy_text(frame->x_labels[0], MAIN_DISPLAY_AXIS_LABEL_MAX, "10.00s");
+    copy_text(frame->x_labels[1], MAIN_DISPLAY_AXIS_LABEL_MAX, "7.50s");
     copy_text(frame->x_labels[2], MAIN_DISPLAY_AXIS_LABEL_MAX, "5.00s");
-    copy_text(frame->x_labels[3], MAIN_DISPLAY_AXIS_LABEL_MAX, "7.50s");
-    copy_text(frame->x_labels[4], MAIN_DISPLAY_AXIS_LABEL_MAX, "10.00s");
+    copy_text(frame->x_labels[3], MAIN_DISPLAY_AXIS_LABEL_MAX, "2.50s");
+    copy_text(frame->x_labels[4], MAIN_DISPLAY_AXIS_LABEL_MAX, "0.00s");
     if (model == 0) return;
     copy_text(frame->value, sizeof(frame->value), model->value);
     copy_text(frame->unit, sizeof(frame->unit), model->unit);
@@ -178,10 +188,12 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
                                const char *unit, main_display_frame_t *frame)
 {
-    float minimum, maximum, step;
+    float minimum, maximum, step, top;
     const char *axis_unit = unit;
     uint8_t i;
     if (frame == 0) return;
+    for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
+        frame->y_labels[i][0] = '\0';
     if (!trend_buffer_range(trend, now_ms, &minimum, &maximum)) {
         frame->trend_has_data = false;
         return;
@@ -191,18 +203,15 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     /* trend_buffer stores normalized base-unit values. Axis labels must use
      * that same unit even when the latest host reading changes prefix. */
     if (trend != 0) {
-        switch (trend->dimension) {
-        case TREND_DIM_VOLTAGE: axis_unit = "V"; break;
-        case TREND_DIM_CURRENT: axis_unit = "A"; break;
-        case TREND_DIM_RESISTANCE: axis_unit = "\xCE\xA9"; break;
-        case TREND_DIM_FREQUENCY: axis_unit = "Hz"; break;
-        case TREND_DIM_TIME: axis_unit = "s"; break;
-        case TREND_DIM_TEMPERATURE: axis_unit = "C"; break;
-        default: break;
-        }
+        if (trend_buffer_display_unit(trend)[0] != '\0')
+            axis_unit = trend_buffer_display_unit(trend);
     }
-    step = (maximum - minimum) / (float)(MAIN_DISPLAY_Y_LABEL_COUNT - 1u);
+    minimum *= trend_buffer_display_scale(trend);
+    maximum *= trend_buffer_display_scale(trend);
+    step = nice_step(maximum - minimum);
+    top = (float)((int32_t)(maximum / step)) * step;
+    if (top < maximum) top += step;
     for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
-        main_display_format_axis(maximum - step * i, axis_unit,
-                                  frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
+        format_fixed_axis(top - step * i, axis_unit, step,
+                          frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
 }
