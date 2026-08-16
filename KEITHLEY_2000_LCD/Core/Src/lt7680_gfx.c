@@ -93,7 +93,6 @@ static lt7680_panel_t s_panel;
 #define LT7680_SPI_STATUS_TX_EMPTY 0x80u
 #define LT7680_SPI_STATUS_RX_EMPTY 0x20u
 #define LT7680_SPI_STATUS_OVERFLOW 0x08u
-#define LT7680_SPI_STATUS_IDLE 0x04u
 #define LT7680_SPI_DIVISOR_SAFE 0x0Fu
 
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
@@ -178,16 +177,12 @@ static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,
             return st;
         }
     }
-    /* TX_EMPTY alone only means the FIFO has handed off its last byte. Wait
-     * for SPI_IDLE so the last serial clock edge has reached U5 before RX pop. */
-    st = flash_wait((uint8_t)(LT7680_SPI_STATUS_TX_EMPTY |
-                              LT7680_SPI_STATUS_IDLE),
-                    (uint8_t)(LT7680_SPI_STATUS_TX_EMPTY |
-                              LT7680_SPI_STATUS_IDLE));
+    /* SPIMSR IDLE is interrupt-mask dependent on this controller. RX_EMPTY
+     * supplies the required per-byte completion check while draining below. */
+    st = flash_wait(LT7680_SPI_STATUS_TX_EMPTY, LT7680_SPI_STATUS_TX_EMPTY);
     if (st != LT7680_OK) {
         return st;
     }
-    (void)write_reg(LT7680_REG_SPIMSR, LT7680_SPI_STATUS_IDLE);
     for (i = 0u; i < count; i++) {
         uint8_t value;
         st = flash_read_fifo(&value);

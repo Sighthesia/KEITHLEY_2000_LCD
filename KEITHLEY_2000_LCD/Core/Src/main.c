@@ -770,6 +770,7 @@ static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
     uint8_t id[3];
+    uint8_t spi_status;
     lt7680_status_t st;
 
     s_rif_ready = false;
@@ -778,6 +779,11 @@ static void rif_init(void)
     {
         hal_uart_send_text("RIF JEDEC read failed=0x");
         hal_uart_send_hex8((uint8_t)st);
+        if (lt7680_read_reg(0xBAu, &spi_status) == LT7680_OK)
+        {
+            hal_uart_send_text(" SPIMSR=0x");
+            hal_uart_send_hex8(spi_status);
+        }
         hal_uart_send_text("\r\n");
         return;
     }

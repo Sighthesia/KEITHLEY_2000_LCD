@@ -209,8 +209,9 @@ verifier; it validates the image slice at the recorded base.
   `tools/font_source`; active small fonts remain in `firmware/src`.
 - `lt7680_flash_read()` uses W25Q command `0x03` with a 24-bit address through
   LT7680 B8/B9/BA/BB. It activates CS with B9=`0x1C`, transfers no more than
-  16 FIFO bytes per batch, waits for SPIMSR `TX_EMPTY|IDLE` (`0x84`) before
-  draining RX, clears the idle flag, and writes B9=`0x0C` on every exit.
+  16 FIFO bytes per batch, waits for SPIMSR `TX_EMPTY` before draining RX, and
+  writes B9=`0x0C` on every exit. Do not require SPIMSR `IDLE`: it is
+  interrupt-mask dependent on this controller and timed out on hardware.
 - Firmware must probe `0x9F` and require `EF 40 17`, parse the RIF header, and
   scan directory entries before using a glyph. It streams no more than 64 tile
   bytes at once, renders only non-background RGB565 runs on the hidden page,
