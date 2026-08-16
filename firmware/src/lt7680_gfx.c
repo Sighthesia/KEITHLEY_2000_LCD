@@ -96,7 +96,9 @@
 
 static lt7680_panel_t s_panel;
 
-#define SPI_CTRL_READ_ACTIVE 0x1Cu
+/* W25Q supports modes 0 and 3. The LT768x raw-SPI reference sequence uses
+ * mode 3, so first hardware bring-up follows it exactly. */
+#define SPI_CTRL_READ_ACTIVE 0x1Fu
 #define SPI_CTRL_IDLE 0x0Cu
 #define SPI_STATUS_TX_EMPTY 0x80u
 #define SPI_STATUS_RX_EMPTY 0x20u

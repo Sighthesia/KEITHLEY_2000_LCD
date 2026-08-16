@@ -208,7 +208,7 @@ verifier; it validates the image slice at the recorded base.
   colors, size, and CRC32. Archived 64x128 digit bitmaps live in
   `tools/font_source`; active small fonts remain in `firmware/src`.
 - `lt7680_flash_read()` uses W25Q command `0x03` with a 24-bit address through
-  LT7680 B8/B9/BA/BB. It activates CS with B9=`0x1C`, transfers no more than
+  LT7680 B8/B9/BA/BB. It activates CS with B9=`0x1F` (SFCS0#, mode 3), transfers no more than
   16 FIFO bytes per batch, waits for SPIMSR `TX_EMPTY` before draining RX, and
   writes B9=`0x0C` on every exit. Do not require SPIMSR `IDLE`: it is
   interrupt-mask dependent on this controller and timed out on hardware.
