@@ -56,6 +56,11 @@ y=192..319 Trend plot, Y labels at left, X labels at bottom
   On target, the radius is rendered with clipped corner pixels around a filled
   rectangle; it does not require a new LT7680 rounded-rectangle primitive.
 - Grid lines are subtle 1px dashed dark grey.
+- The trend plot's X and Y axes sit in L-shaped deep-grey cells matching the
+  reading area's info-panel cells (`MAIN_DISPLAY_COLOR_BAR`): a full-height
+  left strip (x0..95) for the Y labels and a bottom strip (y296..319, plot
+  width) for the X labels. Y labels are right-aligned inside the strip 4px from
+  the plot edge; X labels stay centred on the grid lines.
 - The trend glow is deterministic and inexpensive: a bright 1px center line
   with adjacent darker green lines. No alpha blur is required on the LT7680.
 - Text remains on the existing generated monospace bitmap fonts. The large

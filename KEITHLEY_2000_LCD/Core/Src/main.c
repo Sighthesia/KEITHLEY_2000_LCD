@@ -994,7 +994,15 @@ static void reading_scene_render(void)
     {
         if (s_render_item == 0u)
         {
+            /* Clear the trend region, then restore the info-style L-shaped
+             * axis cells before drawing the grid and labels. */
             (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y, 960u, 128u, MAIN_DISPLAY_COLOR_BG);
+            (void)ui_fill_rect(MAIN_DISPLAY_Y_AXIS_X, MAIN_DISPLAY_Y_AXIS_Y,
+                               MAIN_DISPLAY_Y_AXIS_W, MAIN_DISPLAY_Y_AXIS_H,
+                               MAIN_DISPLAY_COLOR_BAR);
+            (void)ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
+                               MAIN_DISPLAY_X_AXIS_W, MAIN_DISPLAY_X_AXIS_H,
+                               MAIN_DISPLAY_COLOR_BAR);
             s_render_item++;
             return;
         }
@@ -1002,7 +1010,11 @@ static void reading_scene_render(void)
         {
             uint8_t i = (uint8_t)(s_render_item - 1u);
             uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y + i * MAIN_DISPLAY_PLOT_H / 3u);
-            if (!ui_draw_text(4u, trend_y_label_y(i), s_frame.y_labels[i], MAIN_DISPLAY_COLOR_CYAN))
+            size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
+            uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                                   ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
+                                   : 0u;
+            if (!ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             (void)ui_draw_line(MAIN_DISPLAY_PLOT_X, y, MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y, MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
@@ -1035,11 +1047,16 @@ static void reading_scene_render(void)
         if (s_render_item == 0u)
         {
             /* Pages are rendered independently after their one-time base
-             * build, so erase this page's dynamic trend canvas before drawing
-             * the new projection. This avoids carrying the other page's old
-             * curve into the next MISA presentation. */
+             * build. Clear the canvas and restore the info-style L-shaped
+             * axis cells before drawing the new projection. */
             (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y, 960u,
                                MAIN_DISPLAY_TREND_H, MAIN_DISPLAY_COLOR_BG);
+            (void)ui_fill_rect(MAIN_DISPLAY_Y_AXIS_X, MAIN_DISPLAY_Y_AXIS_Y,
+                               MAIN_DISPLAY_Y_AXIS_W, MAIN_DISPLAY_Y_AXIS_H,
+                               MAIN_DISPLAY_COLOR_BAR);
+            (void)ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
+                               MAIN_DISPLAY_X_AXIS_W, MAIN_DISPLAY_X_AXIS_H,
+                               MAIN_DISPLAY_COLOR_BAR);
             s_render_item = 1u;
             return;
         }
@@ -1062,7 +1079,11 @@ static void reading_scene_render(void)
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u)
         {
             uint8_t i = (uint8_t)((s_render_item - 1u) / 2u);
-            if (!ui_draw_text(4u, trend_y_label_y(i), s_frame.y_labels[i],
+            size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
+            uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                                   ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
+                                   : 0u;
+            if (!ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
                                MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;

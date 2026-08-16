@@ -22,4 +22,6 @@ check("half-height suffix font",["D","C","A"].every(c=>e.halfBitmap(c)!=null));
 check("DC/AC baseline hits reading ink bottom",e.baselineAligned);
 check("info panel cells",e.L.infoX+e.L.infoNameW<e.L.infoRight&&e.L.infoRowH===32&&html.includes('cell("Zin"')&&html.includes('"Status"'));
 check("left-aligned reading",e.L.readingX===12);
+check("axis cells surround plot",e.L.yAxisW===e.L.plotX&&e.L.xAxisX===e.L.plotX&&e.L.xAxisW===e.L.plotW&&e.L.xAxisY===e.L.plotY+e.L.plotH+8);
+check("simulator draws axis cells",html.includes("yAxisW")&&html.includes("xAxisW")&&html.includes("ctx.fillStyle=COLORS.bar"));
 if(failures)process.exit(1);console.log("sim/verify.js: ALL CHECKS PASS");

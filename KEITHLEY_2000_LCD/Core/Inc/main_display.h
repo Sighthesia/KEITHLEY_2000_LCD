@@ -72,6 +72,16 @@
 #define MAIN_DISPLAY_PLOT_H 92u
 #define MAIN_DISPLAY_X_LABEL_Y 296u
 
+/* Axis cells use the same deep-grey name-cell treatment as the info panel. */
+#define MAIN_DISPLAY_Y_AXIS_X 0u
+#define MAIN_DISPLAY_Y_AXIS_W MAIN_DISPLAY_PLOT_X
+#define MAIN_DISPLAY_Y_AXIS_Y MAIN_DISPLAY_TREND_Y
+#define MAIN_DISPLAY_Y_AXIS_H MAIN_DISPLAY_TREND_H
+#define MAIN_DISPLAY_X_AXIS_X MAIN_DISPLAY_PLOT_X
+#define MAIN_DISPLAY_X_AXIS_W MAIN_DISPLAY_PLOT_W
+#define MAIN_DISPLAY_X_AXIS_Y MAIN_DISPLAY_X_LABEL_Y
+#define MAIN_DISPLAY_X_AXIS_H 24u
+
 typedef struct {
     uint16_t start_x;
     uint16_t end_x;

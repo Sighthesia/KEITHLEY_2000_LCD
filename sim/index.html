@@ -19,7 +19,7 @@ html,body{margin:0;background:#111;color:#bbb;font:13px monospace}body{display:f
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
-const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,plotX:96,plotY:196,plotW:840,plotH:92};
+const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,plotX:96,plotY:196,plotW:840,plotH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:840,xAxisY:296,xAxisH:24};
 const COLORS={bg:"#000",bar:"#182126",bar2:"#263238",green:"#00ff33",greenDim:"#006c25",cyan:"#00d9ff",white:"#fff",muted:"#5d666b",grid:"#263238",red:"#f22"};
 const X_LABELS=["0.00s","2.50s","5.00s","7.50s","10.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -57,11 +57,12 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   text(ctx,"FILT",valueX,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.filt:true));
   text(ctx,"REL",valueX+4*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.rel:true));
   text(ctx,"MATH",valueX+8*TEXT_W,infoY[3]+(infoRowH-TEXT_H)/2,lamp(demo.on?demo.math:true));
- ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(L.yAxisX,L.yAxisY,L.yAxisW,L.yAxisH);ctx.fillRect(L.xAxisX,L.xAxisY,L.xAxisW,L.xAxisH);
+  ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
  const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),pad=(hi-lo)*.1,ylo=lo-pad,yhi=hi+pad;
  const fmtAxis=(v)=>v>=1000?v.toFixed(0):v>=100?v.toFixed(1):v.toFixed(2);
  const axisUnit=demo.on?demoAxisUnit():"V";
- for(let i=0;i<4;i++)text(ctx,fmtAxis(yhi-(yhi-ylo)*i/3)+axisUnit,8,L.plotY+i*L.plotH/3-10,COLORS.cyan);
+  for(let i=0;i<4;i++){const s=fmtAxis(yhi-(yhi-ylo)*i/3)+axisUnit;text(ctx,s,Math.max(0,L.plotX-4-s.length*TEXT_W),L.plotY+i*L.plotH/3-10,COLORS.cyan)}
  X_LABELS.forEach((s,i)=>text(ctx,s,L.plotX+i*L.plotW/4-(i?30:0),296,COLORS.cyan));
  for(const [color,dy] of [[COLORS.greenDim,-1],[COLORS.greenDim,1],[COLORS.green,0]]){ctx.strokeStyle=color;ctx.beginPath();data.forEach((v,i)=>{const px=L.plotX+i*(L.plotW-1)/239,py=L.plotY+(yhi-v)/(yhi-ylo)*L.plotH+dy;i?ctx.lineTo(px,py):ctx.moveTo(px,py)});ctx.stroke()}
  renderFB(document.getElementById("fb").getContext("2d"),ctx);
