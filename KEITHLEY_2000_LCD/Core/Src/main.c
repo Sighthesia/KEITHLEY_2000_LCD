@@ -766,7 +766,7 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                        : ui_draw_text(x, y, text, color);
 }
 
-static void rif_log_spi_registers(void)
+static void rif_log_spi_registers(const char *phase)
 {
     static const struct {
         uint8_t address;
@@ -780,7 +780,8 @@ static void rif_log_spi_registers(void)
     };
     uint8_t i;
 
-    hal_uart_send_text("RIF LT7680 SPI regs");
+    hal_uart_send_text("RIF LT7680 SPI ");
+    hal_uart_send_text(phase);
     for (i = 0u; i < (uint8_t)(sizeof(registers) / sizeof(registers[0])); i++)
     {
         uint8_t value;
@@ -808,8 +809,11 @@ static void rif_init(void)
     lt7680_status_t st;
 
     s_rif_ready = false;
-    rif_log_spi_registers();
+    rif_log_spi_registers("regs");
     st = lt7680_flash_read_jedec_id(id);
+    /* Capture the controller after the JEDEC transaction has returned. This
+     * is deliberately read-only: do not touch SPIDR or clear SPIMSR flags. */
+    rif_log_spi_registers("post");
     if (st != LT7680_OK)
     {
         hal_uart_send_text("RIF JEDEC read failed=0x");

@@ -221,13 +221,15 @@ verifier; it validates the image slice at the recorded base.
   scan directory entries before using a glyph. It streams no more than 64 tile
   bytes at once, renders only non-background RGB565 runs on the hidden page,
   and falls back to `font_text` when any probe/read/format step fails.
-- When JEDEC returns `FF FF FF`, `rif_init()` emits one read-only snapshot of
-  LT7680 `B7/B9/BA/BB` plus `01` (the host interface/CCR) before probing. The
-  snapshot must use `lt7680_read_reg()` only, must not read `B8/SPIDR`, write
-  status-clear bits, or alter the raw FIFO transaction. `B7=00`, an enabled
-  SPI-master bit in `01`, `B9=1F` (or the selected documented mode), and a
-  non-error `BA` distinguish controller setup from an external no-response;
-  the snapshot itself never proves U5 connectivity.
+- `rif_init()` emits one read-only snapshot of LT7680 `B7/B9/BA/BB` plus `01`
+  (the host interface/CCR) both before JEDEC probing (`regs`) and immediately
+  after `lt7680_flash_read_jedec_id()` returns (`post`), including when the
+  result is `FF FF FF` or an error. The snapshots must use
+  `lt7680_read_reg()` only, must not read `B8/SPIDR`, write status-clear bits,
+  or alter the raw FIFO transaction. `B7=00`, an enabled SPI-master bit in
+  `01`, `B9=1F` (or the selected documented mode), and a non-error `BA`
+  distinguish controller setup from an external no-response; the snapshots
+  themselves never prove U5 connectivity.
 - U5 programming is a separate, read-back-verified operation. Do not modify
   bytes outside `[base-offset, base-offset + image_size)`.
 
