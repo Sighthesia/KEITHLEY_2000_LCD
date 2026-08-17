@@ -35,6 +35,17 @@ typedef struct {
     uint8_t last_status; /* last successfully read SPIMSR value */
 } lt7680_flash_fifo_probe_t;
 
+/* Read-only diagnostic: captures the raw 4-byte SPIDR read from a JEDEC ID
+ * transaction (0x9F). The first byte is the turnaround byte (discarded by
+ * lt7680_flash_read_jedec_id), followed by the three manufacturer/device
+ * ID bytes. Useful for distinguishing U5 MISO stuck-low from LT7680 SPIDR
+ * readback anomalies. */
+typedef struct {
+    uint8_t attempted;   /* 1 if JEDEC transaction was attempted */
+    uint8_t raw[4];      /* raw SPIDR reads: [0]=turnaround, [1..3]=ID */
+    lt7680_status_t status; /* status of the JEDEC transaction */
+} lt7680_flash_jedec_probe_t;
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
@@ -61,3 +72,4 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
+void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe);

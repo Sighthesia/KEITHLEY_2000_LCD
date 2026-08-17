@@ -184,6 +184,7 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
+void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe);
 rif_status_t rif_reader_parse_header(const uint8_t *data, uint16_t len,
                                      rif_image_t *out);
 rif_status_t rif_reader_parse_entry(const rif_image_t *image,
@@ -248,6 +249,18 @@ verifier; it validates the image slice at the recorded base.
   commands, or cleanup. `lt7680_flash_get_fifo_probe()` returns a snapshot; the
   CubeMX main prints it as `RIF FIFO probe attempted=XX full=XX status_err=XX
   last_status=0xXX` after the JEDEC line.
+- The JEDEC probe (`lt7680_flash_jedec_probe_t`) captures the raw 4-byte SPIDR
+  read from a JEDEC ID transaction (0x9F). It is zero-initialized
+  (attempted=0, raw[0..3]=0, status=LT7680_ERR_BUS). Set `attempted` before
+  calling `lt7680_flash_read_jedec_id()`, then record the transaction status
+  and the four raw bytes read from the SPI FIFO: `raw[0]` is the turnaround
+  byte (discarded by the normal API), `raw[1..3]` are the three manufacturer/
+  device ID bytes. The probe never alters transmitted bytes, batch sizes,
+  B9 values, SPI mode, commands, or cleanup. `lt7680_flash_get_jedec_probe()`
+  returns a snapshot; the CubeMX main prints it as
+  `RIF JEDEC raw=XX XX XX XX` after the JEDEC ID line. This diagnostic
+  distinguishes U5 MISO stuck-low (all bytes 0x00) from LT7680 SPIDR readback
+  anomalies (all bytes 0xFF or garbled).
 - U5 programming is a separate, read-back-verified operation. Do not modify
   bytes outside `[base-offset, base-offset + image_size)`.
 

@@ -6,6 +6,9 @@ static lt7680_flash_b7_probe_t s_flash_b7_probe = {
     0u, 0u, 0u, LT7680_ERR_BUS, LT7680_ERR_BUS
 };
 static lt7680_flash_fifo_probe_t s_flash_fifo_probe;
+static lt7680_flash_jedec_probe_t s_flash_jedec_probe = {
+    0u, {0u, 0u, 0u, 0u}, LT7680_ERR_BUS
+};
 
 /* LT7680A-R register map. Display timings follow the values reverse-engineered
  * from the original V16 display firmware (see DEBUG_NOTES / panel protocol). */
@@ -211,8 +214,16 @@ void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe)
     }
 }
 
-static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,
-                                            uint8_t discard, uint8_t *data)
+void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe)
+{
+    if (probe != 0) {
+        *probe = s_flash_jedec_probe;
+    }
+}
+
+static lt7680_status_t flash_push_and_drain_raw(const uint8_t *tx, uint8_t count,
+                                                 uint8_t discard, uint8_t *data,
+                                                 uint8_t *raw)
 {
     uint8_t i;
     lt7680_status_t st;
@@ -248,11 +259,20 @@ static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,
         if (st != LT7680_OK) {
             return st;
         }
+        if (raw != 0) {
+            raw[i] = value;
+        }
         if (i >= discard) {
             data[i - discard] = value;
         }
     }
     return LT7680_OK;
+}
+
+static lt7680_status_t flash_push_and_drain(const uint8_t *tx, uint8_t count,
+                                            uint8_t discard, uint8_t *data)
+{
+    return flash_push_and_drain_raw(tx, count, discard, data, 0);
 }
 
 lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
@@ -311,10 +331,14 @@ lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
     if (id == 0) {
         return LT7680_ERR_PARAM;
     }
+    s_flash_jedec_probe.attempted = 1u;
+    s_flash_jedec_probe.status = LT7680_ERR_BUS;
     st = flash_begin();
     if (st == LT7680_OK) {
-        st = flash_push_and_drain(command, sizeof(command), 1u, id);
+        st = flash_push_and_drain_raw(command, sizeof(command), 1u, id,
+                                      s_flash_jedec_probe.raw);
     }
+    s_flash_jedec_probe.status = st;
     (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
     return st;
 }

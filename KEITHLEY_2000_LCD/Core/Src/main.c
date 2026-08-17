@@ -852,6 +852,16 @@ static void rif_init(void)
     hal_uart_send_hex8(id[2]);
     hal_uart_send_text("\r\n");
     {
+        lt7680_flash_jedec_probe_t jedec_probe;
+        lt7680_flash_get_jedec_probe(&jedec_probe);
+        hal_uart_send_text("RIF JEDEC raw=");
+        hal_uart_send_hex8(jedec_probe.raw[0]);
+        hal_uart_send_hex8(jedec_probe.raw[1]);
+        hal_uart_send_hex8(jedec_probe.raw[2]);
+        hal_uart_send_hex8(jedec_probe.raw[3]);
+        hal_uart_send_text("\r\n");
+    }
+    {
         lt7680_flash_fifo_probe_t fifo_probe;
         lt7680_flash_get_fifo_probe(&fifo_probe);
         hal_uart_send_text("RIF FIFO probe attempted=");

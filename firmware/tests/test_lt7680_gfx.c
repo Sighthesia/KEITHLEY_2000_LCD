@@ -28,6 +28,19 @@ int main(void)
     }
     /* Getter with NULL is safe. */
     lt7680_flash_get_fifo_probe(0);
+    /* JEDEC probe: getter returns zeroed state before any flash transaction. */
+    {
+        lt7680_flash_jedec_probe_t jp;
+        lt7680_flash_get_jedec_probe(&jp);
+        assert(jp.attempted == 0u);
+        assert(jp.raw[0] == 0u);
+        assert(jp.raw[1] == 0u);
+        assert(jp.raw[2] == 0u);
+        assert(jp.raw[3] == 0u);
+        assert(jp.status == LT7680_ERR_BUS);
+    }
+    /* JEDEC probe getter with NULL is safe. */
+    lt7680_flash_get_jedec_probe(0);
     /* Out-of-range coordinates (uninitialized 0x0 panel on the host). */
     assert(lt7680_gfx_draw_line(0, 0, 1, 1, 0) == LT7680_ERR_PARAM);
     assert(lt7680_gfx_draw_line(5, 5, 10, 10, 0) == LT7680_ERR_PARAM);
