@@ -159,18 +159,12 @@ static lt7680_status_t flash_begin(void)
 {
     uint8_t host_if;
     uint8_t b7_readback;
-    lt7680_status_t st = lt7680_read_reg(LT7680_REG_HOST_IF, &host_if);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    st = write_reg(LT7680_REG_HOST_IF, (uint8_t)(host_if | LT7680_SPI_MASTER));
-    if (st != LT7680_OK) {
-        return st;
-    }
+    lt7680_status_t st;
     /* Defensively reset SFL_CTRL to the documented raw-read default (SF0,
      * text mode, 24-bit address) in case the power-on display boot loader
      * left the controller in DMA/font mode. The host sends 03h/9Fh itself,
-     * so no SFL_CTRL command-code setup is required. */
+     * so no SFL_CTRL command-code setup is required. Do this before enabling
+     * the host SPI-master bit; some LT7680 revisions gate B7 writes by mode. */
     s_flash_b7_probe.attempted = 1u;
     s_flash_b7_probe.requested = LT7680_SFL_CTRL_RAW_DEFAULT;
     s_flash_b7_probe.readback = 0u;
@@ -185,6 +179,14 @@ static lt7680_status_t flash_begin(void)
                                                    &b7_readback);
     if (s_flash_b7_probe.read_status == LT7680_OK) {
         s_flash_b7_probe.readback = b7_readback;
+    }
+    st = lt7680_read_reg(LT7680_REG_HOST_IF, &host_if);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    st = write_reg(LT7680_REG_HOST_IF, (uint8_t)(host_if | LT7680_SPI_MASTER));
+    if (st != LT7680_OK) {
+        return st;
     }
     st = write_reg(LT7680_REG_SPI_DIV, LT7680_SPI_DIVISOR_SAFE);
     if (st != LT7680_OK) {

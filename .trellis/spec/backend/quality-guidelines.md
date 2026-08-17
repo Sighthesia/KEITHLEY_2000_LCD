@@ -212,9 +212,11 @@ verifier; it validates the image slice at the recorded base.
   16 FIFO bytes per batch, waits for SPIMSR `TX_EMPTY` before draining RX, and
   writes B9=`0x0C` on every exit. Do not require SPIMSR `IDLE`: it is
   interrupt-mask dependent on this controller and timed out on hardware.
-- Before a raw FIFO transaction, enable CCR SPI-master bit 1 and write
-  SFL_CTRL B7=`0x00`. This restores the SF0/text/24-bit raw default if the
-  boot loader left automatic-font or DMA configuration behind. Do not write
+- Before a raw FIFO transaction, write SFL_CTRL B7=`0x00` and immediately read
+  it back, then enable CCR SPI-master bit 1. Some LT7680 revisions may gate
+  B7 writes after host SPI-master mode is enabled. B7 restores the
+  SF0/text/24-bit raw default if the boot loader left automatic-font or DMA
+  configuration behind. Do not write
   `0x14`: that selects the automatic-font FAST_READ configuration and sets a
   reserved bit; raw reads send `0x03` or `0x9F` through B8 directly.
 - Firmware must probe `0x9F` and require `EF 40 17`, parse the RIF header, and
