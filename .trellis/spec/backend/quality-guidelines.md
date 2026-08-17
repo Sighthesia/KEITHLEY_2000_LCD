@@ -182,6 +182,8 @@ python3 tools/verify_resource_flash.py resources.img \
 lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                    uint16_t length);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
+void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
+void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
 rif_status_t rif_reader_parse_header(const uint8_t *data, uint16_t len,
                                      rif_image_t *out);
 rif_status_t rif_reader_parse_entry(const rif_image_t *image,
@@ -237,6 +239,15 @@ verifier; it validates the image slice at the recorded base.
   then record the write result and immediate B7 readback result independently.
   This distinguishes an uncalled probe, a failed write, an unreadable register,
   and a successful immediate `0x00` readback that is later overwritten.
+- The FIFO probe (`lt7680_flash_fifo_probe_t`) records TX_FULL observations
+  before each SPIDR write during flash FIFO transactions. It is zero-initialized
+  (attempted=0, full_count=0, status_err=0, last_status=0). Before each SPIDR
+  push, read SPIMSR and increment `full_count` if bit6 (TX_FULL) is set; if the
+  SPIMSR read fails, set `status_err=1` but continue the existing raw operation.
+  The probe never alters transmitted bytes, batch sizes, B9 values, SPI mode,
+  commands, or cleanup. `lt7680_flash_get_fifo_probe()` returns a snapshot; the
+  CubeMX main prints it as `RIF FIFO probe attempted=XX full=XX status_err=XX
+  last_status=0xXX` after the JEDEC line.
 - U5 programming is a separate, read-back-verified operation. Do not modify
   bytes outside `[base-offset, base-offset + image_size)`.
 
@@ -254,6 +265,7 @@ verifier; it validates the image slice at the recorded base.
 | JEDEC returns `FF FF FF` after the B7 raw-default reset | Preserve fallback and investigate B9 CS/mode or external Flash wiring; do not change U5 contents |
 | Directory entry has wrong kind/code/64x128 geometry | Continue scanning; fall back if no matching glyph exists |
 | Tile read or GE run fails | Abort the RIF job, preserve responsiveness, and fall back on its next draw step |
+| SPIMSR read fails during FIFO probe | Set status_err=1, continue raw operation, do not abort the transaction |
 
 ### 5. Good/Base/Bad Cases
 

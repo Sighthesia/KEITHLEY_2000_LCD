@@ -98,12 +98,14 @@ static lt7680_panel_t s_panel;
 static lt7680_flash_b7_probe_t s_flash_b7_probe = {
     0u, 0u, 0u, LT7680_ERR_BUS, LT7680_ERR_BUS
 };
+static lt7680_flash_fifo_probe_t s_flash_fifo_probe;
 
 /* W25Q supports modes 0 and 3. The LT768x raw-SPI reference sequence uses
  * mode 3, so first hardware bring-up follows it exactly. */
 #define SPI_CTRL_READ_ACTIVE 0x1Fu
 #define SPI_CTRL_IDLE 0x0Cu
 #define SPI_STATUS_TX_EMPTY 0x80u
+#define SPI_STATUS_TX_FULL  0x40u
 #define SPI_STATUS_RX_EMPTY 0x20u
 #define SPI_STATUS_OVERFLOW 0x08u
 #define SPI_DIVISOR_SAFE 0x0Fu
@@ -198,6 +200,13 @@ void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe)
     }
 }
 
+void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe)
+{
+    if (probe != 0) {
+        *probe = s_flash_fifo_probe;
+    }
+}
+
 static lt7680_status_t spi_push_and_drain(const uint8_t *tx, uint8_t count,
                                           uint8_t discard, uint8_t *data)
 {
@@ -207,7 +216,17 @@ static lt7680_status_t spi_push_and_drain(const uint8_t *tx, uint8_t count,
     if (count == 0u || count > 16u || discard > count) {
         return LT7680_ERR_PARAM;
     }
+    s_flash_fifo_probe.attempted = 1u;
     for (i = 0u; i < count; i++) {
+        uint8_t spi_sr;
+        if (lt7680_read_reg(REG_SPIMSR, &spi_sr) == LT7680_OK) {
+            s_flash_fifo_probe.last_status = spi_sr;
+            if ((spi_sr & SPI_STATUS_TX_FULL) != 0u) {
+                s_flash_fifo_probe.full_count++;
+            }
+        } else {
+            s_flash_fifo_probe.status_err = 1u;
+        }
         st = wr(REG_SPIDR, tx[i]);
         if (st != LT7680_OK) {
             return st;

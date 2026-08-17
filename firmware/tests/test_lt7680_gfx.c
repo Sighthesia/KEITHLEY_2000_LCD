@@ -16,6 +16,18 @@ int main(void)
     assert(lt7680_flash_read(0u, id, 0u) == LT7680_ERR_PARAM);
     assert(lt7680_flash_read(0x1000000u, id, 1u) == LT7680_ERR_PARAM);
     assert(lt7680_flash_read_jedec_id(0) == LT7680_ERR_PARAM);
+
+    /* FIFO probe: getter returns zeroed state before any flash transaction. */
+    {
+        lt7680_flash_fifo_probe_t fp;
+        lt7680_flash_get_fifo_probe(&fp);
+        assert(fp.attempted == 0u);
+        assert(fp.full_count == 0u);
+        assert(fp.status_err == 0u);
+        assert(fp.last_status == 0u);
+    }
+    /* Getter with NULL is safe. */
+    lt7680_flash_get_fifo_probe(0);
     /* Out-of-range coordinates (uninitialized 0x0 panel on the host). */
     assert(lt7680_gfx_draw_line(0, 0, 1, 1, 0) == LT7680_ERR_PARAM);
     assert(lt7680_gfx_draw_line(5, 5, 10, 10, 0) == LT7680_ERR_PARAM);

@@ -25,6 +25,16 @@ typedef struct {
     lt7680_status_t read_status;
 } lt7680_flash_b7_probe_t;
 
+/* Read-only diagnostic: records whether SPIMSR TX_FULL (BA bit6) was observed
+ * before each SPIDR write during a flash FIFO transaction. Initialized to
+ * zero/not-attempted; never modified by normal read operations. */
+typedef struct {
+    uint8_t attempted;   /* 1 if any SPIDR push loop was entered */
+    uint8_t full_count;  /* number of SPIDR writes where TX_FULL was seen */
+    uint8_t status_err;  /* 1 if SPIMSR read failed at least once */
+    uint8_t last_status; /* last successfully read SPIMSR value */
+} lt7680_flash_fifo_probe_t;
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
@@ -50,3 +60,4 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                   uint16_t length);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
+void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);

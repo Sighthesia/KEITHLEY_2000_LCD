@@ -851,6 +851,19 @@ static void rif_init(void)
     hal_uart_send_hex8(id[1]);
     hal_uart_send_hex8(id[2]);
     hal_uart_send_text("\r\n");
+    {
+        lt7680_flash_fifo_probe_t fifo_probe;
+        lt7680_flash_get_fifo_probe(&fifo_probe);
+        hal_uart_send_text("RIF FIFO probe attempted=");
+        hal_uart_send_hex8(fifo_probe.attempted);
+        hal_uart_send_text(" full=");
+        hal_uart_send_hex8(fifo_probe.full_count);
+        hal_uart_send_text(" status_err=");
+        hal_uart_send_hex8(fifo_probe.status_err);
+        hal_uart_send_text(" last_status=0x");
+        hal_uart_send_hex8(fifo_probe.last_status);
+        hal_uart_send_text("\r\n");
+    }
     if (id[0] != 0xEFu || id[1] != 0x40u || id[2] != 0x17u)
     {
         hal_uart_send_text("RIF unavailable: unexpected flash\r\n");
