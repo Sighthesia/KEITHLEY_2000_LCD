@@ -804,7 +804,7 @@ static void rif_log_spi_registers(const char *phase)
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
-    uint8_t id[3];
+    uint8_t id[3] = {0u, 0u, 0u};
     uint8_t spi_status;
     lt7680_status_t st;
     lt7680_flash_b7_probe_t b7_probe;
@@ -844,13 +844,15 @@ static void rif_init(void)
             hal_uart_send_hex8(spi_status);
         }
         hal_uart_send_text("\r\n");
-        return;
     }
-    hal_uart_send_text("RIF JEDEC=");
-    hal_uart_send_hex8(id[0]);
-    hal_uart_send_hex8(id[1]);
-    hal_uart_send_hex8(id[2]);
-    hal_uart_send_text("\r\n");
+    else
+    {
+        hal_uart_send_text("RIF JEDEC=");
+        hal_uart_send_hex8(id[0]);
+        hal_uart_send_hex8(id[1]);
+        hal_uart_send_hex8(id[2]);
+        hal_uart_send_text("\r\n");
+    }
     {
         lt7680_flash_jedec_probe_t jedec_probe;
         lt7680_flash_get_jedec_probe(&jedec_probe);
@@ -873,11 +875,6 @@ static void rif_init(void)
         hal_uart_send_text(" last_status=0x");
         hal_uart_send_hex8(fifo_probe.last_status);
         hal_uart_send_text("\r\n");
-    }
-    if (id[0] != 0xEFu || id[1] != 0x40u || id[2] != 0x17u)
-    {
-        hal_uart_send_text("RIF unavailable: unexpected flash\r\n");
-        return;
     }
     st = lt7680_flash_read(0u, header, sizeof(header));
     if (st != LT7680_OK ||

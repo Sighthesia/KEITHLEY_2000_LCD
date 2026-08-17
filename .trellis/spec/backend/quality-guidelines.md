@@ -222,8 +222,9 @@ verifier; it validates the image slice at the recorded base.
   configuration behind. Do not write
   `0x14`: that selects the automatic-font FAST_READ configuration and sets a
   reserved bit; raw reads send `0x03` or `0x9F` through B8 directly.
-- Firmware must probe `0x9F` and require `EF 40 17`, parse the RIF header, and
-  scan directory entries before using a glyph. It streams no more than 64 tile
+- Firmware probes `0x9F` for diagnostics, but must not require `EF 40 17` for
+  readiness. It must read and parse the RIF header, then scan directory entries
+  before using a glyph. It streams no more than 64 tile
   bytes at once, renders only non-background RGB565 runs on the hidden page,
   and falls back to `font_text` when any probe/read/format step fails.
 - `rif_init()` emits one read-only snapshot of LT7680 `B7/B9/BA/BB` plus `01`
@@ -274,7 +275,8 @@ verifier; it validates the image slice at the recorded base.
 | Full dump with image at recorded base | Verifier slices and validates the image |
 | Full dump with image at another base | Reject unless exported as the matching target range |
 | Source glyph round-trip differs | `--src-dir` verification fails |
-| JEDEC is not `EF 40 17`, FIFO overflows/times out, or RIF parse fails | Disable RIF and render the reading with `font_text` |
+| JEDEC is not `EF 40 17` or the probe errors | Log diagnostics and continue to the RIF header read |
+| FIFO overflows/times out, RIF header read/parse fails | Disable RIF and render the reading with `font_text` |
 | JEDEC returns `FF FF FF` after the B7 raw-default reset | Preserve fallback and investigate B9 CS/mode or external Flash wiring; do not change U5 contents |
 | Directory entry has wrong kind/code/64x128 geometry | Continue scanning; fall back if no matching glyph exists |
 | Tile read or GE run fails | Abort the RIF job, preserve responsiveness, and fall back on its next draw step |
