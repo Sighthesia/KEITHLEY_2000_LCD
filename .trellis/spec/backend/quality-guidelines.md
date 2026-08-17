@@ -185,6 +185,7 @@ lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
 void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe);
+void lt7680_flash_get_header_probe(lt7680_flash_header_probe_t *probe);
 rif_status_t rif_reader_parse_header(const uint8_t *data, uint16_t len,
                                      rif_image_t *out);
 rif_status_t rif_reader_parse_entry(const rif_image_t *image,
@@ -264,6 +265,15 @@ verifier; it validates the image slice at the recorded base.
   anomalies (all bytes 0xFF or garbled).
 - U5 programming is a separate, read-back-verified operation. Do not modify
   bytes outside `[base-offset, base-offset + image_size)`.
+- The header probe (`lt7680_flash_header_probe_t`) is populated by the existing
+  read of at least 16 bytes from address zero. It records the read status and
+  the first 16 returned bytes without issuing another flash transaction. The
+  CubeMX diagnostic prints `RIF header status=0xXX attempted=XX raw=...` after
+  that read and before header parsing. This is diagnostic-only: it must not
+  change the 64-byte read, parser, fallback, FIFO byte sequence, B7/B8/B9
+  setup, SPI mode, commands, cleanup, or the U5 read-only boundary. If the
+  read fails, the snapshot bytes are cleared rather than treating an
+  uninitialized caller buffer as flash data.
 
 ### 4. Validation & Error Matrix
 

@@ -41,6 +41,16 @@ int main(void)
     }
     /* JEDEC probe getter with NULL is safe. */
     lt7680_flash_get_jedec_probe(0);
+    /* Header probe: no qualifying header read has occurred at test start. */
+    {
+        lt7680_flash_header_probe_t hp;
+        lt7680_flash_get_header_probe(&hp);
+        assert(hp.attempted == 0u);
+        assert(hp.status == LT7680_ERR_BUS);
+        assert(hp.raw[0] == 0u);
+        assert(hp.raw[15] == 0u);
+    }
+    lt7680_flash_get_header_probe(0);
     /* Out-of-range coordinates (uninitialized 0x0 panel on the host). */
     assert(lt7680_gfx_draw_line(0, 0, 1, 1, 0) == LT7680_ERR_PARAM);
     assert(lt7680_gfx_draw_line(5, 5, 10, 10, 0) == LT7680_ERR_PARAM);

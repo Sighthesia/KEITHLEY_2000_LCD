@@ -46,6 +46,13 @@ typedef struct {
     lt7680_status_t status; /* status of the JEDEC transaction */
 } lt7680_flash_jedec_probe_t;
 
+/* Read-only diagnostic for the existing RIF header read at address zero. */
+typedef struct {
+    uint8_t attempted;
+    uint8_t raw[16];
+    lt7680_status_t status;
+} lt7680_flash_header_probe_t;
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
@@ -73,3 +80,4 @@ lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
 void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe);
+void lt7680_flash_get_header_probe(lt7680_flash_header_probe_t *probe);
