@@ -223,9 +223,11 @@ verifier; it validates the image slice at the recorded base.
   configuration behind. Do not write
   `0x14`: that selects the automatic-font FAST_READ configuration and sets a
   reserved bit; raw reads send `0x03` or `0x9F` through B8 directly.
-- Firmware probes `0x9F` for diagnostics, but must not require `EF 40 17` for
-  readiness. It must read and parse the RIF header, then scan directory entries
-  before using a glyph. It streams no more than 64 tile
+- Firmware first probes the RIF header with `0x03` and uses that parsed header
+  as the readiness gate. The `0x9F` JEDEC probe is diagnostic-only and runs
+  after the header transaction has completed; a JEDEC failure must not block a
+  valid header from enabling RIF readiness. It must read and parse the RIF
+  header, then scan directory entries before using a glyph. It streams no more than 64 tile
   bytes at once, renders only non-background RGB565 runs on the hidden page,
   and falls back to `font_text` when any probe/read/format step fails.
 - `rif_init()` emits one read-only snapshot of LT7680 `B7/B9/BA/BB` plus `01`
@@ -254,12 +256,13 @@ verifier; it validates the image slice at the recorded base.
 - The JEDEC probe (`lt7680_flash_jedec_probe_t`) captures the raw 4-byte SPIDR
   read from a JEDEC ID transaction (0x9F). It is zero-initialized
   (attempted=0, raw[0..3]=0, status=LT7680_ERR_BUS). Set `attempted` before
-  calling `lt7680_flash_read_jedec_id()`, then record the transaction status
-  and the four raw bytes read from the SPI FIFO: `raw[0]` is the turnaround
-  byte (discarded by the normal API), `raw[1..3]` are the three manufacturer/
-  device ID bytes. The probe never alters transmitted bytes, batch sizes,
-  B9 values, SPI mode, commands, or cleanup. `lt7680_flash_get_jedec_probe()`
-  returns a snapshot; the CubeMX main prints it as
+  calling `lt7680_flash_read_jedec_id()` after the header readiness probe, then
+  record the transaction status and the four raw bytes read from the SPI FIFO:
+  `raw[0]` is the turnaround byte (discarded by the normal API), `raw[1..3]`
+  are the three manufacturer/device ID bytes. The probe never alters
+  transmitted bytes, batch sizes, B9 values, SPI mode, commands, or cleanup.
+  `lt7680_flash_get_jedec_probe()` returns a snapshot; the CubeMX main prints
+  it as
   `RIF JEDEC raw=XX XX XX XX` after the JEDEC ID line. This diagnostic
   distinguishes U5 MISO stuck-low (all bytes 0x00) from LT7680 SPIDR readback
   anomalies (all bytes 0xFF or garbled).

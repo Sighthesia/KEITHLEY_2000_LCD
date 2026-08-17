@@ -808,9 +808,32 @@ static void rif_init(void)
     uint8_t spi_status;
     lt7680_status_t st;
     lt7680_flash_b7_probe_t b7_probe;
+    bool header_ready = false;
 
     s_rif_ready = false;
     rif_log_spi_registers("regs");
+    st = lt7680_flash_read(0u, header, sizeof(header));
+    {
+        lt7680_flash_header_probe_t header_probe;
+        uint8_t i;
+        lt7680_flash_get_header_probe(&header_probe);
+        hal_uart_send_text("RIF header status=0x");
+        hal_uart_send_hex8((uint8_t)header_probe.status);
+        hal_uart_send_text(" attempted=");
+        hal_uart_send_hex8(header_probe.attempted);
+        hal_uart_send_text(" raw=");
+        for (i = 0u; i < sizeof(header_probe.raw); i++)
+        {
+            hal_uart_send_hex8(header_probe.raw[i]);
+        }
+        hal_uart_send_text("\r\n");
+    }
+    if (st == LT7680_OK &&
+        rif_reader_parse_header(header, sizeof(header), &s_rif_image) == RIF_OK)
+    {
+        header_ready = true;
+        s_rif_ready = true;
+    }
     st = lt7680_flash_read_jedec_id(id);
     /* Capture the controller after the JEDEC transaction has returned. This
      * is deliberately read-only: do not touch SPIDR or clear SPIMSR flags. */
@@ -876,29 +899,11 @@ static void rif_init(void)
         hal_uart_send_hex8(fifo_probe.last_status);
         hal_uart_send_text("\r\n");
     }
-    st = lt7680_flash_read(0u, header, sizeof(header));
-    {
-        lt7680_flash_header_probe_t header_probe;
-        uint8_t i;
-        lt7680_flash_get_header_probe(&header_probe);
-        hal_uart_send_text("RIF header status=0x");
-        hal_uart_send_hex8((uint8_t)header_probe.status);
-        hal_uart_send_text(" attempted=");
-        hal_uart_send_hex8(header_probe.attempted);
-        hal_uart_send_text(" raw=");
-        for (i = 0u; i < sizeof(header_probe.raw); i++)
-        {
-            hal_uart_send_hex8(header_probe.raw[i]);
-        }
-        hal_uart_send_text("\r\n");
-    }
-    if (st != LT7680_OK ||
-        rif_reader_parse_header(header, sizeof(header), &s_rif_image) != RIF_OK)
+    if (!header_ready)
     {
         hal_uart_send_text("RIF unavailable: invalid header\r\n");
         return;
     }
-    s_rif_ready = true;
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 
