@@ -93,6 +93,12 @@ model mutation, trend conversion, and drawing belong to the main loop.
   `MISA` on the visible page and repaint only dirty regions in place. The
   hidden-page path is reserved for initial construction; live page switching
   causes a full-screen blank interval on this board.
+- The initial hidden page may be presented exactly once. Runtime renderer
+  completion must not call `MISA` again, even when the active page is unchanged;
+  same-page presentation also causes a full-screen refresh on this controller.
+- The initial hidden page may be presented exactly once. Runtime renderer
+  completion must not call `MISA` again, even when the active page is unchanged;
+  same-page presentation also causes a full-screen refresh on this controller.
 
 ### Boot-Time RIF Safety
 

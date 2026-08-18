@@ -92,6 +92,7 @@ static ui_model_t s_ui;
 static keypad_t s_keypad;
 static bool s_display_ready;
 static bool s_display_enabled;
+static bool s_initial_page_pending;
 static bool s_frame_rendering;
 static uint8_t s_visible_page;
 static uint8_t s_render_page;
@@ -307,6 +308,8 @@ static void display_enable_after_initial_frame(void)
 {
     bool initial_complete = render_scheduler_take_initial_complete(&s_renderer);
 
+    if (!s_initial_page_pending)
+        return;
     if ((initial_complete ||
          (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE)) &&
         lt7680_gfx_present_page(s_render_page) == LT7680_OK)
@@ -321,6 +324,7 @@ static void display_enable_after_initial_frame(void)
             s_page_trend_maximum[s_render_page] = s_frame.trend_maximum;
         }
         s_frame_rendering = false;
+        s_initial_page_pending = false;
         /* Re-apply display-on after every MISA page latch. The LT7680 can
          * otherwise leave the panel blank after the first hidden-page swap. */
         if (lt7680_write_reg(0x12u, 0x48u) == LT7680_OK)
@@ -1683,6 +1687,7 @@ int main(void)
                             s_frame_rendering = true;
                             s_frame_has_trend_update = true;
                             s_ui_dirty_regions = 0u;
+                            s_initial_page_pending = true;
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
