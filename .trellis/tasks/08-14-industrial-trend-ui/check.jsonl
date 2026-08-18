@@ -1,4 +1,0 @@
-{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Check protocol-to-model-to-renderer data flow and three-layer consistency."}
-{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Check for duplicated mappings, constants, formatting, and missed mirror files."}
-{"file":".trellis/tasks/08-14-industrial-trend-ui/research/keithley-protocol-and-spec.md","reason":"Verify terminology, status bits, impedance, and target unknown-value behavior."}
-{"file":"docs/superpowers/specs/2026-08-14-k2000-industrial-trend-ui-design.md","reason":"Review implementation against the approved product and technical acceptance contract."}

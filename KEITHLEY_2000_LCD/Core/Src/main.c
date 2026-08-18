@@ -763,7 +763,8 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
 
 static void __attribute__((unused)) rif_log_spi_registers(const char *phase)
 {
-    static const struct {
+    static const struct
+    {
         uint8_t address;
         const char *name;
     } registers[] = {
@@ -1081,9 +1082,9 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     if (erase_previous && trend_drawn_occupied(column))
     {
         uint16_t old_y0 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                      s_drawn_trend_y0[s_render_page][column]);
+                                     s_drawn_trend_y0[s_render_page][column]);
         uint16_t old_y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                      s_drawn_trend_y1[s_render_page][column]);
+                                     s_drawn_trend_y1[s_render_page][column]);
         (void)ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
                            (uint16_t)(old_y1 - old_y0 + 1u),
                            MAIN_DISPLAY_COLOR_BG);
@@ -1127,7 +1128,7 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
 {
     size_t width = strlen(label) * FONT_TEXT_WIDTH;
     uint16_t x = center > width / 2u ? (uint16_t)(center - width / 2u)
-                                    : MAIN_DISPLAY_PLOT_X;
+                                     : MAIN_DISPLAY_PLOT_X;
     if (x + width > MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
         x = (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W - width);
     return x;
@@ -1181,17 +1182,17 @@ static void reading_scene_render(void)
                                        TREND_MAX_COLUMNS);
             main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
             s_trend_full_repaint = s_render_full_page ||
-                /* The non-visible page receives the current visible trend
-                 * band before incremental columns are drawn, so compare this
-                 * snapshot with the visible-page scale. Comparing its stale
-                 * pre-copy cache would force a needless full trend rebuild. */
-                s_page_trend_has_data[s_visible_page] !=
-                    s_frame.trend_has_data ||
-                (s_frame.trend_has_data &&
-                 (s_page_trend_minimum[s_visible_page] !=
-                      s_frame.trend_minimum ||
-                  s_page_trend_maximum[s_visible_page] !=
-                      s_frame.trend_maximum));
+                                   /* The non-visible page receives the current visible trend
+                                    * band before incremental columns are drawn, so compare this
+                                    * snapshot with the visible-page scale. Comparing its stale
+                                    * pre-copy cache would force a needless full trend rebuild. */
+                                   s_page_trend_has_data[s_visible_page] !=
+                                       s_frame.trend_has_data ||
+                                   (s_frame.trend_has_data &&
+                                    (s_page_trend_minimum[s_visible_page] !=
+                                         s_frame.trend_minimum ||
+                                     s_page_trend_maximum[s_visible_page] !=
+                                         s_frame.trend_maximum));
             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
@@ -1199,16 +1200,16 @@ static void reading_scene_render(void)
                     s_text_generation++;
                 s_frame_text_generation = s_text_generation;
                 page_text_stale = s_render_full_page ||
-                    s_page_text_generation[s_render_page] !=
-                    s_frame_text_generation;
+                                  s_page_text_generation[s_render_page] !=
+                                      s_frame_text_generation;
                 if (text_due)
                     s_text_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
                 if (!s_render_full_page && page_text_stale)
                     render_scheduler_request_regions(&s_renderer,
-                                                    RENDER_DIRTY_STATUS |
-                                                    RENDER_DIRTY_READING);
+                                                     RENDER_DIRTY_STATUS |
+                                                         RENDER_DIRTY_READING);
                 if (!s_render_full_page && trend_needed)
                 {
                     render_scheduler_request_trend(&s_renderer);
@@ -1369,7 +1370,7 @@ static void reading_scene_render(void)
             uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X + i * MAIN_DISPLAY_PLOT_W / 4u);
             if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
                               MAIN_DISPLAY_X_LABEL_Y,
-                                  s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
+                              s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             (void)ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x, MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H, MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
@@ -1422,13 +1423,13 @@ static void reading_scene_render(void)
                                    ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
                                    : 0u;
             if (!ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
-                               MAIN_DISPLAY_COLOR_CYAN))
+                              MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
-                            MAIN_DISPLAY_X_LABEL_COUNT * 2u + 1u)
+                                MAIN_DISPLAY_X_LABEL_COUNT * 2u + 1u)
         {
             uint8_t n = (uint8_t)(s_render_item -
                                   (MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u));
@@ -1445,7 +1446,7 @@ static void reading_scene_render(void)
             }
             if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
                               MAIN_DISPLAY_X_LABEL_Y,
-                                  s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
+                              s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
             return;
