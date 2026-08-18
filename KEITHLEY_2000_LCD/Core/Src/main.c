@@ -331,6 +331,22 @@ static void display_enable_after_initial_frame(void)
          * after the last draw avoids exposing an in-progress SDRAM frame. */
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
+        {
+            uint8_t display_ctrl = 0u;
+            uint8_t status = 0u;
+            uint16_t pixel = 0u;
+            (void)lt7680_read_reg(0x12u, &display_ctrl);
+            (void)lt7680_read_status(&status);
+            (void)lt7680_gfx_peek_pixel(0u, 0u, &pixel);
+            hal_uart_send_text("FRAME diag REG12=0x");
+            hal_uart_send_hex8(display_ctrl);
+            hal_uart_send_text(" STATUS=0x");
+            hal_uart_send_hex8(status);
+            hal_uart_send_text(" PX00=");
+            hal_uart_send_hex8((uint8_t)(pixel >> 8));
+            hal_uart_send_hex8((uint8_t)pixel);
+            hal_uart_send_text("\r\n");
+        }
         s_frame_rendering = false;
         s_initial_page_pending = false;
         s_display_enabled = true;
