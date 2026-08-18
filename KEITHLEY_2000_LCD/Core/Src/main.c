@@ -327,10 +327,12 @@ static void display_enable_after_initial_frame(void)
             s_page_trend_minimum[s_render_page] = s_frame.trend_minimum;
             s_page_trend_maximum[s_render_page] = s_frame.trend_maximum;
         }
+        /* Keep the panel blank while GE completes the frame. Enabling scan only
+         * after the last draw avoids exposing an in-progress SDRAM frame. */
+        if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
+            return;
         s_frame_rendering = false;
         s_initial_page_pending = false;
-        /* Keep display control untouched after MISA. Rewriting REG[12h] here
-         * can interrupt the fetch path immediately after the page latch. */
         s_display_enabled = true;
         if (!initial_complete)
             hal_uart_send_text("PASS frame page enabled\r\n");
@@ -1693,8 +1695,7 @@ int main(void)
                         else
                         {
                             s_ready_page_mask = (uint8_t)(1u << s_visible_page);
-                            s_display_enabled = true;
-                            (void)lt7680_write_reg(0x12u, 0x48u);
+                            s_display_enabled = false;
                             hal_uart_send_text("PASS black page visible, building hidden frame\r\n");
                             /* Build the complete first frame on page 1 while page 0
                              * remains visible. The completed hidden page is presented
