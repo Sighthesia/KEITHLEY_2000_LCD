@@ -96,6 +96,12 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - The initial hidden page may be presented exactly once. Runtime renderer
   completion must not call `MISA` again, even when the active page is unchanged;
   same-page presentation also causes a full-screen refresh on this controller.
+- During LT7680 bring-up, retain the completed initial frame and gate all later
+  renderer work until runtime GE refresh has a separate hardware acceptance
+  path. This isolates first-frame stability from live-refresh failures.
+- During LT7680 bring-up, retain the completed initial frame and gate all later
+  renderer work until runtime GE refresh has a separate hardware acceptance
+  path. This isolates first-frame stability from live-refresh failures.
 - The initial hidden page may be presented exactly once. Runtime renderer
   completion must not call `MISA` again, even when the active page is unchanged;
   same-page presentation also causes a full-screen refresh on this controller.

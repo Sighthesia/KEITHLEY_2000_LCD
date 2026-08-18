@@ -1146,6 +1146,12 @@ static void reading_scene_render(void)
     {
         return;
     }
+    /* Keep the verified first frame on-screen while runtime page/GE refresh
+     * behavior is being brought up on this LT7680 revision. */
+    if (!s_initial_page_pending)
+    {
+        return;
+    }
     trend_buffer_update(&s_trend, now);
     if (s_renderer.phase == RENDER_PHASE_IDLE && s_frame_rendering)
     {
