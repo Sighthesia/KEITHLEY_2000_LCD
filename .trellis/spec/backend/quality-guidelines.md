@@ -74,6 +74,11 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - A complete page copy plus all 240 trend columns still bounds presentation
   rate even when every individual slice is cooperative. Measure the full
   copy-to-present interval on hardware before claiming the 10Hz/5Hz ceilings.
+- At boot, clear both SDRAM pages before enabling display output. Present the
+  cleared page 0 first, keep it visible while the initial frame is built on
+  hidden page 1, and only present page 1 after the cooperative renderer reports
+  completion. This guarantees a visible black screen even if first-frame
+  rendering is slow or stalls.
 
 ### Boot-Time RIF Safety
 

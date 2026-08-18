@@ -1649,6 +1649,17 @@ int main(void)
                         st = lt7680_gfx_select_canvas_page(s_render_page);
                         if (st == LT7680_OK)
                             st = lt7680_gfx_clear(0x0000u);
+                        if (st == LT7680_OK)
+                        {
+                            /* Clear the page that is selected by MISA too. Show
+                             * this known-black page before the cooperative first
+                             * frame starts drawing on the hidden page. */
+                            st = lt7680_gfx_select_canvas_page(s_visible_page);
+                            if (st == LT7680_OK)
+                                st = lt7680_gfx_clear(0x0000u);
+                            if (st == LT7680_OK)
+                                st = lt7680_gfx_present_page(s_visible_page);
+                        }
                         if (st != LT7680_OK)
                         {
                             hal_uart_send_text("FAIL clear=");
@@ -1657,9 +1668,13 @@ int main(void)
                         }
                         else
                         {
-                            /* Build the complete first frame while REG[12h] remains 0x08.
-                             * reading_scene_render() enables 0x48 once, only after its
-                             * cooperative initial phases have all completed. */
+                            s_ready_page_mask = (uint8_t)(1u << s_visible_page);
+                            s_display_enabled = true;
+                            (void)lt7680_write_reg(0x12u, 0x48u);
+                            hal_uart_send_text("PASS black page visible, building hidden frame\r\n");
+                            /* Build the complete first frame on page 1 while page 0
+                             * remains visible. The completed hidden page is presented
+                             * by reading_scene_render(). */
                             main_display_format(&s_ui, &s_frame);
                             main_display_format_trend(&s_trend, HAL_GetTick(), s_frame.unit,
                                                       &s_frame);
