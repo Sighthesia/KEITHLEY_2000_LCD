@@ -329,10 +329,7 @@ static void display_enable_after_initial_frame(void)
         }
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
-        /* Diagnostic contrast: 0x68 enables the controller's verified internal
-         * colour bars in addition to display-on. If bars appear, panel timing
-         * is healthy and the fault is isolated to Main Image output. */
-        if (lt7680_write_reg(0x12u, 0x68u) != LT7680_OK)
+        if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
         {
             uint8_t display_ctrl = 0u;
@@ -1615,11 +1612,7 @@ int main(void)
     }
 #else
     {
-#if PANEL_LANDSCAPE
-        const lt7680_panel_t panel = {960u, 320u, 16u};
-#else
         const lt7680_panel_t panel = {320u, 960u, 16u};
-#endif
         static const k2000_proto_cb_t proto_cb = {proto_on_event, proto_on_unknown};
         lt7680_status_t st;
         uint8_t status = 0u;
