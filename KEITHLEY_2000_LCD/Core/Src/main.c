@@ -310,10 +310,14 @@ static void display_enable_after_initial_frame(void)
 
     if (!s_initial_page_pending)
         return;
-    if ((initial_complete ||
-         (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE)) &&
-        lt7680_gfx_present_page(s_render_page) == LT7680_OK)
+    if (initial_complete ||
+        (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE))
     {
+        /* The diagnostic first-frame path renders on the visible page, so do
+         * not rewrite MISA with the same address. */
+        if (s_render_page != s_visible_page &&
+            lt7680_gfx_present_page(s_render_page) != LT7680_OK)
+            return;
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
         s_page_text_generation[s_render_page] = s_frame_text_generation;
@@ -340,15 +344,17 @@ static bool begin_hidden_frame(void)
     lt7680_status_t st;
     bool initial_frame = s_initial_page_pending;
 
-    s_render_page = !initial_frame ? s_visible_page
-                                      : (uint8_t)(s_visible_page ^ 1u);
+    /* Keep the first diagnostic frame on the already visible page. The
+     * LT7680 page-address latch is currently the only operation that makes
+     * a completed frame disappear, so isolate it from GE rendering. */
+    s_render_page = s_visible_page;
     st = lt7680_gfx_select_canvas_page(s_render_page);
     if (st != LT7680_OK)
         return false;
     if (initial_frame)
     {
-        /* BTE page copies blank this controller during the first refresh. Build
-         * the initial hidden page with bounded GE operations before MISA. */
+        /* Build the first frame directly on the visible canvas while page
+         * presentation is disabled for this diagnostic path. */
         s_render_full_page = true;
         st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
         if (st != LT7680_OK)
