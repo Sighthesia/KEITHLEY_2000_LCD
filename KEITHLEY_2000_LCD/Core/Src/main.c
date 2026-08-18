@@ -1461,6 +1461,16 @@ static void reading_scene_render(void)
     case RENDER_PHASE_INITIAL_TREND_COLUMNS:
     case RENDER_PHASE_UPDATE_TREND_COLUMNS:
     {
+        if (s_renderer.phase == RENDER_PHASE_INITIAL_TREND_COLUMNS)
+        {
+            /* Isolate the initial blanking from trend line GE commands. Keep
+             * the chart panel, axes, and reading visible for this probe. */
+            s_render_column = 0u;
+            render_scheduler_complete_phase(&s_renderer);
+            s_render_item = 0u;
+            display_enable_after_initial_frame();
+            return;
+        }
         /* Each column can issue up to three line commands, plus an erase and
          * grid restoration on updates.  Rendering all 240 columns in one
          * pass defeats the cooperative scheduler and can starve input. */
