@@ -99,6 +99,14 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - During LT7680 bring-up, retain the completed initial frame and gate all later
   renderer work until runtime GE refresh has a separate hardware acceptance
   path. This isolates first-frame stability from live-refresh failures.
+- Use a dedicated initial-frame state for page selection. Do not infer the
+  initial/hidden path from `s_display_ready`; that flag is set before the first
+  cooperative render begins and would misclassify the initial frame as a live
+  update.
+- Use a dedicated initial-frame state for page selection. Do not infer the
+  initial/hidden path from `s_display_ready`; that flag is set before the first
+  cooperative render begins and would misclassify the initial frame as a live
+  update.
 - During LT7680 bring-up, retain the completed initial frame and gate all later
   renderer work until runtime GE refresh has a separate hardware acceptance
   path. This isolates first-frame stability from live-refresh failures.

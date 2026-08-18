@@ -341,7 +341,7 @@ static void display_enable_after_initial_frame(void)
 static bool begin_hidden_frame(void)
 {
     lt7680_status_t st;
-    bool initial_frame = !s_display_ready;
+    bool initial_frame = s_initial_page_pending;
 
     s_render_page = !initial_frame ? s_visible_page
                                       : (uint8_t)(s_visible_page ^ 1u);
