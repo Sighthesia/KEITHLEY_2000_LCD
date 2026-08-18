@@ -79,6 +79,10 @@ model mutation, trend conversion, and drawing belong to the main loop.
   hidden page 1, and only present page 1 after the cooperative renderer reports
   completion. This guarantees a visible black screen even if first-frame
   rendering is slow or stalls.
+- The initial reading phase must render only the primary value/unit (or its
+  empty-state message) before advancing to the initial trend background, axes,
+  and columns. Defer the right-side metadata cells to `UPDATE_READING`; their
+  many small bitmap transactions must not delay first trend visibility.
 
 ### Boot-Time RIF Safety
 

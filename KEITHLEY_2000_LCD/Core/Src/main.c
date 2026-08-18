@@ -1318,6 +1318,15 @@ static void reading_scene_render(void)
             }
             first_info = s_frame.unit_suffix[0] != '\0' ? 4u : 3u;
         }
+        /* The initial page prioritizes the reading and trend. The compact
+         * metadata cells are painted by the first normal reading update, so
+         * their many small glyph transactions cannot delay first reveal. */
+        if (s_renderer.phase == RENDER_PHASE_INITIAL_READING)
+        {
+            render_scheduler_complete_phase(&s_renderer);
+            s_render_item = 0u;
+            return;
+        }
         if (s_render_item >= first_info)
         {
             if (!reading_draw_info((uint8_t)(s_render_item - first_info)))
