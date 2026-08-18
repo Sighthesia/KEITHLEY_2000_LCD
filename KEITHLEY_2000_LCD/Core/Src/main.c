@@ -325,16 +325,13 @@ static void display_enable_after_initial_frame(void)
         }
         s_frame_rendering = false;
         s_initial_page_pending = false;
-        /* Re-apply display-on after every MISA page latch. The LT7680 can
-         * otherwise leave the panel blank after the first hidden-page swap. */
-        if (lt7680_write_reg(0x12u, 0x48u) == LT7680_OK)
-        {
-            s_display_enabled = true;
-            if (!initial_complete)
-                hal_uart_send_text("PASS frame page enabled\r\n");
-            else
-                hal_uart_send_text("PASS initial frame enabled\r\n");
-        }
+        /* Keep display control untouched after MISA. Rewriting REG[12h] here
+         * can interrupt the fetch path immediately after the page latch. */
+        s_display_enabled = true;
+        if (!initial_complete)
+            hal_uart_send_text("PASS frame page enabled\r\n");
+        else
+            hal_uart_send_text("PASS initial frame enabled\r\n");
     }
 }
 
