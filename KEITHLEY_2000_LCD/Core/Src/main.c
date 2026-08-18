@@ -337,19 +337,30 @@ static void display_enable_after_initial_frame(void)
 static bool begin_hidden_frame(void)
 {
     lt7680_status_t st;
+    bool initial_frame = !s_display_ready;
 
-    s_render_page = (uint8_t)(s_visible_page ^ 1u);
+    s_render_page = !initial_frame ? s_visible_page
+                                      : (uint8_t)(s_visible_page ^ 1u);
     st = lt7680_gfx_select_canvas_page(s_render_page);
     if (st != LT7680_OK)
         return false;
-    /* BTE page copies blank this controller during the first refresh. Always
-     * rebuild the hidden page with bounded GE operations before MISA present. */
-    s_render_full_page = true;
-    st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
-    if (st != LT7680_OK)
-        return false;
-    render_scheduler_init(&s_renderer);
-    s_waiting_visible = false;
+    if (initial_frame)
+    {
+        /* BTE page copies blank this controller during the first refresh. Build
+         * the initial hidden page with bounded GE operations before MISA. */
+        s_render_full_page = true;
+        st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
+        if (st != LT7680_OK)
+            return false;
+        render_scheduler_init(&s_renderer);
+        s_waiting_visible = false;
+    }
+    else
+    {
+        /* Runtime updates stay on the visible page. Changing CVSSA/MISA during
+         * a live frame blanks this controller, so update only dirty regions. */
+        s_render_full_page = false;
+    }
     s_frame_rendering = true;
     s_frame_has_trend_update = s_render_full_page;
     s_render_item = 0u;

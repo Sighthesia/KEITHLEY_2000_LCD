@@ -89,6 +89,10 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - Do not use `lt7680_gfx_copy_page()` for runtime alternate-page refresh on the
   K2000 board. Even the full-page BTE copy can blank the panel; select the
   hidden page, clear it with GE, and rebuild all required regions before MISA.
+- After the first page is presented, runtime refreshes must keep `CVSSA` and
+  `MISA` on the visible page and repaint only dirty regions in place. The
+  hidden-page path is reserved for initial construction; live page switching
+  causes a full-screen blank interval on this board.
 
 ### Boot-Time RIF Safety
 
