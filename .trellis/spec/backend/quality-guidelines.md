@@ -83,6 +83,9 @@ model mutation, trend conversion, and drawing belong to the main loop.
   empty-state message) before advancing to the initial trend background, axes,
   and columns. Defer the right-side metadata cells to `UPDATE_READING`; their
   many small bitmap transactions must not delay first trend visibility.
+- After every successful `MISA` page presentation, re-apply `REG[12h]=0x48`
+  before continuing normal rendering. The LT7680 panel can remain blank after
+  a hidden-page latch unless the display-enable value is written again.
 
 ### Boot-Time RIF Safety
 

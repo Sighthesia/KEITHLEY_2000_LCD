@@ -321,11 +321,15 @@ static void display_enable_after_initial_frame(void)
             s_page_trend_maximum[s_render_page] = s_frame.trend_maximum;
         }
         s_frame_rendering = false;
-        if (!s_display_enabled)
+        /* Re-apply display-on after every MISA page latch. The LT7680 can
+         * otherwise leave the panel blank after the first hidden-page swap. */
+        if (lt7680_write_reg(0x12u, 0x48u) == LT7680_OK)
         {
-            (void)lt7680_write_reg(0x12u, 0x48u);
             s_display_enabled = true;
-            hal_uart_send_text("PASS initial frame enabled\r\n");
+            if (!initial_complete)
+                hal_uart_send_text("PASS frame page enabled\r\n");
+            else
+                hal_uart_send_text("PASS initial frame enabled\r\n");
         }
     }
 }
