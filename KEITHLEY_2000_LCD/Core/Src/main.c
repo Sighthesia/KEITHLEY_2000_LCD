@@ -329,7 +329,10 @@ static void display_enable_after_initial_frame(void)
         }
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
-        if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
+        /* Diagnostic contrast: 0x68 enables the controller's verified internal
+         * colour bars in addition to display-on. If bars appear, panel timing
+         * is healthy and the fault is isolated to Main Image output. */
+        if (lt7680_write_reg(0x12u, 0x68u) != LT7680_OK)
             return;
         {
             uint8_t display_ctrl = 0u;
