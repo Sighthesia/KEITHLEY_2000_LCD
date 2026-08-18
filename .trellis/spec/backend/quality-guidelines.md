@@ -75,6 +75,15 @@ model mutation, trend conversion, and drawing belong to the main loop.
   rate even when every individual slice is cooperative. Measure the full
   copy-to-present interval on hardware before claiming the 10Hz/5Hz ceilings.
 
+### Boot-Time RIF Safety
+
+Do not run `rif_init()` before the first visible display frame. The external
+Flash probe changes LT7680 serial-Flash state that is not yet validated to
+coexist with graphics operations. Keep `s_rif_ready=false`, preserve the
+reset -> panel-init -> gfx-init -> clear -> present order, and render with the
+built-in `font_text` fallback. Re-enable RIF only behind a separately
+validated runtime path that restores the LT7680 graphics state.
+
 ### 4. Validation & Error Matrix
 
 | Condition | Required behavior |
@@ -304,6 +313,7 @@ verifier; it validates the image slice at the recorded base.
 | Tile read or GE run fails | Abort the RIF job, preserve responsiveness, and fall back on its next draw step |
 | SPIMSR read fails during FIFO probe | Set status_err=1, continue raw operation, do not abort the transaction |
 | Serial-Flash/DMA sequence is incomplete or lacks a known reversible display-RAM destination | Take only the B6/B7/B9/BA/BB read-only snapshot; do not start DMA or write new registers |
+| Boot-time RIF probe is not validated against graphics state | Defer `rif_init()`, keep `s_rif_ready=false`, and display the reading with `font_text` |
 
 ### 5. Good/Base/Bad Cases
 

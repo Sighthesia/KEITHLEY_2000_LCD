@@ -766,7 +766,7 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                        : ui_draw_text(x, y, text, color);
 }
 
-static void rif_log_spi_registers(const char *phase)
+static void __attribute__((unused)) rif_log_spi_registers(const char *phase)
 {
     static const struct {
         uint8_t address;
@@ -801,7 +801,7 @@ static void rif_log_spi_registers(const char *phase)
     hal_uart_send_text("\r\n");
 }
 
-static void rif_init(void)
+static void __attribute__((unused)) rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
     uint8_t id[3] = {0u, 0u, 0u};
@@ -1636,7 +1636,11 @@ int main(void)
                     }
                     else
                     {
-                        rif_init();
+                        /* External-Flash access is not yet safe during display
+                         * bring-up. Keep the built-in text fallback active so
+                         * the RIF probe cannot disturb LT7680 rendering. */
+                        s_rif_ready = false;
+                        hal_uart_send_text("RIF probe deferred; using internal font\r\n");
                         /* Keep the display blank while SDRAM is cleared. Without this
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */
