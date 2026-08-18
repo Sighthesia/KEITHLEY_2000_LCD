@@ -342,38 +342,14 @@ static bool begin_hidden_frame(void)
     st = lt7680_gfx_select_canvas_page(s_render_page);
     if (st != LT7680_OK)
         return false;
-    s_render_full_page =
-        (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
-    if (s_render_full_page)
-    {
-        st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
-        if (st != LT7680_OK)
-            return false;
-        render_scheduler_init(&s_renderer);
-        s_waiting_visible = false;
-    }
-    else
-    {
-        /* The LT7680 needs a complete, matching source page before MISA
-         * presentation. Partial BTE copies caused physical left-side black
-         * flashes even though the copied rectangle and transform were valid. */
-        st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
-        if (st != LT7680_OK)
-            return false;
-        s_page_trend_has_data[s_render_page] =
-            s_page_trend_has_data[s_visible_page];
-        s_page_trend_minimum[s_render_page] =
-            s_page_trend_minimum[s_visible_page];
-        s_page_trend_maximum[s_render_page] =
-            s_page_trend_maximum[s_visible_page];
-        memcpy(s_drawn_trend_y0[s_render_page],
-               s_drawn_trend_y0[s_visible_page], TREND_MAX_COLUMNS);
-        memcpy(s_drawn_trend_y1[s_render_page],
-               s_drawn_trend_y1[s_visible_page], TREND_MAX_COLUMNS);
-        memcpy(s_drawn_trend_occupied[s_render_page],
-               s_drawn_trend_occupied[s_visible_page],
-               sizeof(s_drawn_trend_occupied[0]));
-    }
+    /* BTE page copies blank this controller during the first refresh. Always
+     * rebuild the hidden page with bounded GE operations before MISA present. */
+    s_render_full_page = true;
+    st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
+    if (st != LT7680_OK)
+        return false;
+    render_scheduler_init(&s_renderer);
+    s_waiting_visible = false;
     s_frame_rendering = true;
     s_frame_has_trend_update = s_render_full_page;
     s_render_item = 0u;

@@ -86,6 +86,9 @@ model mutation, trend conversion, and drawing belong to the main loop.
 - After every successful `MISA` page presentation, re-apply `REG[12h]=0x48`
   before continuing normal rendering. The LT7680 panel can remain blank after
   a hidden-page latch unless the display-enable value is written again.
+- Do not use `lt7680_gfx_copy_page()` for runtime alternate-page refresh on the
+  K2000 board. Even the full-page BTE copy can blank the panel; select the
+  hidden page, clear it with GE, and rebuild all required regions before MISA.
 
 ### Boot-Time RIF Safety
 
