@@ -515,14 +515,10 @@ static lt7680_status_t configure_panel(void)
      * matching R2-R7/G2-G7/B2-B7, bit0 = normal operation (not sleep). */
     st = rmw_reg(LT7680_REG_HOST_IF, 0x09u, 0x10u);
     if (st != LT7680_OK) return st;
-    /* REG[02h]: MACR (Memory Access Control).  Reference RA8876/LT768x
-     * 16bpp builds (xlatb/ra8876, danmeuk/esp_lcd_ra8876) write 0x00 =
-     * direct write, left-to-right top-to-bottom.  The K2000 V16 image used
-     * 0x40; on this LT7680A-R that value keeps the CPU write/read port at
-     * one byte per pixel (8bpp) no matter what REG[5Eh] says - the raw dump
-     * appended only the low byte and the panel showed RGB332 colours.  Align
-     * with the reference 0x00 so MRWDP follows the 16bpp canvas depth. */
-    st = write_reg(LT7680_REG_MEM_CFG, 0x00u);
+    /* REG[02h]: retain the V16 memory access mode. This bit controls the
+     * controller's display-RAM fetch path as well as CPU access; changing it
+     * to 0x00 can leave GE writes readable while Main Image output is blank. */
+    st = rmw_reg(LT7680_REG_MEM_CFG, 0x40u, 0x86u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_GFX_MODE, 0x00u);
     if (st != LT7680_OK) return st;
