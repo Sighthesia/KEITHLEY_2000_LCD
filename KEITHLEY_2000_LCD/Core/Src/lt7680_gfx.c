@@ -5,6 +5,9 @@ static lt7680_panel_t s_panel;
 static lt7680_flash_b7_probe_t s_flash_b7_probe = {
     0u, 0u, 0u, LT7680_ERR_BUS, LT7680_ERR_BUS
 };
+static lt7680_flash_spi_snapshot_t s_flash_spi_snapshot = {
+    0u, 0u, 0u, 0u, 0u, 0u, LT7680_ERR_BUS
+};
 static lt7680_flash_fifo_probe_t s_flash_fifo_probe;
 static lt7680_flash_jedec_probe_t s_flash_jedec_probe = {
     0u, {0u, 0u, 0u, 0u}, LT7680_ERR_BUS
@@ -211,6 +214,51 @@ void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe)
     }
 }
 
+static lt7680_status_t flash_snapshot_spi_regs(lt7680_flash_spi_snapshot_t *probe)
+{
+    lt7680_status_t st;
+
+    if (probe == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    probe->attempted = 1u;
+    probe->status = LT7680_ERR_BUS;
+    st = lt7680_read_reg(LT7680_REG_SFL_CTRL, &probe->b7);
+    if (st != LT7680_OK) {
+        probe->status = st;
+        return st;
+    }
+    st = lt7680_read_reg(0xB6u, &probe->b6);
+    if (st != LT7680_OK) {
+        probe->status = st;
+        return st;
+    }
+    st = lt7680_read_reg(LT7680_REG_SPIMCR2, &probe->b9);
+    if (st != LT7680_OK) {
+        probe->status = st;
+        return st;
+    }
+    st = lt7680_read_reg(LT7680_REG_SPIMSR, &probe->ba);
+    if (st != LT7680_OK) {
+        probe->status = st;
+        return st;
+    }
+    st = lt7680_read_reg(LT7680_REG_SPI_DIV, &probe->bb);
+    if (st != LT7680_OK) {
+        probe->status = st;
+        return st;
+    }
+    probe->status = LT7680_OK;
+    return LT7680_OK;
+}
+
+void lt7680_flash_get_spi_snapshot(lt7680_flash_spi_snapshot_t *probe)
+{
+    if (probe != 0) {
+        *probe = s_flash_spi_snapshot;
+    }
+}
+
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe)
 {
     if (probe != 0) {
@@ -307,6 +355,9 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
             s_flash_header_probe.raw[i] = 0u;
         }
     }
+    if (address == 0u && length >= 16u) {
+        (void)flash_snapshot_spi_regs(&s_flash_spi_snapshot);
+    }
     st = flash_begin();
     if (st == LT7680_OK) {
         command[0] = 0x03u;
@@ -348,6 +399,9 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
             for (i = 0u; i < 16u; i++) {
                 s_flash_header_probe.raw[i] = read_start[i];
             }
+        }
+        if (s_flash_spi_snapshot.attempted != 0u) {
+            (void)flash_snapshot_spi_regs(&s_flash_spi_snapshot);
         }
     }
     return st;

@@ -41,6 +41,19 @@ typedef struct {
     lt7680_status_t read_status;
 } lt7680_flash_b7_probe_t;
 
+/* Read-only snapshot of the LT7680 serial-flash/SPI-master registers that are
+ * relevant to the blocked DMA experiment. This records live register values
+ * only; it does not program DMA or serial-flash control state. */
+typedef struct {
+    uint8_t attempted;
+    uint8_t b6;
+    uint8_t b7;
+    uint8_t b9;
+    uint8_t ba;
+    uint8_t bb;
+    lt7680_status_t status;
+} lt7680_flash_spi_snapshot_t;
+
 /* Read-only diagnostic: records whether SPIMSR TX_FULL (BA bit6) was observed
  * before each SPIDR write during a flash FIFO transaction. Initialized to
  * zero/not-attempted; never modified by normal read operations. */
@@ -87,6 +100,7 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                   uint16_t length);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
+void lt7680_flash_get_spi_snapshot(lt7680_flash_spi_snapshot_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
 void lt7680_flash_get_jedec_probe(lt7680_flash_jedec_probe_t *probe);
 void lt7680_flash_get_header_probe(lt7680_flash_header_probe_t *probe);

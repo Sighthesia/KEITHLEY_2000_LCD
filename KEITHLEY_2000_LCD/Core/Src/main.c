@@ -899,6 +899,25 @@ static void rif_init(void)
         hal_uart_send_hex8(fifo_probe.last_status);
         hal_uart_send_text("\r\n");
     }
+    {
+        lt7680_flash_spi_snapshot_t spi_snapshot;
+        lt7680_flash_get_spi_snapshot(&spi_snapshot);
+        hal_uart_send_text("RIF SPI snapshot attempted=");
+        hal_uart_send_hex8(spi_snapshot.attempted);
+        hal_uart_send_text(" B6=0x");
+        hal_uart_send_hex8(spi_snapshot.b6);
+        hal_uart_send_text(" B7=0x");
+        hal_uart_send_hex8(spi_snapshot.b7);
+        hal_uart_send_text(" B9=0x");
+        hal_uart_send_hex8(spi_snapshot.b9);
+        hal_uart_send_text(" BA=0x");
+        hal_uart_send_hex8(spi_snapshot.ba);
+        hal_uart_send_text(" BB=0x");
+        hal_uart_send_hex8(spi_snapshot.bb);
+        hal_uart_send_text(" status=0x");
+        hal_uart_send_hex8((uint8_t)spi_snapshot.status);
+        hal_uart_send_text("\r\n");
+    }
     if (!header_ready)
     {
         hal_uart_send_text("RIF unavailable: invalid header\r\n");

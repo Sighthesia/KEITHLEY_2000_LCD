@@ -277,6 +277,15 @@ verifier; it validates the image slice at the recorded base.
   setup, SPI mode, commands, cleanup, or the U5 read-only boundary. If the
   read fails, the snapshot bytes are cleared rather than treating an
   uninitialized caller buffer as flash data.
+- `lt7680_flash_spi_snapshot_t` is a read-only diagnostic for the unresolved
+  automatic-serial-Flash/DMA path. It reads B6 (`DMA_CTRL`), B7 (`SFL_CTRL`),
+  B9 (`SPIMCR2`), BA (`SPIMSR`), and BB (`SPI_DIV`) through
+  `lt7680_read_reg()` and prints `RIF SPI snapshot attempted=XX B6=0xXX
+  B7=0xXX B9=0xXX BA=0xXX BB=0xXX status=0xXX`. It must not write B6 or any
+  DMA source/destination register, start DMA, access display RAM, change the
+  raw FIFO path, or modify the U5. The datasheet evidence is insufficient to
+  support an automatic-DMA experiment until a complete reversible sequence is
+  known.
 
 ### 4. Validation & Error Matrix
 
@@ -294,6 +303,7 @@ verifier; it validates the image slice at the recorded base.
 | Directory entry has wrong kind/code/64x128 geometry | Continue scanning; fall back if no matching glyph exists |
 | Tile read or GE run fails | Abort the RIF job, preserve responsiveness, and fall back on its next draw step |
 | SPIMSR read fails during FIFO probe | Set status_err=1, continue raw operation, do not abort the transaction |
+| Serial-Flash/DMA sequence is incomplete or lacks a known reversible display-RAM destination | Take only the B6/B7/B9/BA/BB read-only snapshot; do not start DMA or write new registers |
 
 ### 5. Good/Base/Bad Cases
 
