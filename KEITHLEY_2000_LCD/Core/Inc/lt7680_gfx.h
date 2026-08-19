@@ -73,6 +73,12 @@ lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
 lt7680_status_t lt7680_gfx_present_page(uint8_t page);
 /* Clone one complete RGB565 canvas page with the verified BTE copy ROP. */
 lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page);
+/* Copy an RGB565 rectangle from an absolute SDRAM source (e.g. a pre-built
+ * transposed glyph tile library) onto the given canvas page with the verified
+ * BTE copy ROP. Source and destination strides (pixels) are independent. */
+lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
+                                uint16_t src_stride, uint16_t dst_x,
+                                uint16_t dst_y, uint16_t w, uint16_t h);
 lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);

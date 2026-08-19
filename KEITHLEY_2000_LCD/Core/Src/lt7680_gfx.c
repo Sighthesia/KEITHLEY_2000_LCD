@@ -682,6 +682,52 @@ lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
     return wait_2d_idle();
 }
 
+/* Copy an RGB565 rectangle from an absolute SDRAM source to the given canvas
+ * page with the verified BTE ROP. The source is any packed tile area (e.g. a
+ * pre-transposed glyph library at 0x200000+), so source and destination
+ * strides are independent. Both strides are in pixels. */
+lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
+                                uint16_t src_stride, uint16_t dst_x,
+                                uint16_t dst_y, uint16_t w, uint16_t h)
+{
+    lt7680_status_t st;
+
+    if (canvas_page > 1u || s_panel.width == 0u || s_panel.height == 0u ||
+        src_addr > 0x00FFFFFFu || w == 0u || h == 0u ||
+        (uint32_t)dst_x + w > s_panel.width ||
+        (uint32_t)dst_y + h > s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+    st = write_reg(LT7680_REG_BTE_CTRL1, 0xC2u);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_COLR, 0x25u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_S0_STR, src_addr);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_WTH, src_stride);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_X, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_Y, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_DT_STR,
+                (uint32_t)canvas_page * LT7680_CANVAS_PAGE_BYTES);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_WTH, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_X, dst_x);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_Y, dst_y);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_SIZE, w);
+    if (st != LT7680_OK) return st;
+    st = wr13((uint8_t)(LT7680_REG_BTE_SIZE + 2u), h);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
+    if (st != LT7680_OK) return st;
+    return wait_2d_idle();
+}
+
 lt7680_status_t lt7680_gfx_show_color_bars(void)
 {
     /* V16 display-on adds bit6 (0x40) on top of the init value (bit3 set,
