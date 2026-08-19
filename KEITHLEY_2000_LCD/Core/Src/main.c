@@ -125,7 +125,6 @@ static float s_page_trend_maximum[2];
 static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
-static uint32_t s_status_refresh_tick;
 static uint32_t s_trend_refresh_tick;
 static uint32_t s_display_due_tick;
 static uint32_t s_perf_frame_start_tick;
@@ -436,6 +435,13 @@ static void display_enable_after_initial_frame(void)
         {
             s_initial_page_pending = false;
             s_display_enabled = true;
+            /* The initial renderer has just been committed. Its phase must
+             * not be reused by the first runtime Demo frame. */
+            s_renderer.phase = RENDER_PHASE_IDLE;
+            s_renderer.pending_regions = 0u;
+            s_renderer.trend_pending = false;
+            s_renderer.initial_complete = true;
+            s_renderer.initial_complete_edge = false;
 #if K2000_DEMO_FEED
             s_demo_last_tick = HAL_GetTick();
 #endif
@@ -1260,7 +1266,6 @@ static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
     bool initial_phase;
-    bool status_due;
     uint8_t due_regions;
     bool trend_due;
     bool display_due;
@@ -1287,11 +1292,17 @@ static void reading_scene_render(void)
      * restarted, so every bitmap/graph slice progresses at 500 readings/s. */
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
-        status_due = (uint32_t)(now - s_status_refresh_tick) >= 1000u;
+        /* Runtime status-bar glyph redraw is disabled while measuring the
+         * reading path. The initial frame remains the authoritative status
+         * raster; keeping STATUS out of due_regions prevents UPDATE_STATUS
+         * from monopolizing the synchronous SPI/GE renderer. */
         due_regions = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
-        if (status_due)
-            due_regions |= (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_STATUS);
-        trend_due = (now - s_trend_refresh_tick) >= 200u;
+        /* Keep collecting 500 Hz samples, but defer trend raster updates while
+         * measuring the 30 Hz reading path. A 240-column trend pass contains
+         * hundreds of synchronous GE/SPI transactions and can monopolize the
+         * cooperative renderer for seconds. */
+        trend_due = s_initial_page_pending &&
+                    (now - s_trend_refresh_tick) >= 200u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
         if (display_due && (due_regions != 0u || trend_due ||
@@ -1305,7 +1316,7 @@ static void reading_scene_render(void)
             (void)trend_buffer_project(&s_trend, now, s_trend_columns,
                                        TREND_MAX_COLUMNS);
             main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
-            s_trend_full_repaint = s_render_full_page ||
+             s_trend_full_repaint = s_initial_page_pending ||
                                    /* The non-visible page receives the current visible trend
                                     * band before incremental columns are drawn, so compare this
                                     * snapshot with the visible-page scale. Comparing its stale
@@ -1326,13 +1337,14 @@ static void reading_scene_render(void)
                 page_text_stale = due_regions != 0u;
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
                     s_text_refresh_tick = now;
-                if ((due_regions & RENDER_DIRTY_STATUS) != 0u)
-                    s_status_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
                 s_display_due_tick = now;
-                s_render_status_regions =
-                    (due_regions & RENDER_DIRTY_STATUS) != 0u;
+                /* Runtime status text is intentionally held at its initial
+                 * raster. Its many synchronous glyph GE transactions can
+                 * consume the entire display deadline; the reading and trend
+                 * paths remain live for the performance measurement. */
+                s_render_status_regions = false;
                 if (page_text_stale)
                     render_scheduler_request_regions(&s_renderer, due_regions);
                 if (trend_needed)
