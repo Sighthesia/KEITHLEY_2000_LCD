@@ -307,10 +307,9 @@ static void k2000_demo_feed(void)
 static void display_enable_after_initial_frame(void)
 {
     bool initial_complete = render_scheduler_take_initial_complete(&s_renderer);
+    bool initial_frame = s_initial_page_pending;
 
-    if (!s_initial_page_pending)
-        return;
-    if (initial_complete ||
+    if ((initial_frame && initial_complete) ||
         (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE))
     {
         /* Re-submit the completed page even when it is numerically equal to
@@ -332,12 +331,15 @@ static void display_enable_after_initial_frame(void)
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
         s_frame_rendering = false;
-        s_initial_page_pending = false;
-        s_display_enabled = true;
-        if (!initial_complete)
-            hal_uart_send_text("PASS frame page enabled\r\n");
-        else
-            hal_uart_send_text("PASS initial frame enabled\r\n");
+        if (initial_frame)
+        {
+            s_initial_page_pending = false;
+            s_display_enabled = true;
+            if (!initial_complete)
+                hal_uart_send_text("PASS frame page enabled\r\n");
+            else
+                hal_uart_send_text("PASS initial frame enabled\r\n");
+        }
     }
 }
 
@@ -346,17 +348,14 @@ static bool begin_hidden_frame(void)
     lt7680_status_t st;
     bool initial_frame = s_initial_page_pending;
 
-    /* Keep the first diagnostic frame on the already visible page. The
-     * LT7680 page-address latch is currently the only operation that makes
-     * a completed frame disappear, so isolate it from GE rendering. */
-    s_render_page = s_visible_page;
-    st = lt7680_gfx_select_canvas_page(s_render_page);
-    if (st != LT7680_OK)
-        return false;
     if (initial_frame)
     {
-        /* Build the first frame directly on the visible canvas while page
-         * presentation is disabled for this diagnostic path. */
+        /* Build the first frame on the visible canvas while the panel remains
+         * blank. The initial MISA commit happens after all slices complete. */
+        s_render_page = s_visible_page;
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st != LT7680_OK)
+            return false;
         s_render_full_page = true;
         st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
         if (st != LT7680_OK)
@@ -366,8 +365,16 @@ static bool begin_hidden_frame(void)
     }
     else
     {
-        /* Runtime updates stay on the visible page. Changing CVSSA/MISA during
-         * a live frame blanks this controller, so update only dirty regions. */
+        /* Clone the visible page before drawing so runtime updates remain
+         * atomic. The target then receives only the dirty regions and trend
+         * columns for this snapshot. */
+        s_render_page = (uint8_t)(s_visible_page ^ 1u);
+        st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
+        if (st != LT7680_OK)
+            return false;
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st != LT7680_OK)
+            return false;
         s_render_full_page = false;
     }
     s_frame_rendering = true;
@@ -1149,12 +1156,6 @@ static void reading_scene_render(void)
     bool page_text_stale;
 
     if (!s_display_ready)
-    {
-        return;
-    }
-    /* Keep the verified first frame on-screen while runtime page/GE refresh
-     * behavior is being brought up on this LT7680 revision. */
-    if (!s_initial_page_pending)
     {
         return;
     }
