@@ -1722,7 +1722,13 @@ int main(void)
                              * frame starts drawing on the hidden page. */
                             st = lt7680_gfx_select_canvas_page(s_visible_page);
                             if (st == LT7680_OK)
+                            {
+                                /* The first cooperative frame starts on this
+                                 * cleared canvas, so keep its software page
+                                 * identity aligned with CVSSA. */
+                                s_render_page = s_visible_page;
                                 st = lt7680_gfx_clear(0x0000u);
+                            }
                             if (st == LT7680_OK)
                                 st = lt7680_gfx_present_page(s_visible_page);
                         }
