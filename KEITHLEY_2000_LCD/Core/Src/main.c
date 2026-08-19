@@ -210,7 +210,6 @@ static const demo_unit_t s_demo_units[] = {
 static uint32_t s_demo_last_tick;
 static uint32_t s_demo_sample;
 static bool s_demo_event_reported;
-static bool s_demo_copy_reported;
 static bool s_demo_commit_reported;
 
 static void demo_u32_to_padded(char *out, uint32_t v, uint8_t digits)
@@ -375,28 +374,19 @@ static bool begin_hidden_frame(void)
     }
     else
     {
-        /* Clone the visible page before drawing so runtime updates remain
-         * atomic. The target then receives only the dirty regions and trend
-         * columns for this snapshot. */
+        /* Rebuild the complete frame on the other page. The LT7680 BTE copy
+         * path cannot finish a 1 MiB page reliably on this board, while a
+         * full GE frame still exercises the real page/MISA render path. */
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
-        st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
-        if (!s_demo_copy_reported)
-        {
-            hal_uart_send_text("[DEMO] copy=");
-            hal_uart_send_hex8((uint8_t)st);
-            hal_uart_send_text(" src=");
-            hal_uart_send_hex8(s_visible_page);
-            hal_uart_send_text(" dst=");
-            hal_uart_send_hex8(s_render_page);
-            hal_uart_send_text("\r\n");
-            s_demo_copy_reported = true;
-        }
-        if (st != LT7680_OK)
-            return false;
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK)
             return false;
-        s_render_full_page = false;
+        s_render_full_page = true;
+        st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
+        if (st != LT7680_OK)
+            return false;
+        render_scheduler_init(&s_renderer);
+        s_waiting_visible = false;
     }
     s_frame_rendering = true;
     s_frame_has_trend_update = s_render_full_page;
