@@ -209,6 +209,9 @@ static const demo_unit_t s_demo_units[] = {
 
 static uint32_t s_demo_last_tick;
 static uint32_t s_demo_sample;
+static bool s_demo_event_reported;
+static bool s_demo_copy_reported;
+static bool s_demo_commit_reported;
 
 static void demo_u32_to_padded(char *out, uint32_t v, uint8_t digits)
 {
@@ -317,6 +320,13 @@ static void display_enable_after_initial_frame(void)
          * MISA page after CVSSA is changed during boot. */
         if (lt7680_gfx_present_page(s_render_page) != LT7680_OK)
             return;
+        if (!initial_frame && !s_demo_commit_reported)
+        {
+            hal_uart_send_text("[DEMO] commit page=");
+            hal_uart_send_hex8(s_render_page);
+            hal_uart_send_text("\r\n");
+            s_demo_commit_reported = true;
+        }
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
         s_page_text_generation[s_render_page] = s_frame_text_generation;
@@ -370,6 +380,17 @@ static bool begin_hidden_frame(void)
          * columns for this snapshot. */
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
         st = lt7680_gfx_copy_page(s_visible_page, s_render_page);
+        if (!s_demo_copy_reported)
+        {
+            hal_uart_send_text("[DEMO] copy=");
+            hal_uart_send_hex8((uint8_t)st);
+            hal_uart_send_text(" src=");
+            hal_uart_send_hex8(s_visible_page);
+            hal_uart_send_text(" dst=");
+            hal_uart_send_hex8(s_render_page);
+            hal_uart_send_text("\r\n");
+            s_demo_copy_reported = true;
+        }
         if (st != LT7680_OK)
             return false;
         st = lt7680_gfx_select_canvas_page(s_render_page);
@@ -399,6 +420,13 @@ static void proto_on_event(const k2000_event_t *evt)
     switch (evt->type)
     {
     case K2000_EVT_FIELD:
+        if (!s_demo_event_reported)
+        {
+            hal_uart_send_text("[DEMO] field-len=");
+            hal_uart_send_hex8(evt->field.value_len);
+            hal_uart_send_text("\r\n");
+            s_demo_event_reported = true;
+        }
         if (reading_is_special(evt->field.value, evt->field.value_len,
                                &special))
         {
