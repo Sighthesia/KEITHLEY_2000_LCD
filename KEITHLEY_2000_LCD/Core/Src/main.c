@@ -329,6 +329,16 @@ static void display_enable_after_initial_frame(void)
         }
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
+        {
+            const lt7680_rect_t solid_probe = {0u, 0u, 320u, 960u};
+            lt7680_status_t solid_status =
+                lt7680_gfx_fill_rect(&solid_probe, 0xF800u);
+            hal_uart_send_text("FRAME solid-fill=");
+            hal_uart_send_hex8((uint8_t)solid_status);
+            hal_uart_send_text("\r\n");
+            if (solid_status != LT7680_OK)
+                return;
+        }
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
         {
