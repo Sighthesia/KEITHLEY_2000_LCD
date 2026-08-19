@@ -342,6 +342,24 @@ static void display_enable_after_initial_frame(void)
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
         {
+            static const uint8_t window_regs[] = {
+                0x20u, 0x21u, 0x22u, 0x23u, 0x24u, 0x25u,
+                0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u,
+                0x5Au, 0x5Bu, 0x5Cu, 0x5Du, 0x5Eu
+            };
+            uint8_t i;
+            hal_uart_send_text("FRAME windows=");
+            for (i = 0u; i < sizeof(window_regs); i++)
+            {
+                uint8_t value = 0u;
+                if (lt7680_read_reg(window_regs[i], &value) == LT7680_OK)
+                    hal_uart_send_hex8(value);
+                else
+                    hal_uart_send_text("EE");
+            }
+            hal_uart_send_text("\r\n");
+        }
+        {
             uint8_t display_ctrl = 0u;
             uint8_t status = 0u;
             uint16_t pixel = 0u;
