@@ -106,6 +106,7 @@ static uint8_t s_text_generation;
 static uint8_t s_page_text_generation[2];
 static uint8_t s_frame_text_generation;
 static bool s_frame_has_trend_update;
+static bool s_render_status_regions;
 
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
@@ -124,6 +125,7 @@ static float s_page_trend_maximum[2];
 static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
+static uint32_t s_status_refresh_tick;
 static uint32_t s_trend_refresh_tick;
 static uint32_t s_display_due_tick;
 static uint32_t s_perf_frame_start_tick;
@@ -1258,7 +1260,8 @@ static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
     bool initial_phase;
-    bool text_due;
+    bool status_due;
+    uint8_t due_regions;
     bool trend_due;
     bool display_due;
     bool trend_needed;
@@ -1284,12 +1287,15 @@ static void reading_scene_render(void)
      * restarted, so every bitmap/graph slice progresses at 500 readings/s. */
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
-        text_due = s_ui_dirty_regions != 0u &&
-                   (now - s_text_refresh_tick) >= DISPLAY_FRAME_PERIOD_MS;
+        status_due = (uint32_t)(now - s_status_refresh_tick) >= 1000u;
+        due_regions = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
+        if (status_due)
+            due_regions |= (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_STATUS);
         trend_due = (now - s_trend_refresh_tick) >= 200u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
-        if (display_due && (text_due || trend_due || s_perf_sample_count != 0u))
+        if (display_due && (due_regions != 0u || trend_due ||
+                            s_perf_sample_count != 0u))
         {
             s_render_page = (uint8_t)(s_visible_page ^ 1u);
             s_render_full_page =
@@ -1314,24 +1320,27 @@ static void reading_scene_render(void)
             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
-                if (text_due)
+                if ((due_regions & RENDER_DIRTY_READING) != 0u)
                     s_text_generation++;
                 s_frame_text_generation = s_text_generation;
-                page_text_stale = s_ui_dirty_regions != 0u;
-                if (text_due)
+                page_text_stale = due_regions != 0u;
+                if ((due_regions & RENDER_DIRTY_READING) != 0u)
                     s_text_refresh_tick = now;
+                if ((due_regions & RENDER_DIRTY_STATUS) != 0u)
+                    s_status_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
                 s_display_due_tick = now;
+                s_render_status_regions =
+                    (due_regions & RENDER_DIRTY_STATUS) != 0u;
                 if (page_text_stale)
-                    render_scheduler_request_regions(&s_renderer,
-                                                     s_ui_dirty_regions);
+                    render_scheduler_request_regions(&s_renderer, due_regions);
                 if (trend_needed)
                 {
                     render_scheduler_request_trend(&s_renderer);
                     s_frame_has_trend_update = true;
                 }
-                s_ui_dirty_regions = 0u;
+                s_ui_dirty_regions &= (uint8_t)~due_regions;
             }
         }
     }
@@ -1440,6 +1449,13 @@ static void reading_scene_render(void)
          * metadata cells are painted by the first normal reading update, so
          * their many small glyph transactions cannot delay first reveal. */
         if (s_renderer.phase == RENDER_PHASE_INITIAL_READING)
+        {
+            render_scheduler_complete_phase(&s_renderer);
+            s_render_item = 0u;
+            return;
+        }
+        if (s_render_item >= first_info &&
+            !s_render_status_regions)
         {
             render_scheduler_complete_phase(&s_renderer);
             s_render_item = 0u;
