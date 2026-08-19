@@ -211,7 +211,9 @@ static lt7680_status_t flash_begin_select(uint8_t select)
 
 static lt7680_status_t flash_begin(void)
 {
-    return flash_begin_select(0u);
+    /* U5 is wired to SFCS1 on this board. Keep SFCS0 available only for the
+     * read-only chip-select diagnostic. */
+    return flash_begin_select(1u);
 }
 
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe)
