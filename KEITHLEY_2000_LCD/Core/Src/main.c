@@ -329,52 +329,8 @@ static void display_enable_after_initial_frame(void)
         }
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
-        {
-            const lt7680_rect_t solid_probe = {0u, 0u, 320u, 960u};
-            lt7680_status_t solid_status =
-                lt7680_gfx_fill_rect(&solid_probe, 0xF800u);
-            hal_uart_send_text("FRAME solid-fill=");
-            hal_uart_send_hex8((uint8_t)solid_status);
-            hal_uart_send_text("\r\n");
-            if (solid_status != LT7680_OK)
-                return;
-        }
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
-        {
-            static const uint8_t window_regs[] = {
-                0x20u, 0x21u, 0x22u, 0x23u, 0x24u, 0x25u,
-                0x50u, 0x51u, 0x52u, 0x53u, 0x54u, 0x55u,
-                0x5Au, 0x5Bu, 0x5Cu, 0x5Du, 0x5Eu
-            };
-            uint8_t i;
-            hal_uart_send_text("FRAME windows=");
-            for (i = 0u; i < sizeof(window_regs); i++)
-            {
-                uint8_t value = 0u;
-                if (lt7680_read_reg(window_regs[i], &value) == LT7680_OK)
-                    hal_uart_send_hex8(value);
-                else
-                    hal_uart_send_text("EE");
-            }
-            hal_uart_send_text("\r\n");
-        }
-        {
-            uint8_t display_ctrl = 0u;
-            uint8_t status = 0u;
-            uint16_t pixel = 0u;
-            (void)lt7680_read_reg(0x12u, &display_ctrl);
-            (void)lt7680_read_status(&status);
-            (void)lt7680_gfx_peek_pixel(0u, 0u, &pixel);
-            hal_uart_send_text("FRAME diag REG12=0x");
-            hal_uart_send_hex8(display_ctrl);
-            hal_uart_send_text(" STATUS=0x");
-            hal_uart_send_hex8(status);
-            hal_uart_send_text(" PX00=");
-            hal_uart_send_hex8((uint8_t)(pixel >> 8));
-            hal_uart_send_hex8((uint8_t)pixel);
-            hal_uart_send_text("\r\n");
-        }
         s_frame_rendering = false;
         s_initial_page_pending = false;
         s_display_enabled = true;
@@ -1507,16 +1463,6 @@ static void reading_scene_render(void)
     case RENDER_PHASE_INITIAL_TREND_COLUMNS:
     case RENDER_PHASE_UPDATE_TREND_COLUMNS:
     {
-        if (s_renderer.phase == RENDER_PHASE_INITIAL_TREND_COLUMNS)
-        {
-            /* Isolate the initial blanking from trend line GE commands. Keep
-             * the chart panel, axes, and reading visible for this probe. */
-            s_render_column = 0u;
-            render_scheduler_complete_phase(&s_renderer);
-            s_render_item = 0u;
-            display_enable_after_initial_frame();
-            return;
-        }
         /* Each column can issue up to three line commands, plus an erase and
          * grid restoration on updates.  Rendering all 240 columns in one
          * pass defeats the cooperative scheduler and can starve input. */
