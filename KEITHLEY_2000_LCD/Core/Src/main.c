@@ -35,6 +35,7 @@
 #include "reading_split.h"
 #include "render_scheduler.h"
 #include "rif_reader.h"
+#include "rif_tile_cache.h"
 #include "scene.h"
 #include "ui_model.h"
 #include "trend_buffer.h"
@@ -1080,6 +1081,7 @@ static void rif_init(void)
     }
 
     s_rif_ready = false;
+    rif_tile_cache_init();
     rif_log_spi_registers("regs");
     st = lt7680_flash_read(0u, header, sizeof(header));
     {
@@ -1194,6 +1196,37 @@ static void rif_init(void)
     }
     s_rif_dma_probe_passed = false;
     rif_dma_probe();
+    if (s_rif_dma_probe_passed)
+    {
+        rif_tile_cache_entry_t cache_entry;
+        rif_tile_t cache_tile;
+        rif_entry_t cache_dir_entry;
+        uint8_t cache_data[RIF_READER_ENTRY_SIZE];
+        uint16_t i;
+
+        for (i = 0u; i < s_rif_image.directory_count; i++)
+        {
+            st = lt7680_flash_read(s_rif_image.flash_base +
+                                       s_rif_image.directory_offset +
+                                       (uint32_t)i * RIF_READER_ENTRY_SIZE,
+                                   cache_data, sizeof(cache_data));
+            if (st == LT7680_OK &&
+                rif_reader_parse_entry(&s_rif_image, cache_data,
+                                       sizeof(cache_data), &cache_dir_entry) ==
+                    RIF_OK &&
+                rif_reader_find_glyph(&s_rif_image, &cache_dir_entry,
+                                      RIF_KIND_DIGIT_CHAR, (uint16_t)'8',
+                                      &cache_tile) == RIF_OK)
+            {
+                st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
+                                             (uint16_t)'8', &cache_tile,
+                                             &cache_entry);
+                break;
+            }
+        }
+        if (st != LT7680_OK)
+            hal_uart_send_text("RIF tile cache unavailable\r\n");
+    }
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 

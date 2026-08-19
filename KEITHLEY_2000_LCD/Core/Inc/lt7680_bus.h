@@ -18,6 +18,7 @@ typedef enum {
     LT7680_ERR_BUS,
     LT7680_ERR_PARAM,
     LT7680_ERR_BUSY,
+    LT7680_ERR_UNSUPPORTED,
 } lt7680_status_t;
 
 typedef struct {
