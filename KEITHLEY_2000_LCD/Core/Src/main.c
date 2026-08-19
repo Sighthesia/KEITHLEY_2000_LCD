@@ -1096,34 +1096,95 @@ static void rif_dma_snapshot_send(const char *label,
 
 static void rif_dma_probe(void)
 {
-    static const uint16_t codes[] = {'8', '7'};
-    static const uint32_t targets[] = {0x200000u, 0x300000u};
-    rif_tile_t tile;
+    static const uint32_t staging_addr = 0x200000u;
+    static const uint16_t probe_x = 16u;
+    static const uint16_t probe_y = 16u;
+    static const uint16_t probe_w = 64u;
+    static const uint16_t probe_h = 32u;
+    rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
     lt7680_flash_dma_snapshot_t before;
     lt7680_flash_dma_snapshot_t after;
-    uint8_t code_index;
-    uint8_t target_index;
+    lt7680_status_t dma_status = LT7680_ERR_UNSUPPORTED;
+    lt7680_status_t bte_status = LT7680_ERR_UNSUPPORTED;
+    lt7680_status_t display_status = LT7680_ERR_UNSUPPORTED;
+    lt7680_status_t restore_status = LT7680_OK;
+    bool visual_ready = false;
 
-    /* This is deliberately a register/status probe. The current LT7680 API
-     * has no safe absolute SDRAM readback, so sample fields say UNSUPPORTED
-     * instead of copying data into either canvas page or guessing an address. */
-    for (code_index = 0u; code_index < 2u; code_index++)
+    /* DMA writes a 64x32 RGB565 crop: 128 source bytes per row and a 64-pixel
+     * destination stride. The staging address is outside both canvas pages;
+     * the current API cannot target a hidden page directly. */
+    if (rif_find_tile_char((uint16_t)'8', &tile) &&
+        tile.width == 64u && tile.height == 128u &&
+        tile.stride == 128u && tile.size == 16384u)
     {
-        if (!rif_find_tile_char(codes[code_index], &tile) ||
-            tile.width != 64u || tile.height != 128u ||
-            tile.stride != 128u || tile.size != 16384u)
-            continue;
-        for (target_index = 0u; target_index < 2u; target_index++)
+        (void)lt7680_flash_dma_read_snapshot(&before);
+        dma_status = lt7680_flash_dma_to_sdram(tile.offset, staging_addr,
+                                                (uint16_t)(probe_w * 2u),
+                                                probe_h, probe_w);
+        (void)lt7680_flash_dma_read_snapshot(&after);
+        rif_dma_snapshot_send("tile8-visual", tile.offset, staging_addr,
+                              &before, &after, dma_status);
+        if (dma_status == LT7680_OK)
         {
-            (void)lt7680_flash_dma_read_snapshot(&before);
-            lt7680_status_t st = lt7680_flash_dma_to_sdram(
-                tile.offset, targets[target_index], 8u, 4u, 320u);
-            (void)lt7680_flash_dma_read_snapshot(&after);
-            rif_dma_snapshot_send(code_index == 0u ? "tile8-paired" :
-                                  "tile7-paired", tile.offset,
-                                  targets[target_index], &before, &after, st);
+            bte_status = lt7680_gfx_blit(1u, staging_addr, probe_w, probe_x,
+                                         probe_y, probe_w, probe_h);
+            if (bte_status == LT7680_OK)
+            {
+                display_status = lt7680_gfx_present_page(1u);
+                if (display_status == LT7680_OK)
+                {
+                    display_status = lt7680_write_reg(0x12u, 0x48u);
+                    visual_ready = display_status == LT7680_OK;
+                }
+            }
         }
     }
+
+    hal_uart_send_text("RIF DMA visual status=");
+    hal_uart_send_hex8((uint8_t)(visual_ready ? LT7680_OK :
+                                 (dma_status != LT7680_OK ? dma_status :
+                                  (bte_status != LT7680_OK ? bte_status :
+                                   display_status))));
+    hal_uart_send_text(" source=");
+    rif_probe_send_hex32(tile.offset);
+    hal_uart_send_text(" target-page=1 target-rect=");
+    hal_uart_send_hex8((uint8_t)(probe_x >> 8));
+    hal_uart_send_hex8((uint8_t)probe_x);
+    hal_uart_send_text(",");
+    hal_uart_send_hex8((uint8_t)(probe_y >> 8));
+    hal_uart_send_hex8((uint8_t)probe_y);
+    hal_uart_send_text("+");
+    hal_uart_send_hex8((uint8_t)(probe_w >> 8));
+    hal_uart_send_hex8((uint8_t)probe_w);
+    hal_uart_send_text("x");
+    hal_uart_send_hex8((uint8_t)(probe_h >> 8));
+    hal_uart_send_hex8((uint8_t)probe_h);
+    hal_uart_send_text(" direct-hidden=UNSUPPORTED");
+    if (visual_ready)
+    {
+        hal_uart_send_text(" visual=DISPLAYED-ONCE");
+        (void)lt7680_delay_ms(250u);
+    }
+    else
+    {
+        hal_uart_send_text(" visual=NOT-DISPLAYED");
+    }
+    hal_uart_send_text("\r\n");
+
+    /* Do not leave diagnostic pixels or page identity visible to the normal
+     * boot renderer, regardless of which probe step failed. */
+    if (lt7680_write_reg(0x12u, 0x08u) != LT7680_OK)
+        restore_status = LT7680_ERR_BUS;
+    if (lt7680_gfx_select_canvas_page(1u) != LT7680_OK ||
+        lt7680_gfx_clear(0x0000u) != LT7680_OK)
+        restore_status = LT7680_ERR_BUS;
+    if (lt7680_gfx_select_canvas_page(0u) != LT7680_OK ||
+        lt7680_gfx_present_page(0u) != LT7680_OK)
+        restore_status = LT7680_ERR_BUS;
+    if (restore_status != LT7680_OK)
+        hal_uart_send_text("RIF DMA visual restore=FAIL\r\n");
+    else
+        hal_uart_send_text("RIF DMA visual restore=BLACK-PAGE-0\r\n");
 }
 
 static void rif_init(void)
