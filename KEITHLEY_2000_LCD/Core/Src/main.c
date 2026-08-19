@@ -233,6 +233,9 @@ typedef struct
     uint16_t row;
     uint16_t column;
     uint16_t chunk_width;
+    uint16_t pixel_base;
+    uint16_t block_row;
+    uint8_t block_rows;
     uint16_t directory_index;
     uint32_t kind;
     uint16_t code;
@@ -243,7 +246,9 @@ typedef struct
     bool active;
     rif_tile_t tile;
     uint8_t entry[RIF_READER_ENTRY_SIZE];
-    uint8_t pixels[64];
+    /* Eight 64-pixel RGB565 rows. Keeping the read contiguous avoids
+     * reinitializing the LT7680 Flash Master for every 32-pixel half-row. */
+    uint8_t pixels[1024];
 } rif_draw_job_t;
 
 static rif_image_t s_rif_image;
@@ -809,19 +814,28 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
 
     if (!s_rif_draw_job.chunk_ready)
     {
-        uint16_t remaining =
-            (uint16_t)(s_rif_draw_job.tile.width - s_rif_draw_job.column);
-        s_rif_draw_job.chunk_width = remaining > 32u ? 32u : remaining;
-        st = lt7680_flash_read(s_rif_draw_job.tile.offset +
-                                   (uint32_t)s_rif_draw_job.row * s_rif_draw_job.tile.stride +
-                                   (uint32_t)s_rif_draw_job.column * 2u,
-                               s_rif_draw_job.pixels,
-                               (uint16_t)(s_rif_draw_job.chunk_width * 2u));
-        if (st != LT7680_OK)
+        uint16_t remaining;
+        if (s_rif_draw_job.block_rows == 0u)
         {
-            rif_draw_fail(st);
-            return false;
+            uint16_t rows = (uint16_t)(s_rif_draw_job.tile.height -
+                                       s_rif_draw_job.row);
+            s_rif_draw_job.block_row = s_rif_draw_job.row;
+            s_rif_draw_job.block_rows = (uint8_t)(rows > 8u ? 8u : rows);
+            st = lt7680_flash_read(
+                s_rif_draw_job.tile.offset +
+                    (uint32_t)s_rif_draw_job.block_row * s_rif_draw_job.tile.stride,
+                s_rif_draw_job.pixels,
+                (uint16_t)s_rif_draw_job.block_rows * s_rif_draw_job.tile.stride);
+            if (st != LT7680_OK)
+            {
+                rif_draw_fail(st);
+                return false;
+            }
+            s_rif_draw_job.pixel_base = 0u;
         }
+        remaining = (uint16_t)(s_rif_draw_job.tile.width -
+                               s_rif_draw_job.column);
+        s_rif_draw_job.chunk_width = remaining;
         s_rif_draw_job.pixel = 0u;
         s_rif_draw_job.chunk_ready = true;
     }
@@ -830,18 +844,24 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
         uint8_t start;
         uint16_t color;
         while (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width &&
-               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u] |
-                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u + 1u] << 8)) ==
+               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                s_rif_draw_job.pixel * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                s_rif_draw_job.pixel * 2u + 1u] << 8)) ==
                    s_rif_draw_job.tile.background)
             s_rif_draw_job.pixel++;
         if (s_rif_draw_job.pixel == s_rif_draw_job.chunk_width)
             break;
         start = s_rif_draw_job.pixel;
-        color = (uint16_t)s_rif_draw_job.pixels[start * 2u] |
-                ((uint16_t)s_rif_draw_job.pixels[start * 2u + 1u] << 8);
+        color = (uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                start * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                start * 2u + 1u] << 8);
         while (s_rif_draw_job.pixel < s_rif_draw_job.chunk_width &&
-               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u] |
-                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel * 2u + 1u] << 8)) == color)
+               ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                s_rif_draw_job.pixel * 2u] |
+                ((uint16_t)s_rif_draw_job.pixels[s_rif_draw_job.pixel_base +
+                                                s_rif_draw_job.pixel * 2u + 1u] << 8)) == color)
             s_rif_draw_job.pixel++;
         if (ui_fill_rect((uint16_t)(s_rif_draw_job.cx + s_rif_draw_job.column + start),
                          (uint16_t)(s_rif_draw_job.y + s_rif_draw_job.row),
@@ -861,6 +881,13 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
         return false;
     s_rif_draw_job.column = 0u;
     s_rif_draw_job.row++;
+    s_rif_draw_job.pixel_base = (uint16_t)(s_rif_draw_job.pixel_base +
+                                           s_rif_draw_job.tile.stride);
+    if (s_rif_draw_job.row >= (uint16_t)(s_rif_draw_job.block_row +
+                                         s_rif_draw_job.block_rows))
+    {
+        s_rif_draw_job.block_rows = 0u;
+    }
     if (s_rif_draw_job.row < s_rif_draw_job.tile.height)
         return false;
 
