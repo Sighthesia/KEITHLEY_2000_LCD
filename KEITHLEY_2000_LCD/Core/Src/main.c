@@ -292,6 +292,8 @@ static uint32_t s_demo_last_tick;
 static uint32_t s_demo_sample;
 static bool s_demo_event_reported;
 static bool s_demo_commit_reported;
+static bool s_demo_runtime_reported;
+static bool s_demo_stall_reported;
 
 static void demo_u32_to_padded(char *out, uint32_t v, uint8_t digits)
 {
@@ -1277,6 +1279,19 @@ static void reading_scene_render(void)
         display_enable_after_initial_frame();
         return;
     }
+    if (s_frame_rendering && !s_demo_stall_reported &&
+        (uint32_t)(now - s_perf_frame_start_tick) >= 500u)
+    {
+        hal_uart_send_text("[DEBUG-fps] stall phase=");
+        hal_uart_send_hex8((uint8_t)s_renderer.phase);
+        hal_uart_send_text(" item=");
+        hal_uart_send_hex8(s_render_item);
+        hal_uart_send_text(" column=");
+        hal_uart_send_hex8((uint8_t)(s_render_column >> 8));
+        hal_uart_send_hex8((uint8_t)s_render_column);
+        hal_uart_send_text("\r\n");
+        s_demo_stall_reported = true;
+    }
     /* Publish immutable render snapshots only while idle. Queue a due trend
      * before text regions so a continuously dirty 10 Hz reading cannot starve
      * the 5 Hz graph; the region request is retained by the scheduler and runs
@@ -1314,6 +1329,17 @@ static void reading_scene_render(void)
             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
+                if (!s_initial_page_pending && !s_demo_runtime_reported)
+                {
+                    hal_uart_send_text("[DEBUG-fps] start phase=");
+                    hal_uart_send_hex8((uint8_t)s_renderer.phase);
+                    hal_uart_send_text(" dirty=");
+                    hal_uart_send_hex8(s_ui_dirty_regions);
+                    hal_uart_send_text(" trend=");
+                    hal_uart_send_hex8(trend_needed ? 1u : 0u);
+                    hal_uart_send_text("\r\n");
+                    s_demo_runtime_reported = true;
+                }
                 if (text_due)
                     s_text_generation++;
                 s_frame_text_generation = s_text_generation;
