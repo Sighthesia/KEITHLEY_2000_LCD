@@ -67,6 +67,10 @@
  * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 1U
 
+/* The sample clock and the display clock are deliberately independent. */
+#define DEMO_SAMPLE_PERIOD_MS 2u
+#define DISPLAY_FRAME_PERIOD_MS 33u
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -121,6 +125,70 @@ static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
 static uint32_t s_trend_refresh_tick;
+static uint32_t s_display_due_tick;
+static uint32_t s_perf_frame_start_tick;
+static uint32_t s_perf_last_frame_ms;
+static uint32_t s_perf_max_frame_ms;
+static uint32_t s_perf_window_tick;
+static uint16_t s_perf_window_frames;
+static uint16_t s_perf_fps;
+static uint32_t s_perf_sample_count;
+static uint32_t s_perf_sample_missed;
+
+static void perf_u32(char *out, uint32_t value, uint8_t digits)
+{
+    out[digits] = '\0';
+    while (digits > 0u)
+    {
+        out[--digits] = (char)('0' + (value % 10u));
+        value /= 10u;
+    }
+}
+
+static void perf_format_display(char *out)
+{
+    char fps[6];
+    char frame_ms[6];
+    uint32_t fps_value = s_perf_fps > 99u ? 99u : s_perf_fps;
+    uint32_t frame_value = s_perf_last_frame_ms > 999u ? 999u :
+                           s_perf_last_frame_ms;
+
+    memcpy(out, "FPS:", 4u);
+    perf_u32(fps, fps_value, 2u);
+    memcpy(out + 4u, fps, 2u);
+    memcpy(out + 6u, " T:", 3u);
+    perf_u32(frame_ms, frame_value, 3u);
+    memcpy(out + 9u, frame_ms, 3u);
+    out[12] = '\0';
+}
+
+static void perf_record_frame(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    s_perf_last_frame_ms = now - s_perf_frame_start_tick;
+    if (s_perf_last_frame_ms > s_perf_max_frame_ms)
+        s_perf_max_frame_ms = s_perf_last_frame_ms;
+    s_perf_window_frames++;
+    if ((uint32_t)(now - s_perf_window_tick) >= 1000u)
+    {
+        s_perf_fps = s_perf_window_frames;
+        s_perf_window_frames = 0u;
+        s_perf_window_tick = now;
+        hal_uart_send_text("PERF fps=");
+        hal_uart_send_hex8((uint8_t)s_perf_fps);
+        hal_uart_send_text(" frame-ms=");
+        hal_uart_send_hex8((uint8_t)s_perf_last_frame_ms);
+        hal_uart_send_text(" max-ms=");
+        hal_uart_send_hex8((uint8_t)s_perf_max_frame_ms);
+        hal_uart_send_text(" samples=");
+        hal_uart_send_hex8((uint8_t)(s_perf_sample_count >> 8));
+        hal_uart_send_hex8((uint8_t)s_perf_sample_count);
+        hal_uart_send_text(" missed=");
+        hal_uart_send_hex8((uint8_t)s_perf_sample_missed);
+        hal_uart_send_text("\r\n");
+    }
+}
 static uint16_t s_render_column;
 static uint8_t s_render_item;
 static render_scheduler_t s_renderer;
@@ -204,7 +272,6 @@ static const demo_unit_t s_demo_units[] = {
 };
 #define DEMO_UNIT_COUNT \
     ((uint8_t)(sizeof(s_demo_units) / sizeof(s_demo_units[0])))
-#define DEMO_FEED_PERIOD_MS 100u
 #define DEMO_SAMPLES_PER_UNIT 40u
 
 static uint32_t s_demo_last_tick;
@@ -270,39 +337,46 @@ static void demo_feed_unit(const char *unit)
 static void k2000_demo_feed(void)
 {
     uint32_t now = HAL_GetTick();
-    const demo_unit_t *u;
-    char text[16];
-    const char *p;
-    uint8_t unit_index;
+    uint8_t budget = 8u;
 
-    if (now - s_demo_last_tick < DEMO_FEED_PERIOD_MS)
-    {
+    if (!s_display_enabled)
         return;
-    }
-    s_demo_last_tick = now;
 
-    unit_index = (uint8_t)((s_demo_sample / DEMO_SAMPLES_PER_UNIT) %
-                           DEMO_UNIT_COUNT);
-    u = &s_demo_units[unit_index];
-    demo_format_value(u, text);
-
-    /* 0x0D start, 0x01 field tag, value+unit text, then status tags. The
-     * field terminator doubles as the first status tag (see parser). */
-    k2000_proto_feed(0x0Du);
-    k2000_proto_feed(0x01u);
-    for (p = text; *p != '\0'; p++)
+    while ((uint32_t)(now - s_demo_last_tick) >= DEMO_SAMPLE_PERIOD_MS &&
+           budget-- > 0u)
     {
-        k2000_proto_feed((uint8_t)*p);
-    }
-    demo_feed_unit(u->unit);
-    k2000_proto_feed(K2000_TAG_STATUS_REL); /* 0x09 REL/FILT/AUTO */
-    k2000_proto_feed(u->status09);
-    k2000_proto_feed(K2000_TAG_STATUS_HOLD); /* 0x08 HOLD/TRIG/rate */
-    k2000_proto_feed(u->status08);
-    k2000_proto_feed(K2000_TAG_STATUS_SHIFT); /* 0x07 MATH lamp every 4th */
-    k2000_proto_feed((unit_index % 4u == 3u) ? 0x20u : 0x00u);
+        const demo_unit_t *u;
+        char text[16];
+        const char *p;
+        uint8_t unit_index;
 
-    s_demo_sample++;
+        s_demo_last_tick += DEMO_SAMPLE_PERIOD_MS;
+        unit_index = (uint8_t)((s_demo_sample / DEMO_SAMPLES_PER_UNIT) %
+                               DEMO_UNIT_COUNT);
+        u = &s_demo_units[unit_index];
+        demo_format_value(u, text);
+
+        /* 0x0D start, 0x01 field tag, value+unit text, then status tags. */
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (p = text; *p != '\0'; p++)
+            k2000_proto_feed((uint8_t)*p);
+        demo_feed_unit(u->unit);
+        k2000_proto_feed(K2000_TAG_STATUS_REL);
+        k2000_proto_feed(u->status09);
+        k2000_proto_feed(K2000_TAG_STATUS_HOLD);
+        k2000_proto_feed(u->status08);
+        k2000_proto_feed(K2000_TAG_STATUS_SHIFT);
+        k2000_proto_feed((unit_index % 4u == 3u) ? 0x20u : 0x00u);
+        s_demo_sample++;
+        s_perf_sample_count++;
+    }
+    if ((uint32_t)(now - s_demo_last_tick) >= DEMO_SAMPLE_PERIOD_MS)
+    {
+        s_perf_sample_missed +=
+            (uint32_t)(now - s_demo_last_tick) / DEMO_SAMPLE_PERIOD_MS;
+        s_demo_last_tick = now;
+    }
 }
 #endif /* K2000_DEMO_FEED */
 
@@ -340,10 +414,15 @@ static void display_enable_after_initial_frame(void)
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
             return;
         s_frame_rendering = false;
+        if (!initial_frame)
+            perf_record_frame();
         if (initial_frame)
         {
             s_initial_page_pending = false;
             s_display_enabled = true;
+#if K2000_DEMO_FEED
+            s_demo_last_tick = HAL_GetTick();
+#endif
             if (!initial_complete)
                 hal_uart_send_text("PASS frame page enabled\r\n");
             else
@@ -387,6 +466,7 @@ static bool begin_hidden_frame(void)
             return false;
         render_scheduler_init(&s_renderer);
         s_waiting_visible = false;
+        s_perf_frame_start_tick = HAL_GetTick();
     }
     s_frame_rendering = true;
     s_frame_has_trend_update = s_render_full_page;
@@ -1170,6 +1250,7 @@ static void reading_scene_render(void)
     bool initial_phase;
     bool text_due;
     bool trend_due;
+    bool display_due;
     bool trend_needed;
     bool page_text_stale;
 
@@ -1196,12 +1277,15 @@ static void reading_scene_render(void)
         text_due = s_ui_dirty_regions != 0u &&
                    (now - s_text_refresh_tick) >= 100u;
         trend_due = (now - s_trend_refresh_tick) >= 200u;
-        if (text_due || trend_due)
+        display_due = (uint32_t)(now - s_display_due_tick) >=
+                      DISPLAY_FRAME_PERIOD_MS;
+        if (display_due && (text_due || trend_due || s_perf_sample_count != 0u))
         {
             s_render_page = (uint8_t)(s_visible_page ^ 1u);
             s_render_full_page =
                 (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
             main_display_format(&s_ui, &s_frame);
+            perf_format_display(s_frame.gpib);
             (void)trend_buffer_project(&s_trend, now, s_trend_columns,
                                        TREND_MAX_COLUMNS);
             main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
@@ -1230,6 +1314,7 @@ static void reading_scene_render(void)
                     s_text_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
+                s_display_due_tick = now;
                 if (!s_render_full_page && page_text_stale)
                     render_scheduler_request_regions(&s_renderer,
                                                      RENDER_DIRTY_STATUS |
