@@ -55,6 +55,12 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
+/* The complete cached-tile BTE renderer remains opt-in until its hardware
+ * orientation and pixel results have been accepted. */
+#ifndef RIF_BTE_RENDERER
+#define RIF_BTE_RENDERER 0U
+#endif
+
 /* Demo feed: synthesize K2000 host frames on a timer so the full
  * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
  * verified on the bench without an instrument. Values ramp up/down while the
@@ -790,10 +796,15 @@ static bool rif_find_next_tile(void)
     return false;
 }
 
-static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
+static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
+                                    uint16_t color)
 {
     lt7680_status_t st;
     uint16_t budget = 8u;
+
+#if !RIF_BTE_RENDERER
+    (void)color;
+#endif
 
     if (!s_rif_draw_job.active)
     {
@@ -813,6 +824,59 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
     }
     if (s_rif_draw_job.resolving)
         return rif_find_next_tile();
+
+#if RIF_BTE_RENDERER
+    /* The cache stores the pure-transposed large glyph in framebuffer space.
+     * Any unverified color, size, cache, or BTE result uses the renderer below. */
+    if (color == MAIN_DISPLAY_COLOR_GREEN &&
+        s_rif_draw_job.tile.foreground == MAIN_DISPLAY_COLOR_GREEN &&
+        s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
+        s_rif_draw_job.tile.width == 64u &&
+        s_rif_draw_job.tile.height == 128u &&
+        s_rif_draw_job.tile.stride == 128u)
+    {
+        rif_tile_cache_entry_t entry;
+        uint16_t fb_x;
+        uint16_t fb_y;
+
+        st = rif_tile_cache_prepare(s_rif_draw_job.kind, s_rif_draw_job.code,
+                                    &s_rif_draw_job.tile, &entry);
+        if (st == LT7680_OK && entry.ready != 0u && entry.width == 128u &&
+            entry.height == 64u && entry.stride >= entry.width)
+        {
+            panel_transform_ui_to_fb(s_rif_draw_job.cx, s_rif_draw_job.y,
+                                     &fb_x, &fb_y);
+            if ((uint32_t)fb_x + entry.width <= MAIN_DISPLAY_UI_HEIGHT &&
+                (uint32_t)fb_y + entry.height <= MAIN_DISPLAY_UI_WIDTH)
+            {
+                st = lt7680_gfx_blit(s_render_page, entry.address, entry.stride,
+                                     fb_x, fb_y, entry.width, entry.height);
+                if (st == LT7680_OK)
+                {
+                    s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
+                                                   s_rif_draw_job.tile.width);
+                    s_rif_draw_job.text += s_rif_draw_job.advance;
+                    if (*s_rif_draw_job.text == '\0')
+                    {
+                        s_rif_draw_job.active = false;
+                        return true;
+                    }
+                    if (!rif_text_code(s_rif_draw_job.text,
+                                       &s_rif_draw_job.kind,
+                                       &s_rif_draw_job.code,
+                                       &s_rif_draw_job.advance))
+                    {
+                        rif_draw_fail(LT7680_ERR_PARAM);
+                        return false;
+                    }
+                    s_rif_draw_job.resolving = true;
+                    s_rif_draw_job.directory_index = 0u;
+                    return false;
+                }
+            }
+        }
+    }
+#endif
 
     if (!s_rif_draw_job.chunk_ready)
     {
@@ -914,7 +978,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text)
 static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color)
 {
-    return s_rif_ready ? ui_draw_external_digits(x, y, text)
+    return s_rif_ready ? ui_draw_external_digits(x, y, text, color)
                        : ui_draw_text(x, y, text, color);
 }
 

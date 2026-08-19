@@ -1,7 +1,7 @@
 # RIF Hardware-Accelerated Glyph Rendering
 
 Date: 2026-08-20
-Status: Approved design, implementation not started
+Status: Approved design, renderer switch implemented behind a default-off flag
 
 ## Goal
 
@@ -61,6 +61,12 @@ The cache therefore stores large glyphs as `128x64` RGB565 tiles. The cache is
 located outside both display canvas pages and must be bounded by the actual
 SDRAM configuration. A tile entry records its RIF identity, cache address,
 stride, dimensions, and ready state.
+
+The renderer destination uses the existing pure transpose without axis
+reversal: the UI top-left is mapped with `panel_transform_ui_to_fb()`, and a
+validated cache entry is blitted as `128x64` framebuffer pixels. The complete
+BTE renderer remains compile-time opt-in; the default build keeps the existing
+GE/Flash renderer.
 
 The MCU must not allocate a complete 16 KiB input tile and a second complete
 16 KiB output tile simultaneously. The transpose/cache builder uses bounded
