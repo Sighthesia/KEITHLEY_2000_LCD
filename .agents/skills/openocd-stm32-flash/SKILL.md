@@ -119,6 +119,7 @@ set WORKAREASIZE 0x100
 source [find interface/cmsis-dap.cfg]
 source [find target/stm32f1x.cfg]
 reset_config srst_only srst_nogate connect_assert_srst
+adapter speed 8000
 ```
 
 and the flash sequence uses `reset halt` (halt while held in reset), NOT `halt`:
@@ -151,7 +152,11 @@ Two non-obvious points:
    (`Warn : couldn't use block writes, falling back to single memory accesses`),
    which is slow but reliable — the trailing `verify` then also uses direct
    readback comparison (no CRC errors). Verified: `Programming Finished` +
-   `Verified OK`, flash readback matches the .elf bytes exactly.
+   `Verified OK`, flash readback matches the .elf bytes exactly. Timing is
+   SWD-bound: full 64 KiB flash+verify takes ~31 s at 1 MHz, ~12 s at 4 MHz,
+   ~9.4 s at 8 MHz (sweet spot — 10 MHz regresses to ~26 s as the probe
+   glitches and retries). Block writes stay broken at every speed; 8 MHz +
+   direct-write fallback is the fastest reliable combination on this probe.
 
 ## Verification
 

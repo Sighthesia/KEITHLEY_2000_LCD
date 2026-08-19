@@ -31,7 +31,7 @@
     -c "reset" -c "shutdown"
   ```
   若最后 reset 报错，写入其实已成功，按板上复位键启动即可；软件复位不可靠时手动按复位。
-- 烧录（DAPLink/CMSIS-DAP，Horco `faed:4870`，2026-08-19 已验证）：`openocd.cfg` 为 `reset_config srst_only srst_nogate connect_assert_srst`（DAPLink 无 TRST，且本板固件一运行就断 SWD，必须连接期间拉低 nRESET）+ `set WORKAREASIZE 0x100`（廉价 CMSIS-DAP 跑不了 work-area 异步写/CRC 算法会 `timeout waiting for algorithm`，缩小 work area 强制直接写）。序列用 `reset halt` 而非 `halt`：
+- 烧录（DAPLink/CMSIS-DAP，Horco `faed:4870`，2026-08-19 已验证）：`openocd.cfg` 为 `reset_config srst_only srst_nogate connect_assert_srst`（DAPLink 无 TRST，且本板固件一运行就断 SWD，必须连接期间拉低 nRESET）+ `set WORKAREASIZE 0x100`（廉价 CMSIS-DAP 跑不了 work-area 异步写/CRC 算法会 `timeout waiting for algorithm`，缩小 work area 强制直接写）+ `adapter speed 8000`（速度受 SWD 带宽限制，8MHz 约 9.4s 烧完 64KiB，10MHz 探针出错倒退到 26s）。序列用 `reset halt` 而非 `halt`：
   ```
   openocd -f openocd.cfg \
     -c "init" -c "reset halt" \
