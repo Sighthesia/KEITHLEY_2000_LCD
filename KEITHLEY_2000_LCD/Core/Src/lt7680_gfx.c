@@ -90,6 +90,13 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 #define LT7680_REG_SPIMCR2 0xB9u
 #define LT7680_REG_SPIMSR 0xBAu
 #define LT7680_REG_SPI_DIV 0xBBu
+#define LT7680_REG_DMA_CTRL 0xB6u
+#define LT7680_REG_DMA_SSTR 0xBCu
+#define LT7680_REG_DMA_DX 0xC0u
+#define LT7680_REG_DMA_DY 0xC2u
+#define LT7680_REG_DMA_WTH 0xC6u
+#define LT7680_REG_DMA_HIGH 0xC8u
+#define LT7680_REG_DMA_SWTH 0xCAu
 
 /* Keep page 1 on a 1 MiB boundary. MISA/CVSSA are four separate register
  * writes on the SPI bus; this alignment makes the first three bytes remain
@@ -112,6 +119,8 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 #define LT7680_SPI_STATUS_RX_EMPTY 0x20u
 #define LT7680_SPI_STATUS_OVERFLOW 0x08u
 #define LT7680_SPI_DIVISOR_SAFE 0x0Fu
+#define LT7680_SFL_CTRL_SFCS1_DMA 0xC0u
+#define LT7680_SPI_CTRL_DMA 0x3Cu
 /* SFCS0, host FIFO access, 24-bit address, standard 03h/9Fh command mode.
  * The LT7680A-R keeps the host-FIFO bit set in B7; 0x40 is also the value used
  * by the vendor RA8876/LT768x drivers for the external SFCS0 device. */
@@ -120,6 +129,9 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
 static lt7680_status_t wait_2d_idle(void);
+static lt7680_status_t wr32le(uint8_t reg, uint32_t val);
+static lt7680_status_t wr13(uint8_t reg, uint16_t value);
+static lt7680_status_t wr16le(uint8_t reg, uint16_t val);
 
 /* 4.58" bar panel: 320x960. V16-derived RGB timings (REG[14]-[1F]):
  * H_BACK=80, H_FRONT=16, H_SYNC=16, V_BACK=10, V_FRONT=12, V_SYNC=3.
@@ -414,6 +426,89 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
         }
     }
     return st;
+}
+
+lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
+                                          uint32_t sdram_base,
+                                          uint16_t width_bytes,
+                                          uint16_t height,
+                                          uint16_t destination_stride_pixels)
+{
+    uint64_t flash_end;
+    uint64_t sdram_end;
+    uint32_t row_bytes;
+    uint32_t saved_cvssa;
+    uint16_t saved_canvas_stride;
+    lt7680_status_t st;
+    lt7680_status_t restore_st = LT7680_OK;
+    uint8_t value;
+
+    row_bytes = (uint32_t)destination_stride_pixels * 2u;
+    if (flash_address > 0x00FFFFFFu || width_bytes == 0u ||
+        (width_bytes & 1u) != 0u || height == 0u ||
+        destination_stride_pixels == 0u || width_bytes > row_bytes) {
+        return LT7680_ERR_PARAM;
+    }
+    flash_end = (uint64_t)flash_address + (uint32_t)width_bytes * height;
+    sdram_end = (uint64_t)sdram_base +
+                (uint32_t)(height - 1u) * row_bytes + width_bytes;
+    if (flash_end > 0x01000000u ||
+        sdram_base < 0x00200000u || sdram_end < sdram_base ||
+        sdram_end > 0x01000000u) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = lt7680_read_reg(LT7680_REG_CVSSA0, &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 1u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 8;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 2u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 16;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 3u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 24;
+    st = lt7680_read_reg(LT7680_REG_CVS_IMWTH0, &value);
+    if (st != LT7680_OK) return st;
+    saved_canvas_stride = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVS_IMWTH0 + 1u), &value);
+    if (st != LT7680_OK) return st;
+    saved_canvas_stride |= (uint16_t)value << 8;
+
+    st = wr32le(LT7680_REG_CVSSA0, sdram_base);
+    if (st == LT7680_OK) st = wr13(LT7680_REG_CVS_IMWTH0,
+                                   destination_stride_pixels);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SFL_CTRL,
+                                        LT7680_SFL_CTRL_SFCS1_DMA);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPIMCR2,
+                                        LT7680_SPI_CTRL_DMA);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPI_DIV,
+                                        LT7680_SPI_DIVISOR_SAFE);
+    if (st == LT7680_OK) st = wr32le(LT7680_REG_DMA_SSTR, flash_address);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DX, 0u);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DY, 0u);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_WTH, width_bytes);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_HIGH, height);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH, width_bytes);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
+    if (st == LT7680_OK) st = wait_2d_idle();
+
+    if (wr32le(LT7680_REG_CVSSA0, saved_cvssa) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    if (wr13(LT7680_REG_CVS_IMWTH0, saved_canvas_stride) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    if (write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    /* Keep U5 selected on SFCS1 without issuing any Flash write command. */
+    if (write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_SFCS1_DMA) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    return st != LT7680_OK ? st : restore_st;
 }
 
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
@@ -912,6 +1007,17 @@ static lt7680_status_t wr32le(uint8_t reg, uint32_t val)
         }
     }
     return LT7680_OK;
+}
+
+/* Write a 16-bit little-endian DMA field. Unlike graphic coordinates, these
+ * fields use the full register pair width. */
+static lt7680_status_t wr16le(uint8_t reg, uint16_t val)
+{
+    lt7680_status_t st = write_reg(reg, (uint8_t)val);
+    if (st != LT7680_OK) {
+        return st;
+    }
+    return write_reg((uint8_t)(reg + 1u), (uint8_t)(val >> 8));
 }
 
 /* Write a 13-bit value to a coordinate register pair (lo at reg, hi at
