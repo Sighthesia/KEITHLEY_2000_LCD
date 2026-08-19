@@ -437,6 +437,7 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
     uint64_t flash_end;
     uint64_t sdram_end;
     uint32_t row_bytes;
+    uint16_t block_width_pixels;
     uint32_t saved_cvssa;
     uint16_t saved_canvas_stride;
     lt7680_status_t st;
@@ -457,6 +458,7 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
         sdram_end > 0x01000000u) {
         return LT7680_ERR_PARAM;
     }
+    block_width_pixels = (uint16_t)(width_bytes / 2u);
 
     st = lt7680_read_reg(LT7680_REG_CVSSA0, &value);
     if (st != LT7680_OK) return st;
@@ -489,9 +491,14 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
     if (st == LT7680_OK) st = wr32le(LT7680_REG_DMA_SSTR, flash_address);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DX, 0u);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DY, 0u);
-    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_WTH, width_bytes);
+    /* DMAW_WTH and DMA_SWTH are image widths in pixels. The public API keeps
+     * width_bytes because the SFCS1 source is a packed RGB565 byte stream;
+     * destination_stride_pixels remains the canvas stride written above. */
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_WTH,
+                                     block_width_pixels);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_HIGH, height);
-    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH, width_bytes);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH,
+                                     block_width_pixels);
     if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
     if (st == LT7680_OK) st = wait_2d_idle();
 

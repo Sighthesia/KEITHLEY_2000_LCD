@@ -127,9 +127,11 @@ lt7680_status_t lt7680_gfx_set_pixel(uint16_t x, uint16_t y, uint16_t rgb565);
 lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565);
 lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                   uint16_t length);
-/* Read-only SFCS1 Flash DMA transfer into SDRAM staging. DX/DY are fixed at
- * the temporary canvas origin; destination_stride_pixels is the SDRAM row
- * stride, not an absolute DMA destination coordinate. */
+/* Read-only SFCS1 Flash DMA transfer into SDRAM staging. width_bytes is the
+ * tightly packed RGB565 source-row width in bytes and must be even. DX/DY are
+ * fixed at the temporary canvas origin; destination_stride_pixels is the
+ * SDRAM canvas row stride in pixels, not an absolute DMA destination
+ * coordinate. The DMA width registers use pixels internally. */
 lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
                                           uint32_t sdram_base,
                                           uint16_t width_bytes,
