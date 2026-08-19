@@ -166,7 +166,7 @@ static lt7680_status_t flash_read_fifo(uint8_t *value)
     return lt7680_read_reg(LT7680_REG_SPIDR, value);
 }
 
-static lt7680_status_t flash_begin(void)
+static lt7680_status_t flash_begin_select(uint8_t select)
 {
     uint8_t host_if;
     uint8_t b7_readback;
@@ -177,11 +177,12 @@ static lt7680_status_t flash_begin(void)
      * so no SFL_CTRL command-code setup is required. Do this before enabling
      * the host SPI-master bit; some LT7680 revisions gate B7 writes by mode. */
     s_flash_b7_probe.attempted = 1u;
-    s_flash_b7_probe.requested = LT7680_SFL_CTRL_RAW_DEFAULT;
+    s_flash_b7_probe.requested = (uint8_t)(LT7680_SFL_CTRL_RAW_DEFAULT |
+                                           (select != 0u ? 0x80u : 0u));
     s_flash_b7_probe.readback = 0u;
     s_flash_b7_probe.write_status = LT7680_ERR_BUS;
     s_flash_b7_probe.read_status = LT7680_ERR_BUS;
-    st = write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_RAW_DEFAULT);
+    st = write_reg(LT7680_REG_SFL_CTRL, s_flash_b7_probe.requested);
     s_flash_b7_probe.write_status = st;
     if (st != LT7680_OK) {
         return st;
@@ -203,7 +204,14 @@ static lt7680_status_t flash_begin(void)
     if (st != LT7680_OK) {
         return st;
     }
-    return write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_READ_ACTIVE);
+    return write_reg(LT7680_REG_SPIMCR2,
+                     (uint8_t)(LT7680_SPI_CTRL_READ_ACTIVE |
+                               (select != 0u ? 0x20u : 0u)));
+}
+
+static lt7680_status_t flash_begin(void)
+{
+    return flash_begin_select(0u);
 }
 
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe)
@@ -478,6 +486,42 @@ lt7680_status_t lt7680_flash_jedec_diagnostic(lt7680_flash_jedec_diag_t *diag)
     (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
     return diag->batch_status != LT7680_OK ? diag->batch_status
                                            : diag->step_status;
+}
+
+lt7680_status_t lt7680_flash_cs_diagnostic(lt7680_flash_cs_diag_t *diag)
+{
+    static const uint8_t command[4] = {0x9Fu, 0u, 0u, 0u};
+    lt7680_status_t st;
+
+    if (diag == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    for (uint8_t i = 0u; i < 4u; i++) {
+        diag->sfcs0_raw[i] = 0u;
+        diag->sfcs1_raw[i] = 0u;
+    }
+    diag->sfcs0_status = LT7680_ERR_BUS;
+    diag->sfcs1_status = LT7680_ERR_BUS;
+
+    st = flash_begin_select(0u);
+    if (st == LT7680_OK) {
+        diag->sfcs0_status = flash_push_and_drain_raw(
+            command, sizeof(command), 0u, diag->sfcs0_raw, 0);
+    } else {
+        diag->sfcs0_status = st;
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+
+    st = flash_begin_select(1u);
+    if (st == LT7680_OK) {
+        diag->sfcs1_status = flash_push_and_drain_raw(
+            command, sizeof(command), 0u, diag->sfcs1_raw, 0);
+    } else {
+        diag->sfcs1_status = st;
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+    return diag->sfcs0_status != LT7680_OK ? diag->sfcs0_status
+                                           : diag->sfcs1_status;
 }
 
 /* Read-modify-write, as the original V16 firmware does: preserve untouched

@@ -68,6 +68,13 @@ typedef struct {
     lt7680_status_t step_status;
 } lt7680_flash_jedec_diag_t;
 
+typedef struct {
+    uint8_t sfcs0_raw[4];
+    uint8_t sfcs1_raw[4];
+    lt7680_status_t sfcs0_status;
+    lt7680_status_t sfcs1_status;
+} lt7680_flash_cs_diag_t;
+
 /* Read-only diagnostic for the existing RIF header read at address zero. */
 typedef struct {
     uint8_t attempted;
@@ -106,6 +113,7 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
                                   uint16_t length);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 lt7680_status_t lt7680_flash_jedec_diagnostic(lt7680_flash_jedec_diag_t *diag);
+lt7680_status_t lt7680_flash_cs_diagnostic(lt7680_flash_cs_diag_t *diag);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_spi_snapshot(lt7680_flash_spi_snapshot_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);

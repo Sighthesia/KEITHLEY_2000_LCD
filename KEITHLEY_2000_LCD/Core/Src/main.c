@@ -951,6 +951,23 @@ static void rif_init(void)
         hal_uart_send_hex8((uint8_t)diag.step_status);
         hal_uart_send_text("\r\n");
     }
+    {
+        lt7680_flash_cs_diag_t diag;
+        lt7680_status_t diag_status = lt7680_flash_cs_diagnostic(&diag);
+        hal_uart_send_text("RIF SFCS diag status=0x");
+        hal_uart_send_hex8((uint8_t)diag_status);
+        hal_uart_send_text(" sfcs0=");
+        for (uint8_t i = 0u; i < 4u; i++)
+            hal_uart_send_hex8(diag.sfcs0_raw[i]);
+        hal_uart_send_text(" sfcs1=");
+        for (uint8_t i = 0u; i < 4u; i++)
+            hal_uart_send_hex8(diag.sfcs1_raw[i]);
+        hal_uart_send_text(" status0=0x");
+        hal_uart_send_hex8((uint8_t)diag.sfcs0_status);
+        hal_uart_send_text(" status1=0x");
+        hal_uart_send_hex8((uint8_t)diag.sfcs1_status);
+        hal_uart_send_text("\r\n");
+    }
 
     s_rif_ready = false;
     rif_log_spi_registers("regs");
