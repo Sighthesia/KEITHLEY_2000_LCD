@@ -145,6 +145,21 @@ static void perf_u32(char *out, uint32_t value, uint8_t digits)
     }
 }
 
+static void perf_send_u32(uint32_t value)
+{
+    char text[11];
+    uint8_t first = 0u;
+    uint8_t i;
+
+    do
+    {
+        text[first++] = (char)('0' + (value % 10u));
+        value /= 10u;
+    } while (value != 0u && first < sizeof(text));
+    for (i = first; i > 0u; i--)
+        hal_uart_send(&((uint8_t *)text)[i - 1u], 1u);
+}
+
 static void perf_format_display(char *out)
 {
     char fps[6];
@@ -176,16 +191,15 @@ static void perf_record_frame(void)
         s_perf_window_frames = 0u;
         s_perf_window_tick = now;
         hal_uart_send_text("PERF fps=");
-        hal_uart_send_hex8((uint8_t)s_perf_fps);
+        perf_send_u32(s_perf_fps);
         hal_uart_send_text(" frame-ms=");
-        hal_uart_send_hex8((uint8_t)s_perf_last_frame_ms);
+        perf_send_u32(s_perf_last_frame_ms);
         hal_uart_send_text(" max-ms=");
-        hal_uart_send_hex8((uint8_t)s_perf_max_frame_ms);
+        perf_send_u32(s_perf_max_frame_ms);
         hal_uart_send_text(" samples=");
-        hal_uart_send_hex8((uint8_t)(s_perf_sample_count >> 8));
-        hal_uart_send_hex8((uint8_t)s_perf_sample_count);
+        perf_send_u32(s_perf_sample_count);
         hal_uart_send_text(" missed=");
-        hal_uart_send_hex8((uint8_t)s_perf_sample_missed);
+        perf_send_u32(s_perf_sample_missed);
         hal_uart_send_text("\r\n");
     }
 }
@@ -453,18 +467,14 @@ static bool begin_hidden_frame(void)
     }
     else
     {
-        /* Rebuild the complete frame on the other page. The LT7680 BTE copy
-         * path cannot finish a 1 MiB page reliably on this board, while a
-         * full GE frame still exercises the real page/MISA render path. */
-        s_render_page = (uint8_t)(s_visible_page ^ 1u);
+        /* Keep runtime updates on the visible canvas while measuring the
+         * incremental GE path. Full-page copy and redraw are too slow for the
+         * 30 Hz budget on this controller. */
+        s_render_page = s_visible_page;
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK)
             return false;
-        s_render_full_page = true;
-        st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
-        if (st != LT7680_OK)
-            return false;
-        render_scheduler_init(&s_renderer);
+        s_render_full_page = false;
         s_waiting_visible = false;
         s_perf_frame_start_tick = HAL_GetTick();
     }
@@ -1275,7 +1285,7 @@ static void reading_scene_render(void)
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
         text_due = s_ui_dirty_regions != 0u &&
-                   (now - s_text_refresh_tick) >= 100u;
+                   (now - s_text_refresh_tick) >= DISPLAY_FRAME_PERIOD_MS;
         trend_due = (now - s_trend_refresh_tick) >= 200u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
