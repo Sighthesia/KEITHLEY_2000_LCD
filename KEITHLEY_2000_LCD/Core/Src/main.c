@@ -254,6 +254,7 @@ typedef struct
 static rif_image_t s_rif_image;
 static rif_draw_job_t s_rif_draw_job;
 static bool s_rif_ready;
+static bool s_rif_dma_probe_passed;
 
 #if K2000_DEMO_FEED
 /* One entry per demo "range". lo_mant/hi_mant are the ramp low/high mantissas
@@ -952,6 +953,88 @@ static void __attribute__((unused)) rif_log_spi_registers(const char *phase)
     hal_uart_send_text("\r\n");
 }
 
+static void rif_probe_send_hex32(uint32_t value)
+{
+    hal_uart_send_hex8((uint8_t)(value >> 24));
+    hal_uart_send_hex8((uint8_t)(value >> 16));
+    hal_uart_send_hex8((uint8_t)(value >> 8));
+    hal_uart_send_hex8((uint8_t)value);
+}
+
+static void rif_dma_probe(void)
+{
+    rif_entry_t entry;
+    rif_tile_t tile;
+    uint8_t entry_data[RIF_READER_ENTRY_SIZE];
+    uint16_t sample = 0u;
+    uint16_t sample_next = 0u;
+    uint32_t checksum = 2166136261u;
+    uint16_t i;
+    lt7680_status_t st = LT7680_ERR_PARAM;
+    bool found = false;
+
+    for (i = 0u; i < s_rif_image.directory_count; i++)
+    {
+        st = lt7680_flash_read(s_rif_image.flash_base +
+                                   s_rif_image.directory_offset +
+                                   (uint32_t)i * RIF_READER_ENTRY_SIZE,
+                               entry_data, RIF_READER_ENTRY_SIZE);
+        if (st != LT7680_OK ||
+            rif_reader_parse_entry(&s_rif_image, entry_data,
+                                   RIF_READER_ENTRY_SIZE, &entry) != RIF_OK)
+            break;
+        if (rif_reader_find_glyph(&s_rif_image, &entry, RIF_KIND_DIGIT_CHAR,
+                                  (uint16_t)'8', &tile) == RIF_OK)
+        {
+            found = true;
+            break;
+        }
+    }
+
+    if (found && tile.width == 64u && tile.height == 128u &&
+        tile.stride == 128u && tile.size == 16384u)
+    {
+        st = lt7680_flash_dma_to_sdram(tile.offset, 0x200000u, 128u, 4u,
+                                       320u);
+        if (st == LT7680_OK)
+        {
+            /* peek_pixel addresses the active canvas, so copy two staged
+             * pixels into the still-hidden canvas before reading them back. */
+            st = lt7680_gfx_blit(s_render_page, 0x200000u, 320u, 0u, 0u,
+                                 2u, 1u);
+        }
+        if (st == LT7680_OK)
+        {
+            st = lt7680_gfx_peek_pixel(0u, 0u, &sample);
+            if (st == LT7680_OK)
+                st = lt7680_gfx_peek_pixel(1u, 0u, &sample_next);
+            if (st == LT7680_OK)
+            {
+                checksum ^= sample;
+                checksum *= 16777619u;
+                checksum ^= sample_next;
+                checksum *= 16777619u;
+                s_rif_dma_probe_passed =
+                    (sample != 0x0000u && sample != 0xFFFFu) ||
+                    (sample_next != 0x0000u && sample_next != 0xFFFFu);
+                if (!s_rif_dma_probe_passed)
+                    st = LT7680_ERR_BUS;
+            }
+        }
+    }
+
+    hal_uart_send_text("RIF DMA probe status=");
+    hal_uart_send_hex8((uint8_t)st);
+    hal_uart_send_text(" offset=");
+    rif_probe_send_hex32(found ? tile.offset : 0u);
+    hal_uart_send_text(" sample=");
+    hal_uart_send_hex8((uint8_t)(sample >> 8));
+    hal_uart_send_hex8((uint8_t)sample);
+    hal_uart_send_text(" checksum=");
+    rif_probe_send_hex32(checksum);
+    hal_uart_send_text("\r\n");
+}
+
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -1109,6 +1192,8 @@ static void rif_init(void)
         hal_uart_send_text("RIF unavailable: invalid header\r\n");
         return;
     }
+    s_rif_dma_probe_passed = false;
+    rif_dma_probe();
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 
