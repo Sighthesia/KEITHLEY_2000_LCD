@@ -112,11 +112,10 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 #define LT7680_SPI_STATUS_RX_EMPTY 0x20u
 #define LT7680_SPI_STATUS_OVERFLOW 0x08u
 #define LT7680_SPI_DIVISOR_SAFE 0x0Fu
-/* Raw host reads push 03h/9Fh themselves through the FIFO, so SFL_CTRL is not
- * part of the read transaction. The documented raw-read default (SF0, text
- * mode, 24-bit address, 03h command) is 0x00; writing it defensively clears
- * any DMA-mode leftover from the power-on display boot loader. */
-#define LT7680_SFL_CTRL_RAW_DEFAULT 0x00u
+/* SFCS0, host FIFO access, 24-bit address, standard 03h/9Fh command mode.
+ * The LT7680A-R keeps the host-FIFO bit set in B7; 0x40 is also the value used
+ * by the vendor RA8876/LT768x drivers for the external SFCS0 device. */
+#define LT7680_SFL_CTRL_RAW_DEFAULT 0x40u
 
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
