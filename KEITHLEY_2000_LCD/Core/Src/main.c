@@ -934,6 +934,24 @@ static void rif_init(void)
     lt7680_flash_b7_probe_t b7_probe;
     bool header_ready = false;
 
+    {
+        lt7680_flash_jedec_diag_t diag;
+        lt7680_status_t diag_status = lt7680_flash_jedec_diagnostic(&diag);
+        hal_uart_send_text("RIF JEDEC diag status=0x");
+        hal_uart_send_hex8((uint8_t)diag_status);
+        hal_uart_send_text(" batch=");
+        for (uint8_t i = 0u; i < 4u; i++)
+            hal_uart_send_hex8(diag.batch_raw[i]);
+        hal_uart_send_text(" step=");
+        for (uint8_t i = 0u; i < 4u; i++)
+            hal_uart_send_hex8(diag.step_raw[i]);
+        hal_uart_send_text(" batch-status=0x");
+        hal_uart_send_hex8((uint8_t)diag.batch_status);
+        hal_uart_send_text(" step-status=0x");
+        hal_uart_send_hex8((uint8_t)diag.step_status);
+        hal_uart_send_text("\r\n");
+    }
+
     s_rif_ready = false;
     rif_log_spi_registers("regs");
     st = lt7680_flash_read(0u, header, sizeof(header));

@@ -427,6 +427,60 @@ lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
     return st;
 }
 
+lt7680_status_t lt7680_flash_jedec_diagnostic(lt7680_flash_jedec_diag_t *diag)
+{
+    static const uint8_t command[4] = {0x9Fu, 0u, 0u, 0u};
+    lt7680_status_t st;
+    uint8_t i;
+
+    if (diag == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    for (i = 0u; i < 4u; i++) {
+        diag->batch_raw[i] = 0u;
+        diag->step_raw[i] = 0u;
+    }
+    diag->batch_status = LT7680_ERR_BUS;
+    diag->step_status = LT7680_ERR_BUS;
+
+    st = flash_begin();
+    if (st == LT7680_OK) {
+        diag->batch_status = flash_push_and_drain_raw(
+            command, sizeof(command), 0u, diag->batch_raw, 0);
+    } else {
+        diag->batch_status = st;
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+
+    st = flash_begin();
+    if (st == LT7680_OK) {
+        diag->step_status = LT7680_OK;
+        for (i = 0u; i < 4u; i++) {
+            st = write_reg(LT7680_REG_SPIDR, command[i]);
+            if (st != LT7680_OK) {
+                diag->step_status = st;
+                break;
+            }
+            st = flash_wait(LT7680_SPI_STATUS_TX_EMPTY,
+                            LT7680_SPI_STATUS_TX_EMPTY);
+            if (st != LT7680_OK) {
+                diag->step_status = st;
+                break;
+            }
+            st = flash_read_fifo(&diag->step_raw[i]);
+            if (st != LT7680_OK) {
+                diag->step_status = st;
+                break;
+            }
+        }
+    } else {
+        diag->step_status = st;
+    }
+    (void)write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE);
+    return diag->batch_status != LT7680_OK ? diag->batch_status
+                                           : diag->step_status;
+}
+
 /* Read-modify-write, as the original V16 firmware does: preserve untouched
  * bits and only clear/set the ones the display config needs. */
 static lt7680_status_t rmw_reg(uint8_t reg, uint8_t set_bits,
