@@ -107,42 +107,41 @@ adapter speed or `reset_config` changes.
 
 ## DAPLink / CMSIS-DAP variant (this board, verified 2026-08-19)
 
-The K2000 firmware **kills SWD as soon as it runs** — a plain `init` fails with
-`Error: Error connecting DP: cannot read IDR` unless the target is held in reset
-while connecting. The board's NRST is wired (TEL: `NRST ; ... U1.7 ...`), and
-DAPLink has **no TRST** (probe reports `nTRST = 0 nRESET = 1`).
+DAPLink has **no TRST** (probe reports `nTRST = 0 nRESET = 1`); the board's NRST
+is wired (TEL: `NRST ; ... U1.7 ...`), so use `srst_only srst_nogate`.
 
-So the `openocd.cfg` for this probe is:
+The stock firmware used to kill SWD on boot: `HAL_MspInit()` called
+`__HAL_AFIO_REMAP_SWJ_DISABLE()` (stm32f1xx_hal_msp.c), so a plain `init` failed
+with `Error: Error connecting DP: cannot read IDR` unless the target was held in
+reset, forcing `connect_assert_srst` + `reset halt`. The board netlist uses none
+of PA13/14/15/PB3/4, so this was changed to `__HAL_AFIO_REMAP_SWJ_NOJTAG()`
+(keep SWD, free JTAG pins). With SWD alive, a **plain `init` + `halt` connects
+and full gdb-style debugging works** (halt/resume/registers on demand).
+
+Current `openocd.cfg` for this probe:
 
 ```tcl
 set WORKAREASIZE 0x100
 source [find interface/cmsis-dap.cfg]
 source [find target/stm32f1x.cfg]
-reset_config srst_only srst_nogate connect_assert_srst
+reset_config srst_only srst_nogate
 adapter speed 8000
 ```
 
-and the flash sequence uses `reset halt` (halt while held in reset), NOT `halt`:
+Flash sequence (same shape as the ST-Link one):
 
 ```
 openocd -f openocd.cfg \
   -c "init" \
-  -c "reset halt" \
+  -c "halt" \
   -c "program PATH/TO/firmware.elf verify" \
   -c "reset" \
   -c "shutdown"
 ```
 
-Two non-obvious points:
+Non-obvious points:
 
-1. `connect_assert_srst` is what makes the SWD handshake pass on this board.
-   With it, a plain `halt` times out (`external reset detected`, `timed out while
-   waiting for target halted`); `reset halt` completes at the reset vector
-   (`pc: 0xfffffffe`). At `adapter speed 1000`, the halt may land deeper in
-   firmware (`pc: 0x08002800`); lowering speed to 100 kHz lands at the reset
-   vector — either still programs.
-
-2. `set WORKAREASIZE 0x100` must be set **before** `target/stm32f1x.cfg` is
+1. `set WORKAREASIZE 0x100` must be set **before** `target/stm32f1x.cfg` is
    sourced. Cheap CMSIS-DAP firmware (Horco `faed:4870`, `FW Version = Horco
    v0.2`) cannot run OpenOCD's work-area async algorithms: the flash **write**
    algorithm and the CRC-verify algorithm time out (`Error: timeout waiting for
@@ -154,9 +153,13 @@ Two non-obvious points:
    readback comparison (no CRC errors). Verified: `Programming Finished` +
    `Verified OK`, flash readback matches the .elf bytes exactly. Timing is
    SWD-bound: full 64 KiB flash+verify takes ~31 s at 1 MHz, ~12 s at 4 MHz,
-   ~9.4 s at 8 MHz (sweet spot — 10 MHz regresses to ~26 s as the probe
-   glitches and retries). Block writes stay broken at every speed; 8 MHz +
-   direct-write fallback is the fastest reliable combination on this probe.
+   ~9 s at 8 MHz (sweet spot — 10 MHz regresses to ~26 s as the probe glitches
+   and retries). Block writes stay broken at every speed; 8 MHz + direct-write
+   fallback is the fastest reliable combination on this probe.
+
+2. If you ever flash an older build that still disables SWJ, connect will fail
+   again with `cannot read IDR`; re-apply `connect_assert_srst` + `reset halt`
+   for that session (see git history for the earlier variant).
 
 ## Verification
 
