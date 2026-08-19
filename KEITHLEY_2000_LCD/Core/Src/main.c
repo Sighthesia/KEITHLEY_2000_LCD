@@ -1317,19 +1317,16 @@ static void reading_scene_render(void)
                 if (text_due)
                     s_text_generation++;
                 s_frame_text_generation = s_text_generation;
-                page_text_stale = s_render_full_page ||
-                                  s_page_text_generation[s_render_page] !=
-                                      s_frame_text_generation;
+                page_text_stale = s_ui_dirty_regions != 0u;
                 if (text_due)
                     s_text_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
                 s_display_due_tick = now;
-                if (!s_render_full_page && page_text_stale)
+                if (page_text_stale)
                     render_scheduler_request_regions(&s_renderer,
-                                                     RENDER_DIRTY_STATUS |
-                                                         RENDER_DIRTY_READING);
-                if (!s_render_full_page && trend_needed)
+                                                     s_ui_dirty_regions);
+                if (trend_needed)
                 {
                     render_scheduler_request_trend(&s_renderer);
                     s_frame_has_trend_update = true;
