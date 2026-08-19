@@ -313,10 +313,10 @@ static void display_enable_after_initial_frame(void)
     if (initial_complete ||
         (s_frame_rendering && s_renderer.phase == RENDER_PHASE_IDLE))
     {
-        /* The diagnostic first-frame path renders on the visible page, so do
-         * not rewrite MISA with the same address. */
-        if (s_render_page != s_visible_page &&
-            lt7680_gfx_present_page(s_render_page) != LT7680_OK)
+        /* Re-submit the completed page even when it is numerically equal to
+         * the software-visible page. The controller may retain the previous
+         * MISA page after CVSSA is changed during boot. */
+        if (lt7680_gfx_present_page(s_render_page) != LT7680_OK)
             return;
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
