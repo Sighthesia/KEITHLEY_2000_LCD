@@ -105,6 +105,54 @@ into reset removes that interference. If the connect ever fails again with
 `unable to connect`, the first thing to reach for is the board reset button, not
 adapter speed or `reset_config` changes.
 
+## DAPLink / CMSIS-DAP variant (this board, verified 2026-08-19)
+
+The K2000 firmware **kills SWD as soon as it runs** — a plain `init` fails with
+`Error: Error connecting DP: cannot read IDR` unless the target is held in reset
+while connecting. The board's NRST is wired (TEL: `NRST ; ... U1.7 ...`), and
+DAPLink has **no TRST** (probe reports `nTRST = 0 nRESET = 1`).
+
+So the `openocd.cfg` for this probe is:
+
+```tcl
+set WORKAREASIZE 0x100
+source [find interface/cmsis-dap.cfg]
+source [find target/stm32f1x.cfg]
+reset_config srst_only srst_nogate connect_assert_srst
+```
+
+and the flash sequence uses `reset halt` (halt while held in reset), NOT `halt`:
+
+```
+openocd -f openocd.cfg \
+  -c "init" \
+  -c "reset halt" \
+  -c "program PATH/TO/firmware.elf verify" \
+  -c "reset" \
+  -c "shutdown"
+```
+
+Two non-obvious points:
+
+1. `connect_assert_srst` is what makes the SWD handshake pass on this board.
+   With it, a plain `halt` times out (`external reset detected`, `timed out while
+   waiting for target halted`); `reset halt` completes at the reset vector
+   (`pc: 0xfffffffe`). At `adapter speed 1000`, the halt may land deeper in
+   firmware (`pc: 0x08002800`); lowering speed to 100 kHz lands at the reset
+   vector — either still programs.
+
+2. `set WORKAREASIZE 0x100` must be set **before** `target/stm32f1x.cfg` is
+   sourced. Cheap CMSIS-DAP firmware (Horco `faed:4870`, `FW Version = Horco
+   v0.2`) cannot run OpenOCD's work-area async algorithms: the flash **write**
+   algorithm and the CRC-verify algorithm time out (`Error: timeout waiting for
+   algorithm, a target reset is recommended`, `flash write failed just before
+   address 0x8000000`) even though the **erase** algorithm succeeds. Shrinking
+   the work area makes OpenOCD fall back to direct single halfword writes
+   (`Warn : couldn't use block writes, falling back to single memory accesses`),
+   which is slow but reliable — the trailing `verify` then also uses direct
+   readback comparison (no CRC errors). Verified: `Programming Finished` +
+   `Verified OK`, flash readback matches the .elf bytes exactly.
+
 ## Verification
 
 - Clean flash completes without writing errors; `Preparing Flash` goes through

@@ -31,6 +31,14 @@
     -c "reset" -c "shutdown"
   ```
   若最后 reset 报错，写入其实已成功，按板上复位键启动即可；软件复位不可靠时手动按复位。
+- 烧录（DAPLink/CMSIS-DAP，Horco `faed:4870`，2026-08-19 已验证）：`openocd.cfg` 为 `reset_config srst_only srst_nogate connect_assert_srst`（DAPLink 无 TRST，且本板固件一运行就断 SWD，必须连接期间拉低 nRESET）+ `set WORKAREASIZE 0x100`（廉价 CMSIS-DAP 跑不了 work-area 异步写/CRC 算法会 `timeout waiting for algorithm`，缩小 work area 强制直接写）。序列用 `reset halt` 而非 `halt`：
+  ```
+  openocd -f openocd.cfg \
+    -c "init" -c "reset halt" \
+    -c "program KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD.elf verify" \
+    -c "reset" -c "shutdown"
+  ```
+  细节见 skill `.agents/skills/openocd-stm32-flash/SKILL.md` 的 DAPLink 变体一节。
 - 硬件验收（彩条里程碑，已通过）：`LT7680_SPI_SELFTEST=0` 正常路径 → `lt7680_reset()`（PA3 同时复位 LT7680 与面板）→ `hal_panel_init()`（9-bit SPI ST7701S 序列，`0x11`→`0x35 0x00`→`0x3A 0x66`→`0x29`）→ `lt7680_gfx_init()` → `lt7680_gfx_show_color_bars()`；115200 串口回 `STATUS=0x..` / `PASS color-bars enabled`，屏幕显示彩条。
 - 硬件验收（数字演示里程碑，build11 已通过）：正常启动全程黑屏（复位后立即 `REG[12h]=0x08` 关显示、不调用 `show_color_bars()`），`lt7680_gfx_clear()` 用**几何引擎矩形填充**（`DCR1=REG[76h]=0xE0`，不是 MRWDP 突发），回读全部 `PX(..)=0000`，`clear-ms=5`（突发 614400 字节需 ~2s 且并不清空画布）；数字在物理屏正中、方向正确，映射是**纯转置** `fb_x=uy; fb_y=ux`（960×320 横屏 UI 空间，无任何轴反转；x 反转=上下颠倒、y 反转=左右镜像）。`lt7680_gfx_peek_pixel()` 可经 MRWDP 回读画布像素用于诊断。
 - 硬件验收（趋势布局里程碑，build13 待烧录）：删除功能/参数/图表头三行，读数区扩为 y24..192（168px）；数字**左对齐**（64x128 单元，单位同尺寸并紧跟数值，电压档 `VDC/VAC` 拆出半高 `DC/AC` 用 32x64 `font_half`）；右侧右对齐信息列（Zin / Range / Rate / FILT REL MATH）。`main_display`/`render_scheduler` 已去掉三行相关 phase 与 dirty 位，Flash 62672B=95.63%（64KB 紧张，不宜再加字形）。
