@@ -925,7 +925,7 @@ static void __attribute__((unused)) rif_log_spi_registers(const char *phase)
     hal_uart_send_text("\r\n");
 }
 
-static void __attribute__((unused)) rif_init(void)
+static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
     uint8_t id[3] = {0u, 0u, 0u};
@@ -1328,7 +1328,7 @@ static void reading_scene_render(void)
                                          s_frame.trend_minimum ||
                                      s_page_trend_maximum[s_visible_page] !=
                                          s_frame.trend_maximum));
-            trend_needed = trend_due || s_trend_full_repaint;
+            trend_needed = trend_due;
             if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
@@ -1788,11 +1788,6 @@ int main(void)
                     }
                     else
                     {
-                        /* External-Flash access is not yet safe during display
-                         * bring-up. Keep the built-in text fallback active so
-                         * the RIF probe cannot disturb LT7680 rendering. */
-                        s_rif_ready = false;
-                        hal_uart_send_text("RIF probe deferred; using internal font\r\n");
                         /* Keep the display blank while SDRAM is cleared. Without this
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */
@@ -1818,15 +1813,19 @@ int main(void)
                             if (st == LT7680_OK)
                                 st = lt7680_gfx_present_page(s_visible_page);
                         }
-                        if (st != LT7680_OK)
-                        {
-                            hal_uart_send_text("FAIL clear=");
+                            if (st != LT7680_OK)
+                            {
+                                hal_uart_send_text("FAIL clear=");
                             hal_uart_send_hex8((uint8_t)st);
                             hal_uart_send_text("\r\n");
-                        }
-                        else
-                        {
-                            s_ready_page_mask = (uint8_t)(1u << s_visible_page);
+                            }
+                            else
+                            {
+                                /* Validate the external RIF while the panel is still
+                                 * blank. A failed probe leaves the internal font path
+                                 * active; a valid header enables external glyphs. */
+                                rif_init();
+                                s_ready_page_mask = (uint8_t)(1u << s_visible_page);
                             s_display_enabled = false;
                             hal_uart_send_text("PASS black page visible, building hidden frame\r\n");
                             /* Build the complete first frame on page 1 while page 0
