@@ -1,7 +1,7 @@
 # RIF Hardware-Accelerated Glyph Rendering
 
 Date: 2026-08-20
-Status: Approved design, renderer switch implemented behind a default-off flag
+Status: DMA staging blocked on hardware; renderer switch remains default-off
 
 ## Goal
 
@@ -23,6 +23,9 @@ blocking the 500 Hz sample feed.
 - LT7680 BTE rectangle blit primitive is already available as
   `lt7680_gfx_blit()` and has passed target compilation.
 - The two display canvas pages occupy SDRAM `0x000000` and `0x100000`.
+- Hardware acceptance on 2026-08-20: JEDEC and RIF header passed, but the
+  first DMA staging probe failed with `status=0x02`, `offset=0x00021000`, and
+  a black pixel sample. Full BTE rendering remains unaccepted.
 
 ## Architecture
 
@@ -128,6 +131,16 @@ frame-ms < 33
 fps near 30
 missed=0
 ```
+
+Current blocker:
+
+```text
+RIF DMA probe status=02 offset=00021000 sample=0000 checksum=117697CD
+```
+
+The next diagnostic must distinguish DMA start/status failure, destination
+window addressing failure, and a false-negative SDRAM readback sample before
+changing the cache or renderer implementation.
 
 ## Non-Goals
 
