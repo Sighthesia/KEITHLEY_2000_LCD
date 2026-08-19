@@ -1026,78 +1026,104 @@ static void rif_probe_send_hex32(uint32_t value)
     hal_uart_send_hex8((uint8_t)value);
 }
 
-static void rif_dma_probe(void)
+static bool rif_find_tile_char(uint16_t code, rif_tile_t *tile)
 {
     rif_entry_t entry;
-    rif_tile_t tile;
     uint8_t entry_data[RIF_READER_ENTRY_SIZE];
-    uint16_t sample = 0u;
-    uint16_t sample_next = 0u;
-    uint32_t checksum = 2166136261u;
     uint16_t i;
-    lt7680_status_t st = LT7680_ERR_PARAM;
-    bool found = false;
 
     for (i = 0u; i < s_rif_image.directory_count; i++)
     {
-        st = lt7680_flash_read(s_rif_image.flash_base +
-                                   s_rif_image.directory_offset +
-                                   (uint32_t)i * RIF_READER_ENTRY_SIZE,
-                               entry_data, RIF_READER_ENTRY_SIZE);
-        if (st != LT7680_OK ||
+        if (lt7680_flash_read(s_rif_image.flash_base +
+                              s_rif_image.directory_offset +
+                              (uint32_t)i * RIF_READER_ENTRY_SIZE,
+                              entry_data, RIF_READER_ENTRY_SIZE) != LT7680_OK ||
             rif_reader_parse_entry(&s_rif_image, entry_data,
                                    RIF_READER_ENTRY_SIZE, &entry) != RIF_OK)
-            break;
+            return false;
         if (rif_reader_find_glyph(&s_rif_image, &entry, RIF_KIND_DIGIT_CHAR,
-                                  (uint16_t)'8', &tile) == RIF_OK)
-        {
-            found = true;
-            break;
-        }
+                                  code, tile) == RIF_OK)
+            return true;
     }
+    return false;
+}
 
-    if (found && tile.width == 64u && tile.height == 128u &&
-        tile.stride == 128u && tile.size == 16384u)
-    {
-        st = lt7680_flash_dma_to_sdram(tile.offset, 0x200000u, 128u, 4u,
-                                       320u);
-        if (st == LT7680_OK)
-        {
-            /* peek_pixel addresses the active canvas, so copy two staged
-             * pixels into the still-hidden canvas before reading them back. */
-            st = lt7680_gfx_blit(s_render_page, 0x200000u, 320u, 0u, 0u,
-                                 2u, 1u);
-        }
-        if (st == LT7680_OK)
-        {
-            st = lt7680_gfx_peek_pixel(0u, 0u, &sample);
-            if (st == LT7680_OK)
-                st = lt7680_gfx_peek_pixel(1u, 0u, &sample_next);
-            if (st == LT7680_OK)
-            {
-                checksum ^= sample;
-                checksum *= 16777619u;
-                checksum ^= sample_next;
-                checksum *= 16777619u;
-                s_rif_dma_probe_passed =
-                    (sample != 0x0000u && sample != 0xFFFFu) ||
-                    (sample_next != 0x0000u && sample_next != 0xFFFFu);
-                if (!s_rif_dma_probe_passed)
-                    st = LT7680_ERR_BUS;
-            }
-        }
-    }
+static void rif_dma_snapshot_send(const char *label,
+                                  uint32_t source, uint32_t target,
+                                  const lt7680_flash_dma_snapshot_t *before,
+                                  const lt7680_flash_dma_snapshot_t *after,
+                                  lt7680_status_t transfer_status)
+{
+    uint8_t i;
 
-    hal_uart_send_text("RIF DMA probe status=");
-    hal_uart_send_hex8((uint8_t)st);
-    hal_uart_send_text(" offset=");
-    rif_probe_send_hex32(found ? tile.offset : 0u);
-    hal_uart_send_text(" sample=");
-    hal_uart_send_hex8((uint8_t)(sample >> 8));
-    hal_uart_send_hex8((uint8_t)sample);
-    hal_uart_send_text(" checksum=");
-    rif_probe_send_hex32(checksum);
+    hal_uart_send_text("RIF DMA regs before=");
+    hal_uart_send_hex8(before->b6);
+    hal_uart_send_hex8(before->b7);
+    hal_uart_send_hex8(before->b9);
+    hal_uart_send_hex8(before->ba);
+    hal_uart_send_hex8(before->bb);
+    for (i = 0u; i < sizeof(before->bc_cb); i++)
+        hal_uart_send_hex8(before->bc_cb[i]);
+    hal_uart_send_text(" after=");
+    hal_uart_send_hex8(after->b6);
+    hal_uart_send_hex8(after->b7);
+    hal_uart_send_hex8(after->b9);
+    hal_uart_send_hex8(after->ba);
+    hal_uart_send_hex8(after->bb);
+    for (i = 0u; i < sizeof(after->bc_cb); i++)
+        hal_uart_send_hex8(after->bc_cb[i]);
+    hal_uart_send_text(" status=");
+    hal_uart_send_hex8((uint8_t)transfer_status);
+    hal_uart_send_text(" source=");
+    rif_probe_send_hex32(source);
+    hal_uart_send_text(" target=");
+    rif_probe_send_hex32(target);
+    hal_uart_send_text(" cvssa=");
+    rif_probe_send_hex32(after->cvssa);
+    hal_uart_send_text(" stride=");
+    hal_uart_send_hex8((uint8_t)(after->canvas_stride >> 8));
+    hal_uart_send_hex8((uint8_t)after->canvas_stride);
+    hal_uart_send_text(" dma_status=");
+    hal_uart_send_hex8(after->b6);
+    hal_uart_send_text(" core=");
+    hal_uart_send_hex8(after->core_status);
+    hal_uart_send_text(" sdram=");
+    hal_uart_send_hex8(after->sdram_status);
+    hal_uart_send_text(" sample0=UNSUPPORTED sample1=UNSUPPORTED method=");
+    hal_uart_send_text(label);
     hal_uart_send_text("\r\n");
+}
+
+static void rif_dma_probe(void)
+{
+    static const uint16_t codes[] = {'8', '7'};
+    static const uint32_t targets[] = {0x200000u, 0x300000u};
+    rif_tile_t tile;
+    lt7680_flash_dma_snapshot_t before;
+    lt7680_flash_dma_snapshot_t after;
+    uint8_t code_index;
+    uint8_t target_index;
+
+    /* This is deliberately a register/status probe. The current LT7680 API
+     * has no safe absolute SDRAM readback, so sample fields say UNSUPPORTED
+     * instead of copying data into either canvas page or guessing an address. */
+    for (code_index = 0u; code_index < 2u; code_index++)
+    {
+        if (!rif_find_tile_char(codes[code_index], &tile) ||
+            tile.width != 64u || tile.height != 128u ||
+            tile.stride != 128u || tile.size != 16384u)
+            continue;
+        for (target_index = 0u; target_index < 2u; target_index++)
+        {
+            (void)lt7680_flash_dma_read_snapshot(&before);
+            lt7680_status_t st = lt7680_flash_dma_to_sdram(
+                tile.offset, targets[target_index], 8u, 4u, 320u);
+            (void)lt7680_flash_dma_read_snapshot(&after);
+            rif_dma_snapshot_send(code_index == 0u ? "tile8-paired" :
+                                  "tile7-paired", tile.offset,
+                                  targets[target_index], &before, &after, st);
+        }
+    }
 }
 
 static void rif_init(void)

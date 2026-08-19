@@ -511,6 +511,67 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
     return st != LT7680_OK ? st : restore_st;
 }
 
+lt7680_status_t lt7680_flash_dma_read_snapshot(
+    lt7680_flash_dma_snapshot_t *snapshot)
+{
+    uint8_t value;
+    lt7680_status_t st = LT7680_OK;
+    uint8_t reg;
+
+    if (snapshot == 0) {
+        return LT7680_ERR_PARAM;
+    }
+    snapshot->b6 = 0u;
+    snapshot->b7 = 0u;
+    snapshot->b9 = 0u;
+    snapshot->ba = 0u;
+    snapshot->bb = 0u;
+    snapshot->cvssa = 0u;
+    snapshot->canvas_stride = 0u;
+    snapshot->core_status = 0u;
+    snapshot->sdram_status = 0u;
+    for (reg = 0u; reg < sizeof(snapshot->bc_cb); reg++)
+        snapshot->bc_cb[reg] = 0u;
+    snapshot->status = LT7680_ERR_BUS;
+    st = lt7680_read_reg(LT7680_REG_DMA_CTRL, &snapshot->b6);
+    if (st != LT7680_OK) goto fail;
+    st = lt7680_read_reg(LT7680_REG_SFL_CTRL, &snapshot->b7);
+    if (st != LT7680_OK) goto fail;
+    st = lt7680_read_reg(LT7680_REG_SPIMCR2, &snapshot->b9);
+    if (st != LT7680_OK) goto fail;
+    st = lt7680_read_reg(LT7680_REG_SPIMSR, &snapshot->ba);
+    if (st != LT7680_OK) goto fail;
+    st = lt7680_read_reg(LT7680_REG_SPI_DIV, &snapshot->bb);
+    if (st != LT7680_OK) goto fail;
+    for (reg = LT7680_REG_DMA_SSTR; reg <= (LT7680_REG_DMA_SWTH + 1u);
+         reg++) {
+        st = lt7680_read_reg(reg, &snapshot->bc_cb[reg - LT7680_REG_DMA_SSTR]);
+        if (st != LT7680_OK) goto fail;
+    }
+    snapshot->cvssa = 0u;
+    for (reg = 0u; reg < 4u; reg++) {
+        st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + reg), &value);
+        if (st != LT7680_OK) goto fail;
+        snapshot->cvssa |= (uint32_t)value << (8u * reg);
+    }
+    st = lt7680_read_reg(LT7680_REG_CVS_IMWTH0, &value);
+    if (st != LT7680_OK) goto fail;
+    snapshot->canvas_stride = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVS_IMWTH0 + 1u), &value);
+    if (st != LT7680_OK) goto fail;
+    snapshot->canvas_stride |= (uint16_t)value << 8;
+    st = lt7680_read_status(&snapshot->core_status);
+    if (st != LT7680_OK) goto fail;
+    st = lt7680_read_reg(LT7680_REG_SDRAM_CTRL, &snapshot->sdram_status);
+    if (st != LT7680_OK) goto fail;
+    snapshot->status = LT7680_OK;
+    return LT7680_OK;
+
+fail:
+    snapshot->status = st;
+    return st;
+}
+
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3])
 {
     const uint8_t command[4] = {0x9Fu, 0u, 0u, 0u};

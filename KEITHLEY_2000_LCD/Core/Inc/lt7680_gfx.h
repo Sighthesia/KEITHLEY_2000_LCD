@@ -75,6 +75,22 @@ typedef struct {
     lt7680_status_t sfcs1_status;
 } lt7680_flash_cs_diag_t;
 
+/* Read-only DMA register/status snapshot. bc_cb is the live BC..CB register
+ * window, including the programmed source address and transfer geometry. */
+typedef struct {
+    uint8_t b6;
+    uint8_t b7;
+    uint8_t b9;
+    uint8_t ba;
+    uint8_t bb;
+    uint8_t bc_cb[16];
+    uint32_t cvssa;
+    uint16_t canvas_stride;
+    uint8_t core_status;
+    uint8_t sdram_status;
+    lt7680_status_t status;
+} lt7680_flash_dma_snapshot_t;
+
 /* Read-only diagnostic for the existing RIF header read at address zero. */
 typedef struct {
     uint8_t attempted;
@@ -122,6 +138,8 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 lt7680_status_t lt7680_flash_jedec_diagnostic(lt7680_flash_jedec_diag_t *diag);
 lt7680_status_t lt7680_flash_cs_diagnostic(lt7680_flash_cs_diag_t *diag);
+lt7680_status_t lt7680_flash_dma_read_snapshot(
+    lt7680_flash_dma_snapshot_t *snapshot);
 void lt7680_flash_get_b7_probe(lt7680_flash_b7_probe_t *probe);
 void lt7680_flash_get_spi_snapshot(lt7680_flash_spi_snapshot_t *probe);
 void lt7680_flash_get_fifo_probe(lt7680_flash_fifo_probe_t *probe);
