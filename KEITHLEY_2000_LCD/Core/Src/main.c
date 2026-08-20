@@ -1106,7 +1106,7 @@ static void rif_dma_probe(void)
     static const uint16_t probe_x = 16u;
     static const uint16_t probe_y = 16u;
     static const uint16_t probe_w = 64u;
-    static const uint16_t probe_heights[] = {4u, 8u, 16u, 32u};
+    static const uint16_t probe_heights[] = {4u, 8u, 16u, 31u};
     rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
     lt7680_flash_dma_snapshot_t before;
     lt7680_flash_dma_snapshot_t after;
