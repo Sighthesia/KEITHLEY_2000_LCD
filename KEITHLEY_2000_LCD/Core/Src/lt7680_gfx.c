@@ -132,6 +132,7 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
 static lt7680_status_t wait_2d_idle(void);
 static lt7680_status_t wait_dma_idle(void);
+static lt7680_status_t wait_bte_idle(void);
 static lt7680_status_t wr32le(uint8_t reg, uint32_t val);
 static lt7680_status_t wr13(uint8_t reg, uint16_t value);
 static lt7680_status_t wr16le(uint8_t reg, uint16_t val);
@@ -997,7 +998,7 @@ lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
     if (st != LT7680_OK) return st;
-    return wait_2d_idle();
+    return wait_bte_idle();
 }
 
 /* Copy an RGB565 rectangle from an absolute SDRAM source to the given canvas
@@ -1043,7 +1044,7 @@ lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
     if (st != LT7680_OK) return st;
-    return wait_2d_idle();
+    return wait_bte_idle();
 }
 
 lt7680_status_t lt7680_gfx_show_color_bars(void)
@@ -1291,6 +1292,23 @@ static lt7680_status_t wait_dma_idle(void)
             return LT7680_OK;
     }
     (void)write_reg(LT7680_REG_DMA_CTRL, 0x00u);
+    return LT7680_ERR_TIMEOUT;
+}
+
+/* REG[90h] bit4 is the BTE busy flag. Unlike CORE_BUSY, it identifies the
+ * specific BTE operation started by lt7680_gfx_blit(). */
+static lt7680_status_t wait_bte_idle(void)
+{
+    uint8_t bte_ctrl0 = 0u;
+
+    for (uint16_t i = 0u; i < 1000u; i++) {
+        lt7680_status_t st = lt7680_read_reg(LT7680_REG_BTE_CTRL0,
+                                              &bte_ctrl0);
+        if (st != LT7680_OK)
+            return st;
+        if ((bte_ctrl0 & 0x10u) == 0u)
+            return LT7680_OK;
+    }
     return LT7680_ERR_TIMEOUT;
 }
 
