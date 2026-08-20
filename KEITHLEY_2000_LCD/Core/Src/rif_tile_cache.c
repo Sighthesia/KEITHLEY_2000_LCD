@@ -148,11 +148,11 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             entry->ready = 0u;
             return st;
         }
-    st = lt7680_gfx_set_canvas_width(cache_width);
-    if (st != LT7680_OK) {
-        entry->ready = 0u;
-        return st;
-    }
+        st = lt7680_gfx_set_canvas_width(cache_width);
+        if (st != LT7680_OK) {
+            entry->ready = 0u;
+            return st;
+        }
 
         for (col = 0u; col < tile->width; col++) {
             for (cache_row = 0u; cache_row < chunk_rows; cache_row++) {
