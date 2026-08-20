@@ -1261,51 +1261,6 @@ static bool rif_cache_pixel_probe(void)
     return ok;
 }
 
-static bool rif_bte_cache_visual_probe(void)
-{
-    static const uint32_t cache_base = 0x300000u;
-    static const uint16_t colors[] = {
-        0xF800u, 0x07E0u, 0x001Fu, 0xFFFFu
-    };
-    lt7680_status_t st;
-    uint16_t row;
-    uint16_t col;
-    bool ok = true;
-
-    st = lt7680_gfx_set_canvas_base(cache_base);
-    if (st == LT7680_OK)
-        st = lt7680_gfx_set_canvas_width(128u);
-    for (row = 0u; st == LT7680_OK && row < 8u; row++) {
-        uint16_t line[16];
-        for (col = 0u; col < 16u; col++)
-            line[col] = colors[(uint16_t)(col / 4u)];
-        st = lt7680_gfx_write_pixels(0u, row, line, 16u);
-    }
-    if (st == LT7680_OK)
-        st = lt7680_gfx_blit(1u, cache_base, 128u, 16u, 16u, 16u, 8u);
-    if (st == LT7680_OK)
-        st = lt7680_gfx_present_page(1u);
-    if (st == LT7680_OK)
-        st = lt7680_write_reg(0x12u, 0x48u);
-    if (st == LT7680_OK)
-        (void)lt7680_delay_ms(300u);
-    else
-        ok = false;
-
-    if (lt7680_write_reg(0x12u, 0x08u) != LT7680_OK)
-        ok = false;
-    if (lt7680_gfx_select_canvas_page(1u) != LT7680_OK ||
-        lt7680_gfx_clear(0x0000u) != LT7680_OK)
-        ok = false;
-    if (lt7680_gfx_select_canvas_page(0u) != LT7680_OK ||
-        lt7680_gfx_present_page(0u) != LT7680_OK)
-        ok = false;
-
-    hal_uart_send_text("RIF BTE cache visual probe=");
-    hal_uart_send_text(ok ? "PASS\r\n" : "FAIL\r\n");
-    return ok;
-}
-
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -1470,7 +1425,9 @@ static void rif_init(void)
         bool cache_pixel_ok = rif_cache_pixel_probe();
         s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
     }
-    (void)rif_bte_cache_visual_probe();
+    /* The BTE probe currently reports command completion only; until its
+     * pixels are independently accepted, do not present its diagnostic page
+     * during normal boot. */
     if (s_rif_dma_probe_passed)
     {
         bool cache_ready = true;
