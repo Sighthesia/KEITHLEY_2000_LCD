@@ -16,6 +16,8 @@ typedef struct {
 } rif_tile_cache_entry_t;
 
 void rif_tile_cache_init(void);
+lt7680_status_t rif_tile_cache_lookup(uint32_t kind, uint16_t code,
+                                      rif_tile_cache_entry_t *entry);
 lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
                                         const rif_tile_t *tile,
                                         rif_tile_cache_entry_t *entry);

@@ -18,7 +18,7 @@
     (RIF_TILE_CACHE_LARGE_WIDTH * RIF_TILE_CACHE_LARGE_HEIGHT * 2u)
 #define RIF_TILE_CACHE_HALF_BYTES \
     (RIF_TILE_CACHE_HALF_WIDTH * RIF_TILE_CACHE_HALF_HEIGHT * 2u)
-#define RIF_TILE_CACHE_SLOT_COUNT 8u
+#define RIF_TILE_CACHE_SLOT_COUNT 16u
 
 static rif_tile_cache_entry_t s_entries[RIF_TILE_CACHE_SLOT_COUNT];
 static uint32_t s_next_address;
@@ -187,4 +187,22 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
 
     entry->ready = 0u;
     return LT7680_ERR_BUSY;
+}
+
+lt7680_status_t rif_tile_cache_lookup(uint32_t kind, uint16_t code,
+                                      rif_tile_cache_entry_t *entry)
+{
+    uint8_t i;
+
+    if (entry == NULL || kind == 0u)
+        return LT7680_ERR_PARAM;
+    for (i = 0u; i < RIF_TILE_CACHE_SLOT_COUNT; i++) {
+        if (s_entries[i].ready != 0u && s_entries[i].kind == kind &&
+            s_entries[i].code == code) {
+            *entry = s_entries[i];
+            return LT7680_OK;
+        }
+    }
+    entry->ready = 0u;
+    return LT7680_ERR_UNSUPPORTED;
 }

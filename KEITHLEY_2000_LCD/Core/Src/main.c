@@ -838,8 +838,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         uint16_t fb_x;
         uint16_t fb_y;
 
-        st = rif_tile_cache_prepare(s_rif_draw_job.kind, s_rif_draw_job.code,
-                                    &s_rif_draw_job.tile, &entry);
+        st = rif_tile_cache_lookup(s_rif_draw_job.kind, s_rif_draw_job.code,
+                                   &entry);
         if (st == LT7680_OK && entry.ready != 0u && entry.width == 128u &&
             entry.height == 64u && entry.stride >= entry.width)
         {
@@ -1373,36 +1373,29 @@ static void rif_init(void)
     rif_dma_probe();
     if (s_rif_dma_probe_passed)
     {
-        rif_tile_cache_entry_t cache_entry;
-        rif_tile_t cache_tile;
-        rif_entry_t cache_dir_entry;
-        uint8_t cache_data[RIF_READER_ENTRY_SIZE];
-        uint16_t i;
+        bool cache_ready = true;
+        uint8_t digit;
 
-        for (i = 0u; i < s_rif_image.directory_count; i++)
+        for (digit = 0u; digit <= 9u; digit++)
         {
-            st = lt7680_flash_read(s_rif_image.flash_base +
-                                       s_rif_image.directory_offset +
-                                       (uint32_t)i * RIF_READER_ENTRY_SIZE,
-                                   cache_data, sizeof(cache_data));
-            if (st == LT7680_OK &&
-                rif_reader_parse_entry(&s_rif_image, cache_data,
-                                       sizeof(cache_data), &cache_dir_entry) ==
-                    RIF_OK &&
-                rif_reader_find_glyph(&s_rif_image, &cache_dir_entry,
-                                      RIF_KIND_DIGIT_CHAR, (uint16_t)'8',
-                                      &cache_tile) == RIF_OK)
+            rif_tile_t cache_tile;
+            rif_tile_cache_entry_t cache_entry;
+
+            if (!rif_find_tile_char((uint16_t)('0' + digit), &cache_tile))
             {
-                st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
-                                             (uint16_t)'8', &cache_tile,
-                                             &cache_entry);
-                break;
+                cache_ready = false;
+                continue;
             }
+            st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
+                                        (uint16_t)('0' + digit), &cache_tile,
+                                        &cache_entry);
+            if (st != LT7680_OK || cache_entry.ready == 0u)
+                cache_ready = false;
         }
-        if (st != LT7680_OK)
+        if (!cache_ready)
             hal_uart_send_text("RIF tile cache unavailable\r\n");
         else
-            hal_uart_send_text("RIF tile cache ready\r\n");
+            hal_uart_send_text("RIF digit cache ready\r\n");
     }
     hal_uart_send_text("RIF BTE renderer=ON\r\n");
     hal_uart_send_text("RIF external digits ready\r\n");
