@@ -1102,7 +1102,7 @@ static void rif_dma_probe(void)
     static const uint16_t probe_x = 16u;
     static const uint16_t probe_y = 16u;
     static const uint16_t probe_w = 64u;
-    static const uint16_t probe_h = 32u;
+    static const uint16_t probe_h = 4u;
     rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
     lt7680_flash_dma_snapshot_t before;
     lt7680_flash_dma_snapshot_t after;
@@ -1112,7 +1112,7 @@ static void rif_dma_probe(void)
     lt7680_status_t restore_status = LT7680_OK;
     bool visual_ready = false;
 
-    /* DMA writes a 64x32 RGB565 crop: 128 source bytes per row and a 64-pixel
+    /* DMA writes a 64x4 RGB565 crop: 128 source bytes per row and a 64-pixel
      * destination stride. The staging address is outside both canvas pages;
      * the current API cannot target a hidden page directly. */
     if (rif_find_tile_char((uint16_t)'8', &tile) &&
