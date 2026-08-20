@@ -24,6 +24,7 @@ static rif_tile_cache_entry_t s_entries[RIF_TILE_CACHE_SLOT_COUNT];
 static uint32_t s_next_address;
 static uint16_t s_chunk_pixels[RIF_TILE_CACHE_MAX_DMA_ROWS *
                                RIF_TILE_CACHE_LARGE_WIDTH];
+static uint16_t s_line_pixels[RIF_TILE_CACHE_MAX_DMA_ROWS];
 
 static uint32_t cache_tile_bytes(const rif_tile_t *tile, uint16_t *cache_width,
                                  uint16_t *cache_height)
@@ -147,24 +148,25 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             entry->ready = 0u;
             return st;
         }
-        st = lt7680_gfx_set_canvas_width(cache_width);
-        if (st != LT7680_OK) {
-            entry->ready = 0u;
-            return st;
-        }
+    st = lt7680_gfx_set_canvas_width(cache_width);
+    if (st != LT7680_OK) {
+        entry->ready = 0u;
+        return st;
+    }
 
-        for (cache_row = 0u; cache_row < chunk_rows; cache_row++) {
-            st = lt7680_gfx_write_pixels((uint16_t)(row + cache_row), 0u,
-                                         &s_chunk_pixels[(uint32_t)cache_row *
-                                                         tile->width],
-                                         tile->width);
+        for (col = 0u; col < tile->width; col++) {
+            for (cache_row = 0u; cache_row < chunk_rows; cache_row++) {
+                s_line_pixels[cache_row] = s_chunk_pixels[(uint32_t)cache_row *
+                                                          tile->width + col];
+            }
+            st = lt7680_gfx_write_pixels(row, col, s_line_pixels, chunk_rows);
             if (st != LT7680_OK) {
                 entry->ready = 0u;
                 return st;
             }
         }
 
-        cache_address += (uint32_t)chunk_rows * cache_width * 2u;
+        cache_address += (uint32_t)chunk_rows * tile->width * 2u;
         row = (uint16_t)(row + chunk_rows);
     }
 
