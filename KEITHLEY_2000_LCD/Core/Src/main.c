@@ -55,10 +55,9 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
-/* The complete cached-tile BTE renderer remains opt-in until its hardware
- * orientation and pixel results have been accepted. */
+/* Enable the cached-tile path for the hardware acceptance build. */
 #ifndef RIF_BTE_RENDERER
-#define RIF_BTE_RENDERER 0U
+#define RIF_BTE_RENDERER 1U
 #endif
 
 /* Demo feed: synthesize K2000 host frames on a timer so the full
@@ -1194,6 +1193,7 @@ static void rif_dma_probe(void)
         hal_uart_send_text(" visual=NOT-DISPLAYED");
     }
     hal_uart_send_text("\r\n");
+    s_rif_dma_probe_passed = dma_status == LT7680_OK;
 
     /* Do not leave diagnostic pixels or page identity visible to the normal
      * boot renderer, regardless of which probe step failed. */
@@ -1401,7 +1401,10 @@ static void rif_init(void)
         }
         if (st != LT7680_OK)
             hal_uart_send_text("RIF tile cache unavailable\r\n");
+        else
+            hal_uart_send_text("RIF tile cache ready\r\n");
     }
+    hal_uart_send_text("RIF BTE renderer=ON\r\n");
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 
