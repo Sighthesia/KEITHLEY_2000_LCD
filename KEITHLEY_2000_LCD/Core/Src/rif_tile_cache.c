@@ -112,35 +112,12 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             chunk_rows = RIF_TILE_CACHE_MAX_DMA_ROWS;
 
         flash_address = tile->offset + (uint32_t)row * tile->stride;
-        st = lt7680_flash_dma_to_sdram(flash_address, RIF_TILE_CACHE_STAGING_BASE,
-                                       tile->stride, chunk_rows,
-                                       tile->width);
+        st = lt7680_flash_read(flash_address,
+                               (uint8_t *)s_chunk_pixels,
+                               (uint16_t)(tile->stride * chunk_rows));
         if (st != LT7680_OK) {
             entry->ready = 0u;
             return st;
-        }
-
-        st = lt7680_gfx_set_canvas_base(RIF_TILE_CACHE_STAGING_BASE);
-        if (st != LT7680_OK) {
-            entry->ready = 0u;
-            return st;
-        }
-        st = lt7680_gfx_set_canvas_width(tile->width);
-        if (st != LT7680_OK) {
-            entry->ready = 0u;
-            return st;
-        }
-
-        for (cache_row = 0u; cache_row < chunk_rows; cache_row++) {
-            for (col = 0u; col < tile->width; col++) {
-                st = lt7680_gfx_peek_pixel(col, cache_row,
-                                           &s_chunk_pixels[(uint32_t)cache_row *
-                                                           tile->width + col]);
-                if (st != LT7680_OK) {
-                    entry->ready = 0u;
-                    return st;
-                }
-            }
         }
 
         st = lt7680_gfx_set_canvas_base(cache_address);
@@ -156,8 +133,8 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
 
         for (col = 0u; col < tile->width; col++) {
             for (cache_row = 0u; cache_row < chunk_rows; cache_row++) {
-                s_line_pixels[cache_row] = s_chunk_pixels[(uint32_t)cache_row *
-                                                          tile->width + col];
+                uint32_t pixel_index = (uint32_t)cache_row * tile->stride + col * 2u;
+                s_line_pixels[cache_row] = (uint16_t)s_chunk_pixels[pixel_index / 2u];
             }
             st = lt7680_gfx_write_pixels(row, col, s_line_pixels, chunk_rows);
             if (st != LT7680_OK) {
