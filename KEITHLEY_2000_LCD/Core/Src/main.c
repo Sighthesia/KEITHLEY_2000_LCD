@@ -1194,8 +1194,6 @@ static void rif_dma_probe(void)
         hal_uart_send_text(" visual=NOT-DISPLAYED");
     }
     hal_uart_send_text("\r\n");
-    s_rif_dma_probe_passed = dma_status == LT7680_OK;
-
     /* Do not leave diagnostic pixels or page identity visible to the normal
      * boot renderer, regardless of which probe step failed. */
     if (lt7680_write_reg(0x12u, 0x08u) != LT7680_OK)
@@ -1405,7 +1403,7 @@ static void rif_init(void)
     }
     s_rif_dma_probe_passed = false;
     rif_dma_probe();
-    (void)rif_cache_pixel_probe();
+    s_rif_dma_probe_passed = s_rif_dma_probe_passed && rif_cache_pixel_probe();
     if (s_rif_dma_probe_passed)
     {
         bool cache_ready = true;
@@ -1436,7 +1434,12 @@ static void rif_init(void)
         else
             hal_uart_send_text("RIF digit cache ready\r\n");
     }
-    hal_uart_send_text("RIF BTE renderer=ON\r\n");
+#if RIF_BTE_RENDERER
+    hal_uart_send_text("RIF BTE renderer=");
+    hal_uart_send_text(s_rif_dma_probe_passed ? "ON\r\n" : "OFF\r\n");
+#else
+    hal_uart_send_text("RIF BTE renderer=OFF (compile)\r\n");
+#endif
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 
