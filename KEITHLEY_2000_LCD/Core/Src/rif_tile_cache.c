@@ -166,7 +166,7 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             }
         }
 
-        cache_address += (uint32_t)chunk_rows * tile->width * 2u;
+        cache_address += (uint32_t)tile->width * chunk_rows * 2u;
         row = (uint16_t)(row + chunk_rows);
     }
 
