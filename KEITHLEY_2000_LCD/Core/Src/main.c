@@ -55,9 +55,10 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
-/* Enable the cached-tile path for the hardware acceptance build. */
+/* Keep the cached-tile path disabled until cache pixels pass hardware
+ * validation. DMA completion alone does not validate the BTE source image. */
 #ifndef RIF_BTE_RENDERER
-#define RIF_BTE_RENDERER 1U
+#define RIF_BTE_RENDERER 0U
 #endif
 
 /* Demo feed: synthesize K2000 host frames on a timer so the full
@@ -1211,6 +1212,39 @@ static void rif_dma_probe(void)
         hal_uart_send_text("RIF DMA visual restore=BLACK-PAGE-0\r\n");
 }
 
+static bool rif_cache_pixel_probe(void)
+{
+    static const uint32_t cache_base = 0x300000u;
+    static const uint16_t pattern[] = {0x07E0u, 0xF800u, 0x001Fu, 0xFFFFu};
+    lt7680_flash_dma_snapshot_t saved;
+    uint16_t pixel;
+    uint8_t i;
+    bool ok = true;
+
+    if (lt7680_flash_dma_read_snapshot(&saved) != LT7680_OK ||
+        lt7680_gfx_set_canvas_base(cache_base) != LT7680_OK ||
+        lt7680_gfx_set_canvas_width(128u) != LT7680_OK)
+        return false;
+
+    for (i = 0u; i < (uint8_t)(sizeof(pattern) / sizeof(pattern[0])); i++) {
+        if (lt7680_gfx_write_pixels((uint16_t)(i * 4u), 0u, &pattern[i], 1u) !=
+            LT7680_OK ||
+            lt7680_gfx_peek_pixel((uint16_t)(i * 4u), 0u, &pixel) != LT7680_OK ||
+            pixel != pattern[i]) {
+            ok = false;
+            break;
+        }
+    }
+
+    if (lt7680_gfx_set_canvas_base(saved.cvssa) != LT7680_OK ||
+        lt7680_gfx_set_canvas_width(saved.canvas_stride) != LT7680_OK)
+        ok = false;
+
+    hal_uart_send_text("RIF cache pixel probe=");
+    hal_uart_send_text(ok ? "PASS\r\n" : "FAIL\r\n");
+    return ok;
+}
+
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -1371,6 +1405,7 @@ static void rif_init(void)
     }
     s_rif_dma_probe_passed = false;
     rif_dma_probe();
+    (void)rif_cache_pixel_probe();
     if (s_rif_dma_probe_passed)
     {
         bool cache_ready = true;
