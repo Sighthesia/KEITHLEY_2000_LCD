@@ -498,7 +498,12 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
                                      block_width_pixels);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_HIGH, height);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH,
-                                     block_width_pixels);
+                                      block_width_pixels);
+    /* Release the host-controlled Flash transaction before DMA takes over
+     * SFCS. Keeping the manual active-CS value here can leave DMA_START stuck
+     * while the serial-flash state machine waits for ownership. */
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPIMCR2,
+                                        LT7680_SPI_CTRL_IDLE);
     if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
     if (st == LT7680_OK) st = wait_2d_idle();
 
