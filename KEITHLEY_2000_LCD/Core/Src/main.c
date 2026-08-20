@@ -1374,20 +1374,24 @@ static void rif_init(void)
     if (s_rif_dma_probe_passed)
     {
         bool cache_ready = true;
-        uint8_t digit;
+        static const char cache_chars[] =
+            "0123456789.+-Ee%mukKMWVOhDAC?RFLHzs";
+        uint16_t char_index;
 
-        for (digit = 0u; digit <= 9u; digit++)
+        for (char_index = 0u; cache_chars[char_index] != '\0'; char_index++)
         {
             rif_tile_t cache_tile;
             rif_tile_cache_entry_t cache_entry;
 
-            if (!rif_find_tile_char((uint16_t)('0' + digit), &cache_tile))
+            if (!rif_find_tile_char((uint16_t)cache_chars[char_index],
+                                    &cache_tile))
             {
                 cache_ready = false;
                 continue;
             }
             st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
-                                        (uint16_t)('0' + digit), &cache_tile,
+                                        (uint16_t)cache_chars[char_index],
+                                        &cache_tile,
                                         &cache_entry);
             if (st != LT7680_OK || cache_entry.ready == 0u)
                 cache_ready = false;

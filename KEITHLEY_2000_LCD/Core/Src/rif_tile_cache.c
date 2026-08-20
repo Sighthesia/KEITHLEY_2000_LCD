@@ -18,7 +18,7 @@
     (RIF_TILE_CACHE_LARGE_WIDTH * RIF_TILE_CACHE_LARGE_HEIGHT * 2u)
 #define RIF_TILE_CACHE_HALF_BYTES \
     (RIF_TILE_CACHE_HALF_WIDTH * RIF_TILE_CACHE_HALF_HEIGHT * 2u)
-#define RIF_TILE_CACHE_SLOT_COUNT 16u
+#define RIF_TILE_CACHE_SLOT_COUNT 40u
 
 static rif_tile_cache_entry_t s_entries[RIF_TILE_CACHE_SLOT_COUNT];
 static uint32_t s_next_address;
