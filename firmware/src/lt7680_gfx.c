@@ -893,6 +893,11 @@ lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565)
     if (st != LT7680_OK) {
         return st;
     }
+    /* The first MRWDP read cycle is a dummy cycle on LT7680A-R. */
+    st = lt7680_read_reg(REG_MRWDP, &lo);
+    if (st != LT7680_OK) {
+        return st;
+    }
     st = lt7680_read_reg(REG_MRWDP, &lo);
     if (st != LT7680_OK) {
         return st;

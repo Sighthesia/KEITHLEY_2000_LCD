@@ -131,6 +131,7 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 /* forward decls (defined after lt7680_gfx_clear / lt7680_gfx_fill_rect) */
 static lt7680_status_t set_fg_color16(uint16_t rgb565);
 static lt7680_status_t wait_2d_idle(void);
+static lt7680_status_t wait_dma_idle(void);
 static lt7680_status_t wr32le(uint8_t reg, uint32_t val);
 static lt7680_status_t wr13(uint8_t reg, uint16_t value);
 static lt7680_status_t wr16le(uint8_t reg, uint16_t val);
@@ -505,7 +506,7 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
      * the plan documents B9=0x3C for the Flash setup and B6=0x01 as the
      * start value. */
     if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
-    if (st == LT7680_OK) st = wait_2d_idle();
+    if (st == LT7680_OK) st = wait_dma_idle();
 
     if (wr32le(LT7680_REG_CVSSA0, saved_cvssa) != LT7680_OK) {
         restore_st = LT7680_ERR_BUS;
@@ -1208,6 +1209,11 @@ lt7680_status_t lt7680_gfx_peek_pixel(uint16_t x, uint16_t y, uint16_t *rgb565)
     if (st != LT7680_OK) {
         return st;
     }
+    /* The first MRWDP read cycle is a dummy cycle on LT7680A-R. */
+    st = lt7680_read_reg(LT7680_REG_MRWDP, &lo);
+    if (st != LT7680_OK) {
+        return st;
+    }
     st = lt7680_read_reg(LT7680_REG_MRWDP, &lo);
     if (st != LT7680_OK) {
         return st;
@@ -1268,6 +1274,23 @@ static lt7680_status_t wait_2d_idle(void)
             return LT7680_OK;
         }
     }
+    return LT7680_ERR_TIMEOUT;
+}
+
+/* REG[B6] bit0 is the Serial Flash DMA busy flag. CORE_BUSY is shared by
+ * several engines and cannot prove that a Flash DMA transfer completed. */
+static lt7680_status_t wait_dma_idle(void)
+{
+    uint8_t dma_ctrl = 0u;
+
+    for (uint16_t i = 0u; i < 1000u; i++) {
+        lt7680_status_t st = lt7680_read_reg(LT7680_REG_DMA_CTRL, &dma_ctrl);
+        if (st != LT7680_OK)
+            return st;
+        if ((dma_ctrl & 0x01u) == 0u)
+            return LT7680_OK;
+    }
+    (void)write_reg(LT7680_REG_DMA_CTRL, 0x00u);
     return LT7680_ERR_TIMEOUT;
 }
 
