@@ -1102,7 +1102,7 @@ static void rif_dma_probe(void)
     static const uint16_t probe_x = 16u;
     static const uint16_t probe_y = 16u;
     static const uint16_t probe_w = 64u;
-    static const uint16_t probe_h = 4u;
+    static const uint16_t probe_heights[] = {4u, 8u, 16u, 32u};
     rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
     lt7680_flash_dma_snapshot_t before;
     lt7680_flash_dma_snapshot_t after;
@@ -1110,35 +1110,46 @@ static void rif_dma_probe(void)
     lt7680_status_t bte_status = LT7680_ERR_UNSUPPORTED;
     lt7680_status_t display_status = LT7680_ERR_UNSUPPORTED;
     lt7680_status_t restore_status = LT7680_OK;
+    uint16_t last_probe_h = 0u;
     bool visual_ready = false;
 
-    /* DMA writes a 64x4 RGB565 crop: 128 source bytes per row and a 64-pixel
-     * destination stride. The staging address is outside both canvas pages;
-     * the current API cannot target a hidden page directly. */
+    /* DMA probes several crop heights to find the LT7680 block-geometry limit.
+     * The staging address is outside both canvas pages; the current API cannot
+     * target a hidden page directly. */
     if (rif_find_tile_char((uint16_t)'8', &tile) &&
         tile.width == 64u && tile.height == 128u &&
         tile.stride == 128u && tile.size == 16384u)
     {
-        (void)lt7680_flash_dma_read_snapshot(&before);
-        dma_status = lt7680_flash_dma_to_sdram(tile.offset, staging_addr,
-                                                (uint16_t)(probe_w * 2u),
-                                                probe_h, probe_w);
-        (void)lt7680_flash_dma_read_snapshot(&after);
-        rif_dma_snapshot_send("tile8-visual", tile.offset, staging_addr,
-                              &before, &after, dma_status);
-        if (dma_status == LT7680_OK)
+        for (uint8_t i = 0u; i < (uint8_t)(sizeof(probe_heights) /
+                                           sizeof(probe_heights[0])); ++i)
         {
-            bte_status = lt7680_gfx_blit(1u, staging_addr, probe_w, probe_x,
-                                         probe_y, probe_w, probe_h);
-            if (bte_status == LT7680_OK)
+            uint16_t probe_h = probe_heights[i];
+            last_probe_h = probe_h;
+
+            (void)lt7680_flash_dma_read_snapshot(&before);
+            dma_status = lt7680_flash_dma_to_sdram(tile.offset, staging_addr,
+                                                    (uint16_t)(probe_w * 2u),
+                                                    probe_h, probe_w);
+            (void)lt7680_flash_dma_read_snapshot(&after);
+            rif_dma_snapshot_send("tile8-visual", tile.offset, staging_addr,
+                                  &before, &after, dma_status);
+            if (dma_status == LT7680_OK)
             {
-                display_status = lt7680_gfx_present_page(1u);
-                if (display_status == LT7680_OK)
+                bte_status = lt7680_gfx_blit(1u, staging_addr, probe_w,
+                                             probe_x, probe_y, probe_w,
+                                             probe_h);
+                if (bte_status == LT7680_OK)
                 {
-                    display_status = lt7680_write_reg(0x12u, 0x48u);
-                    visual_ready = display_status == LT7680_OK;
+                    display_status = lt7680_gfx_present_page(1u);
+                    if (display_status == LT7680_OK)
+                    {
+                        display_status = lt7680_write_reg(0x12u, 0x48u);
+                        visual_ready = display_status == LT7680_OK;
+                    }
                 }
             }
+            if (visual_ready)
+                break;
         }
     }
 
@@ -1159,8 +1170,8 @@ static void rif_dma_probe(void)
     hal_uart_send_hex8((uint8_t)(probe_w >> 8));
     hal_uart_send_hex8((uint8_t)probe_w);
     hal_uart_send_text("x");
-    hal_uart_send_hex8((uint8_t)(probe_h >> 8));
-    hal_uart_send_hex8((uint8_t)probe_h);
+    hal_uart_send_hex8((uint8_t)(last_probe_h >> 8));
+    hal_uart_send_hex8((uint8_t)last_probe_h);
     hal_uart_send_text(" direct-hidden=UNSUPPORTED");
     if (visual_ready)
     {
