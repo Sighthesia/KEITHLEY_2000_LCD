@@ -504,7 +504,9 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
      * while the serial-flash state machine waits for ownership. */
     if (st == LT7680_OK) st = write_reg(LT7680_REG_SPIMCR2,
                                         LT7680_SPI_CTRL_IDLE);
-    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
+    /* Use the DMA block-mode start value here; the RIF staging path is a
+     * rectangular transfer into SDRAM, not a linear byte stream move. */
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x03u);
     if (st == LT7680_OK) st = wait_2d_idle();
 
     if (wr32le(LT7680_REG_CVSSA0, saved_cvssa) != LT7680_OK) {
