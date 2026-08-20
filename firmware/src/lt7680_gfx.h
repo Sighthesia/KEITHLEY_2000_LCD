@@ -83,6 +83,11 @@ typedef struct {
 } lt7680_flash_header_probe_t;
 
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
+lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address);
+lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels);
+lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
+                                        const uint16_t *pixels,
+                                        uint16_t count);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);
 lt7680_status_t lt7680_gfx_draw_rect(const lt7680_rect_t *rect, uint16_t rgb565);

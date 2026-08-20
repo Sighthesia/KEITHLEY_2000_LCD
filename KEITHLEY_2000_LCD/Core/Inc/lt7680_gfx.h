@@ -101,6 +101,14 @@ typedef struct {
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
+/* Set the canvas base address directly for off-screen cache construction. */
+lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address);
+/* Set the canvas image width directly, in pixels. */
+lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels);
+/* Write a packed RGB565 scanline buffer into the current canvas at x/y. */
+lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
+                                        const uint16_t *pixels,
+                                        uint16_t count);
 /* Atomically make a completed canvas page the visible main image. */
 lt7680_status_t lt7680_gfx_present_page(uint8_t page);
 /* Clone one complete RGB565 canvas page with the verified BTE copy ROP. */

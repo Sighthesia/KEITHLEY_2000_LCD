@@ -731,6 +731,56 @@ lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel)
     return LT7680_OK;
 }
 
+lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address)
+{
+    if (address > 0x00FFFFFFu) {
+        return LT7680_ERR_PARAM;
+    }
+    return wr32le(REG_CVSSA, address);
+}
+
+lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels)
+{
+    if (width_pixels == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    return wr13(REG_CVSIMWTH, width_pixels);
+}
+
+lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
+                                        const uint16_t *pixels,
+                                        uint16_t count)
+{
+    lt7680_status_t st;
+    uint16_t i;
+
+    if (pixels == 0 || count == 0u || x >= s_panel.width || y >= s_panel.height)
+        return LT7680_ERR_PARAM;
+    if ((uint32_t)x + count > s_panel.width)
+        return LT7680_ERR_PARAM;
+
+    st = wr13(REG_CURH, x);
+    if (st != LT7680_OK)
+        return st;
+    st = wr13(REG_CURV, y);
+    if (st != LT7680_OK)
+        return st;
+    st = lt7680_select_reg(REG_MRWDP);
+    if (st != LT7680_OK)
+        return st;
+
+    for (i = 0u; i < count; i++) {
+        uint8_t pixel[2];
+
+        pixel[0] = (uint8_t)(pixels[i] & 0xFFu);
+        pixel[1] = (uint8_t)(pixels[i] >> 8);
+        st = lt7680_write_data(pixel, 2u);
+        if (st != LT7680_OK)
+            return st;
+    }
+    return LT7680_OK;
+}
+
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565)
 {
     lt7680_rect_t full;

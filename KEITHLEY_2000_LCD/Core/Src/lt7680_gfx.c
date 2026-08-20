@@ -1,6 +1,8 @@
 #include "lt7680_gfx.h"
 #include "font_text.h"
 
+#include <stddef.h>
+
 static lt7680_panel_t s_panel;
 static lt7680_flash_b7_probe_t s_flash_b7_probe = {
     0u, 0u, 0u, LT7680_ERR_BUS, LT7680_ERR_BUS
@@ -894,6 +896,56 @@ lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page)
     }
     return wr32le(LT7680_REG_CVSSA0,
                   (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
+}
+
+lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address)
+{
+    if (address > 0x00FFFFFFu) {
+        return LT7680_ERR_PARAM;
+    }
+    return wr32le(LT7680_REG_CVSSA0, address);
+}
+
+lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels)
+{
+    if (width_pixels == 0u) {
+        return LT7680_ERR_PARAM;
+    }
+    return wr13(LT7680_REG_CVS_IMWTH0, width_pixels);
+}
+
+lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
+                                        const uint16_t *pixels,
+                                        uint16_t count)
+{
+    lt7680_status_t st;
+    uint16_t i;
+
+    if (pixels == NULL || count == 0u || x >= s_panel.width || y >= s_panel.height)
+        return LT7680_ERR_PARAM;
+    if ((uint32_t)x + count > s_panel.width)
+        return LT7680_ERR_PARAM;
+
+    st = wr13(LT7680_REG_CURH, x);
+    if (st != LT7680_OK)
+        return st;
+    st = wr13(LT7680_REG_CURV, y);
+    if (st != LT7680_OK)
+        return st;
+    st = lt7680_select_reg(LT7680_REG_MRWDP);
+    if (st != LT7680_OK)
+        return st;
+
+    for (i = 0u; i < count; i++) {
+        uint8_t pixel[2];
+
+        pixel[0] = (uint8_t)(pixels[i] & 0xFFu);
+        pixel[1] = (uint8_t)(pixels[i] >> 8);
+        st = lt7680_write_data(pixel, 2u);
+        if (st != LT7680_OK)
+            return st;
+    }
+    return LT7680_OK;
 }
 
 lt7680_status_t lt7680_gfx_present_page(uint8_t page)
