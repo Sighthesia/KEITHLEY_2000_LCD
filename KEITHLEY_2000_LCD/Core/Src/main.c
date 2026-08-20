@@ -1421,7 +1421,10 @@ static void rif_init(void)
     }
     s_rif_dma_probe_passed = false;
     rif_dma_probe();
-    s_rif_dma_probe_passed = s_rif_dma_probe_passed && rif_cache_pixel_probe();
+    {
+        bool cache_pixel_ok = rif_cache_pixel_probe();
+        s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
+    }
     if (s_rif_dma_probe_passed)
     {
         bool cache_ready = true;
