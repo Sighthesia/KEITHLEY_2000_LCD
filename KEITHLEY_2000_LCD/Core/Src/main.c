@@ -1230,6 +1230,15 @@ static bool rif_cache_pixel_probe(void)
             lt7680_gfx_peek_pixel((uint16_t)(i * 4u), 0u, &pixel) != LT7680_OK ||
             pixel != pattern[i]) {
             ok = false;
+            hal_uart_send_text("RIF cache pixel mismatch index=");
+            hal_uart_send_hex8(i);
+            hal_uart_send_text(" expected=");
+            hal_uart_send_hex8((uint8_t)(pattern[i] >> 8));
+            hal_uart_send_hex8((uint8_t)pattern[i]);
+            hal_uart_send_text(" actual=");
+            hal_uart_send_hex8((uint8_t)(pixel >> 8));
+            hal_uart_send_hex8((uint8_t)pixel);
+            hal_uart_send_text("\r\n");
             break;
         }
     }
@@ -1240,6 +1249,15 @@ static bool rif_cache_pixel_probe(void)
 
     hal_uart_send_text("RIF cache pixel probe=");
     hal_uart_send_text(ok ? "PASS\r\n" : "FAIL\r\n");
+    hal_uart_send_text("RIF cache canvas restore cvssa=");
+    hal_uart_send_hex8((uint8_t)(saved.cvssa >> 24));
+    hal_uart_send_hex8((uint8_t)(saved.cvssa >> 16));
+    hal_uart_send_hex8((uint8_t)(saved.cvssa >> 8));
+    hal_uart_send_hex8((uint8_t)saved.cvssa);
+    hal_uart_send_text(" stride=");
+    hal_uart_send_hex8((uint8_t)(saved.canvas_stride >> 8));
+    hal_uart_send_hex8((uint8_t)saved.canvas_stride);
+    hal_uart_send_text("\r\n");
     return ok;
 }
 
