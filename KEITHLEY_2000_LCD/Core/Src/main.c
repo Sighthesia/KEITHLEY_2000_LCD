@@ -1261,6 +1261,48 @@ static bool rif_cache_pixel_probe(void)
     return ok;
 }
 
+static void rif_log_bte_snapshot(void)
+{
+    lt7680_bte_snapshot_t snapshot;
+
+    if (lt7680_gfx_read_bte_snapshot(&snapshot) != LT7680_OK) {
+        hal_uart_send_text("RIF BTE snapshot=ERROR\r\n");
+        return;
+    }
+    hal_uart_send_text("RIF BTE snapshot ctrl0=");
+    hal_uart_send_hex8(snapshot.ctrl0);
+    hal_uart_send_text(" ctrl1=");
+    hal_uart_send_hex8(snapshot.ctrl1);
+    hal_uart_send_text(" colr=");
+    hal_uart_send_hex8(snapshot.colr);
+    hal_uart_send_text(" saddr=");
+    rif_probe_send_hex32(snapshot.source_address);
+    hal_uart_send_text(" swth=");
+    hal_uart_send_hex8((uint8_t)(snapshot.source_width >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.source_width);
+    hal_uart_send_text(" sxy=");
+    hal_uart_send_hex8((uint8_t)(snapshot.source_x >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.source_x);
+    hal_uart_send_hex8((uint8_t)(snapshot.source_y >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.source_y);
+    hal_uart_send_text(" daddr=");
+    rif_probe_send_hex32(snapshot.destination_address);
+    hal_uart_send_text(" dwth=");
+    hal_uart_send_hex8((uint8_t)(snapshot.destination_width >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.destination_width);
+    hal_uart_send_text(" dxy=");
+    hal_uart_send_hex8((uint8_t)(snapshot.destination_x >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.destination_x);
+    hal_uart_send_hex8((uint8_t)(snapshot.destination_y >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.destination_y);
+    hal_uart_send_text(" size=");
+    hal_uart_send_hex8((uint8_t)(snapshot.width >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.width);
+    hal_uart_send_hex8((uint8_t)(snapshot.height >> 8));
+    hal_uart_send_hex8((uint8_t)snapshot.height);
+    hal_uart_send_text("\r\n");
+}
+
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -1425,6 +1467,7 @@ static void rif_init(void)
         bool cache_pixel_ok = rif_cache_pixel_probe();
         s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
     }
+    rif_log_bte_snapshot();
     /* The BTE probe currently reports command completion only; until its
      * pixels are independently accepted, do not present its diagnostic page
      * during normal boot. */
