@@ -98,6 +98,23 @@ typedef struct {
     lt7680_status_t status;
 } lt7680_flash_header_probe_t;
 
+typedef struct {
+    uint8_t ctrl0;
+    uint8_t ctrl1;
+    uint8_t colr;
+    uint32_t source_address;
+    uint16_t source_width;
+    uint16_t source_x;
+    uint16_t source_y;
+    uint32_t destination_address;
+    uint16_t destination_width;
+    uint16_t destination_x;
+    uint16_t destination_y;
+    uint16_t width;
+    uint16_t height;
+    lt7680_status_t status;
+} lt7680_bte_snapshot_t;
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 /* Select one of the two complete 320x960 RGB565 canvas pages for GE writes. */
 lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
@@ -117,8 +134,9 @@ lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page);
  * transposed glyph tile library) onto the given canvas page with the verified
  * BTE copy ROP. Source and destination strides (pixels) are independent. */
 lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
-                                uint16_t src_stride, uint16_t dst_x,
-                                uint16_t dst_y, uint16_t w, uint16_t h);
+                                 uint16_t src_stride, uint16_t dst_x,
+                                 uint16_t dst_y, uint16_t w, uint16_t h);
+lt7680_status_t lt7680_gfx_read_bte_snapshot(lt7680_bte_snapshot_t *snapshot);
 lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);

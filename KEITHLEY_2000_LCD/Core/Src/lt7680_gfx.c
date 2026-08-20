@@ -133,6 +133,7 @@ static lt7680_status_t set_fg_color16(uint16_t rgb565);
 static lt7680_status_t wait_2d_idle(void);
 static lt7680_status_t wait_dma_idle(void);
 static lt7680_status_t wait_bte_idle(void);
+static lt7680_status_t read16le(uint8_t reg, uint16_t *value);
 static lt7680_status_t wr32le(uint8_t reg, uint32_t val);
 static lt7680_status_t wr13(uint8_t reg, uint16_t value);
 static lt7680_status_t wr16le(uint8_t reg, uint16_t val);
@@ -1047,6 +1048,57 @@ lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
     return wait_bte_idle();
 }
 
+lt7680_status_t lt7680_gfx_read_bte_snapshot(lt7680_bte_snapshot_t *snapshot)
+{
+    uint8_t value;
+    lt7680_status_t st = LT7680_OK;
+
+    if (snapshot == NULL)
+        return LT7680_ERR_PARAM;
+    st = lt7680_read_reg(LT7680_REG_BTE_CTRL0, &snapshot->ctrl0);
+    if (st != LT7680_OK) return st;
+    st = lt7680_read_reg(LT7680_REG_BTE_CTRL1, &snapshot->ctrl1);
+    if (st != LT7680_OK) return st;
+    st = lt7680_read_reg(LT7680_REG_BTE_COLR, &snapshot->colr);
+    if (st != LT7680_OK) return st;
+    snapshot->source_address = 0u;
+    snapshot->destination_address = 0u;
+    for (uint8_t i = 0u; i < 4u; i++) {
+        st = lt7680_read_reg((uint8_t)(LT7680_REG_BTE_S0_STR + i), &value);
+        if (st != LT7680_OK) return st;
+        snapshot->source_address |= (uint32_t)value << (8u * i);
+        st = lt7680_read_reg((uint8_t)(LT7680_REG_BTE_DT_STR + i), &value);
+        if (st != LT7680_OK) return st;
+        snapshot->destination_address |= (uint32_t)value << (8u * i);
+    }
+    st = lt7680_read_reg(LT7680_REG_BTE_S0_WTH, &value);
+    if (st != LT7680_OK) return st;
+    snapshot->source_width = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_BTE_S0_WTH + 1u), &value);
+    if (st != LT7680_OK) return st;
+    snapshot->source_width |= (uint16_t)value << 8;
+    st = lt7680_read_reg(LT7680_REG_BTE_DT_WTH, &value);
+    if (st != LT7680_OK) return st;
+    snapshot->destination_width = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_BTE_DT_WTH + 1u), &value);
+    if (st != LT7680_OK) return st;
+    snapshot->destination_width |= (uint16_t)value << 8;
+    st = read16le(LT7680_REG_BTE_S0_X, &snapshot->source_x);
+    if (st != LT7680_OK) return st;
+    st = read16le(LT7680_REG_BTE_S0_Y, &snapshot->source_y);
+    if (st != LT7680_OK) return st;
+    st = read16le(LT7680_REG_BTE_DT_X, &snapshot->destination_x);
+    if (st != LT7680_OK) return st;
+    st = read16le(LT7680_REG_BTE_DT_Y, &snapshot->destination_y);
+    if (st != LT7680_OK) return st;
+    st = read16le(LT7680_REG_BTE_SIZE, &snapshot->width);
+    if (st != LT7680_OK) return st;
+    st = read16le((uint8_t)(LT7680_REG_BTE_SIZE + 2u), &snapshot->height);
+    if (st != LT7680_OK) return st;
+    snapshot->status = LT7680_OK;
+    return LT7680_OK;
+}
+
 lt7680_status_t lt7680_gfx_show_color_bars(void)
 {
     /* V16 display-on adds bit6 (0x40) on top of the init value (bit3 set,
@@ -1310,6 +1362,21 @@ static lt7680_status_t wait_bte_idle(void)
             return LT7680_OK;
     }
     return LT7680_ERR_TIMEOUT;
+}
+
+static lt7680_status_t read16le(uint8_t reg, uint16_t *value)
+{
+    uint8_t lo;
+    uint8_t hi;
+    lt7680_status_t st = lt7680_read_reg(reg, &lo);
+
+    if (st != LT7680_OK)
+        return st;
+    st = lt7680_read_reg((uint8_t)(reg + 1u), &hi);
+    if (st != LT7680_OK)
+        return st;
+    *value = (uint16_t)lo | ((uint16_t)hi << 8);
+    return LT7680_OK;
 }
 
 lt7680_status_t lt7680_gfx_draw_line(int16_t x0, int16_t y0, int16_t x1,
