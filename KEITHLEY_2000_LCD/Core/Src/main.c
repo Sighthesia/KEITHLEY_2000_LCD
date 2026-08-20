@@ -1078,6 +1078,8 @@ static void rif_dma_snapshot_send(const char *label,
     rif_probe_send_hex32(source);
     hal_uart_send_text(" target=");
     rif_probe_send_hex32(target);
+    hal_uart_send_text(" target-page=");
+    hal_uart_send_hex8((uint8_t)(target >> 20));
     hal_uart_send_text(" cvssa=");
     rif_probe_send_hex32(after->cvssa);
     hal_uart_send_text(" stride=");

@@ -499,14 +499,10 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_HIGH, height);
     if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH,
                                       block_width_pixels);
-    /* Release the host-controlled Flash transaction before DMA takes over
-     * SFCS. Keeping the manual active-CS value here can leave DMA_START stuck
-     * while the serial-flash state machine waits for ownership. */
-    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPIMCR2,
-                                        LT7680_SPI_CTRL_IDLE);
-    /* Use the DMA block-mode start value here; the RIF staging path is a
-     * rectangular transfer into SDRAM, not a linear byte stream move. */
-    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x03u);
+    /* Keep the repo's verified baseline control sequence for the DMA probe:
+     * the plan documents B9=0x3C for the Flash setup and B6=0x01 as the
+     * start value. */
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
     if (st == LT7680_OK) st = wait_2d_idle();
 
     if (wr32le(LT7680_REG_CVSSA0, saved_cvssa) != LT7680_OK) {
