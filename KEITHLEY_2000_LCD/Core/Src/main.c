@@ -1049,6 +1049,7 @@ static bool rif_find_tile_char(uint16_t code, rif_tile_t *tile)
 }
 
 static void rif_dma_snapshot_send(const char *label,
+                                  uint16_t probe_h,
                                   uint32_t source, uint32_t target,
                                   const lt7680_flash_dma_snapshot_t *before,
                                   const lt7680_flash_dma_snapshot_t *after,
@@ -1074,6 +1075,9 @@ static void rif_dma_snapshot_send(const char *label,
         hal_uart_send_hex8(after->bc_cb[i]);
     hal_uart_send_text(" status=");
     hal_uart_send_hex8((uint8_t)transfer_status);
+    hal_uart_send_text(" height=");
+    hal_uart_send_hex8((uint8_t)(probe_h >> 8));
+    hal_uart_send_hex8((uint8_t)probe_h);
     hal_uart_send_text(" source=");
     rif_probe_send_hex32(source);
     hal_uart_send_text(" target=");
@@ -1110,7 +1114,9 @@ static void rif_dma_probe(void)
     lt7680_status_t bte_status = LT7680_ERR_UNSUPPORTED;
     lt7680_status_t display_status = LT7680_ERR_UNSUPPORTED;
     lt7680_status_t restore_status = LT7680_OK;
+    uint16_t first_success_h = 0u;
     uint16_t last_probe_h = 0u;
+    uint16_t reported_h = 0u;
     bool visual_ready = false;
 
     /* DMA probes several crop heights to find the LT7680 block-geometry limit.
@@ -1131,27 +1137,32 @@ static void rif_dma_probe(void)
                                                     (uint16_t)(probe_w * 2u),
                                                     probe_h, probe_w);
             (void)lt7680_flash_dma_read_snapshot(&after);
-            rif_dma_snapshot_send("tile8-visual", tile.offset, staging_addr,
-                                  &before, &after, dma_status);
+            rif_dma_snapshot_send("tile8-visual", probe_h, tile.offset,
+                                  staging_addr, &before, &after, dma_status);
             if (dma_status == LT7680_OK)
             {
-                bte_status = lt7680_gfx_blit(1u, staging_addr, probe_w,
-                                             probe_x, probe_y, probe_w,
-                                             probe_h);
-                if (bte_status == LT7680_OK)
-                {
-                    display_status = lt7680_gfx_present_page(1u);
-                    if (display_status == LT7680_OK)
-                    {
-                        display_status = lt7680_write_reg(0x12u, 0x48u);
-                        visual_ready = display_status == LT7680_OK;
-                    }
-                }
+                if (first_success_h == 0u)
+                    first_success_h = probe_h;
             }
-            if (visual_ready)
-                break;
         }
     }
+
+    if (first_success_h != 0u)
+    {
+        bte_status = lt7680_gfx_blit(1u, staging_addr, probe_w, probe_x,
+                                     probe_y, probe_w, first_success_h);
+        if (bte_status == LT7680_OK)
+        {
+            display_status = lt7680_gfx_present_page(1u);
+            if (display_status == LT7680_OK)
+            {
+                display_status = lt7680_write_reg(0x12u, 0x48u);
+                visual_ready = display_status == LT7680_OK;
+            }
+        }
+    }
+
+    reported_h = first_success_h != 0u ? first_success_h : last_probe_h;
 
     hal_uart_send_text("RIF DMA visual status=");
     hal_uart_send_hex8((uint8_t)(visual_ready ? LT7680_OK :
@@ -1170,8 +1181,8 @@ static void rif_dma_probe(void)
     hal_uart_send_hex8((uint8_t)(probe_w >> 8));
     hal_uart_send_hex8((uint8_t)probe_w);
     hal_uart_send_text("x");
-    hal_uart_send_hex8((uint8_t)(last_probe_h >> 8));
-    hal_uart_send_hex8((uint8_t)last_probe_h);
+    hal_uart_send_hex8((uint8_t)(reported_h >> 8));
+    hal_uart_send_hex8((uint8_t)reported_h);
     hal_uart_send_text(" direct-hidden=UNSUPPORTED");
     if (visual_ready)
     {
