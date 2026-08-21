@@ -1904,6 +1904,22 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
     return x;
 }
 
+/* Hysteresis for the trend axes rebuild: the sliding-window min/max drifts
+ * with every sample, so an exact comparison would force a full background +
+ * axis-label repaint on every frame (seconds of GE work). Incremental column
+ * updates absorb small scale drift; only a change beyond 1/16 of the span
+ * justifies rebuilding the axes. */
+static bool trend_scale_close(float page_min, float page_max,
+                              float frame_min, float frame_max)
+{
+    float tol = (frame_max - frame_min) * (1.0f / 16.0f);
+    float dmin = page_min - frame_min;
+    float dmax = page_max - frame_max;
+    if (dmin < 0.0f) dmin = -dmin;
+    if (dmax < 0.0f) dmax = -dmax;
+    return dmin <= tol && dmax <= tol;
+}
+
 static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -1963,10 +1979,11 @@ static void reading_scene_render(void)
                                    s_page_trend_has_data[s_visible_page] !=
                                        s_frame.trend_has_data ||
                                    (s_frame.trend_has_data &&
-                                    (s_page_trend_minimum[s_visible_page] !=
-                                         s_frame.trend_minimum ||
-                                     s_page_trend_maximum[s_visible_page] !=
-                                         s_frame.trend_maximum));
+                                    !trend_scale_close(
+                                        s_page_trend_minimum[s_visible_page],
+                                        s_page_trend_maximum[s_visible_page],
+                                        s_frame.trend_minimum,
+                                        s_frame.trend_maximum));
             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
