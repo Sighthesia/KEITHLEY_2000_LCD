@@ -577,10 +577,11 @@ static bool begin_hidden_frame(void)
     }
     else
     {
-        /* Keep runtime updates on the visible canvas while measuring the
-         * incremental GE path. Full-page copy and redraw are too slow for the
-         * 30 Hz budget on this controller. */
-        s_render_page = s_visible_page;
+        /* Compose runtime updates on the HIDDEN page and flip atomically at
+         * commit. Writing the scanned page makes BTE bursts collide with
+         * display fetches (single-pixel sparkles); the hidden page never
+         * collides, and both pages are kept identical by dual-page writes. */
+        s_render_page = (uint8_t)(s_visible_page ^ 1u);
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK)
             return false;
@@ -693,21 +694,44 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
                                     uint16_t h, uint16_t color)
 {
     lt7680_rect_t rect;
+    lt7680_status_t st = LT7680_OK;
+    uint8_t p;
 
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
-    return lt7680_gfx_fill_rect(&rect, color);
+    /* Dual-page write: both canvas pages stay identical so a frame can be
+     * composed on the hidden page and flipped atomically -- a BTE burst must
+     * never land on the page the panel is scanning (single-pixel sparkles). */
+    for (p = 0u; p < 2u && st == LT7680_OK; p++)
+    {
+        st = lt7680_gfx_select_canvas_page(p);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_fill_rect(&rect, color);
+    }
+    if (st == LT7680_OK)
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+    return st;
 }
 
 static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
                                     uint16_t y1, uint16_t color)
 {
     uint16_t fx0, fy0, fx1, fy1;
+    lt7680_status_t st = LT7680_OK;
+    uint8_t p;
 
     panel_transform_ui_to_fb(x0, y0, &fx0, &fy0);
     panel_transform_ui_to_fb(x1, y1, &fx1, &fy1);
-    return lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
-                                (int16_t)fx1, (int16_t)fy1, color);
+    for (p = 0u; p < 2u && st == LT7680_OK; p++)
+    {
+        st = lt7680_gfx_select_canvas_page(p);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
+                                      (int16_t)fx1, (int16_t)fy1, color);
+    }
+    if (st == LT7680_OK)
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+    return st;
 }
 
 static const uint8_t *text_glyph(const char *text, uint8_t *advance)
@@ -1031,16 +1055,25 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             if ((uint32_t)fb_x + entry.width <= MAIN_DISPLAY_UI_HEIGHT &&
                 (uint32_t)fb_y + entry.height <= MAIN_DISPLAY_UI_WIDTH)
             {
-                st = lt7680_gfx_blit(s_render_page, entry.address, entry.stride,
-                                     fb_x, fb_y, entry.width, entry.height);
+                st = LT7680_OK;
+                for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
+                {
+                    st = lt7680_gfx_select_canvas_page(pg);
+                    if (st == LT7680_OK)
+                        st = lt7680_gfx_blit(pg, entry.address, entry.stride,
+                                             fb_x, fb_y, entry.width,
+                                             entry.height);
+                }
+                st = lt7680_gfx_select_canvas_page(s_render_page) == LT7680_OK
+                         ? st : LT7680_ERR_BUS;
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
                     /* Small inter-blit gap only. The per-blit VSYNC wait was
                      * removed: at 25 MHz PCLK the frame period is ~33 ms and
                      * waiting blocked the main loop long enough to drop demo
-                     * samples; the halved scan rate itself already gives the
-                     * arbiter far more display-fetch slack. */
+                     * samples. Blits target the hidden page (dual-page sync),
+                     * so scan collisions cannot corrupt visible pixels. */
                     (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
