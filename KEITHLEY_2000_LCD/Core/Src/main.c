@@ -812,10 +812,59 @@ static void rif_draw_fail(lt7680_status_t st)
     hal_uart_send_text("\r\n");
 }
 
+/* RAM-resident directory of every glyph resolved during prebuild. Scanning
+ * the Flash directory per glyph dominated the frame budget (~370 ms/frame);
+ * this table makes resolution an O(1) RAM lookup. */
+typedef struct
+{
+    uint32_t kind;
+    uint16_t code;
+    rif_tile_t tile;
+} rif_dir_entry_t;
+
+#define RIF_DIR_CACHE_MAX 40u
+static rif_dir_entry_t s_dir_cache[RIF_DIR_CACHE_MAX];
+static uint8_t s_dir_cache_count;
+
+static bool rif_dir_lookup(uint32_t kind, uint16_t code, rif_tile_t *tile)
+{
+    uint8_t i;
+
+    for (i = 0u; i < s_dir_cache_count; i++)
+    {
+        if (s_dir_cache[i].kind == kind && s_dir_cache[i].code == code)
+        {
+            *tile = s_dir_cache[i].tile;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void rif_dir_remember(uint32_t kind, uint16_t code,
+                             const rif_tile_t *tile)
+{
+    if (s_dir_cache_count >= RIF_DIR_CACHE_MAX)
+        return;
+    s_dir_cache[s_dir_cache_count].kind = kind;
+    s_dir_cache[s_dir_cache_count].code = code;
+    s_dir_cache[s_dir_cache_count].tile = *tile;
+    s_dir_cache_count++;
+}
+
 static bool rif_find_next_tile(void)
 {
     rif_entry_t entry;
     lt7680_status_t st;
+
+    if (rif_dir_lookup(s_rif_draw_job.kind, s_rif_draw_job.code,
+                       &s_rif_draw_job.tile))
+    {
+        s_rif_draw_job.resolving = false;
+        s_rif_draw_job.row = 0u;
+        s_rif_draw_job.column = 0u;
+        return false;
+    }
 
     if (s_rif_draw_job.directory_index >= s_rif_image.directory_count)
     {
@@ -1381,6 +1430,7 @@ static void rif_init(void)
 
     s_rif_ready = false;
     rif_tile_cache_init();
+    s_dir_cache_count = 0u;
     rif_log_spi_registers("regs");
     st = lt7680_flash_read(0u, header, sizeof(header));
     {
@@ -1520,6 +1570,8 @@ static void rif_init(void)
                 cache_ready = false;
                 continue;
             }
+            rif_dir_remember(RIF_KIND_DIGIT_CHAR,
+                             (uint16_t)cache_chars[char_index], &cache_tile);
             st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
                                         (uint16_t)cache_chars[char_index],
                                         &cache_tile,
@@ -1543,6 +1595,7 @@ static void rif_init(void)
             {
                 continue;
             }
+            rif_dir_remember(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile);
             st = rif_tile_cache_prepare(RIF_KIND_DIGIT_SYMBOL, sym,
                                         &cache_tile, &cache_entry);
             if (st != LT7680_OK || cache_entry.ready == 0u)
