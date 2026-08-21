@@ -84,7 +84,7 @@ typedef struct
     uint8_t fresh; /* 1 = must blit this frame */
 } rif_cell_t;
 
-#define RIF_CELL_MAX 24u
+#define RIF_CELL_MAX 20u
 static rif_cell_t s_cells[RIF_CELL_MAX];
 static uint8_t s_cell_count;
 static bool s_reading_diff;
@@ -2058,7 +2058,7 @@ static void reading_scene_render(void)
             }
 
             {
-                rif_cell_t planned[RIF_CELL_MAX];
+                static rif_cell_t planned[RIF_CELL_MAX];
                 uint8_t planned_count = 0u;
                 const char *p;
                 uint16_t cx;
@@ -2070,16 +2070,15 @@ static void reading_scene_render(void)
                     uint32_t kind;
                     uint16_t code;
                     uint8_t advance;
-                    if (rif_text_code(p, &kind, &code, &advance))
-                    {
-                        planned[planned_count].x = cx;
-                        planned[planned_count].y = s_frame.reading_y;
-                        planned[planned_count].kind = kind;
-                        planned[planned_count].code = code;
-                        planned[planned_count].fresh = 1u;
-                        planned_count++;
-                        cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
-                    }
+                    if (!rif_text_code(p, &kind, &code, &advance))
+                        break;
+                    planned[planned_count].x = cx;
+                    planned[planned_count].y = s_frame.reading_y;
+                    planned[planned_count].kind = kind;
+                    planned[planned_count].code = code;
+                    planned[planned_count].fresh = 1u;
+                    planned_count++;
+                    cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
                     p += advance;
                 }
                 p = s_frame.unit;
@@ -2089,16 +2088,15 @@ static void reading_scene_render(void)
                     uint32_t kind;
                     uint16_t code;
                     uint8_t advance;
-                    if (rif_text_code(p, &kind, &code, &advance))
-                    {
-                        planned[planned_count].x = cx;
-                        planned[planned_count].y = s_frame.reading_y;
-                        planned[planned_count].kind = kind;
-                        planned[planned_count].code = code;
-                        planned[planned_count].fresh = 1u;
-                        planned_count++;
-                        cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
-                    }
+                    if (!rif_text_code(p, &kind, &code, &advance))
+                        break;
+                    planned[planned_count].x = cx;
+                    planned[planned_count].y = s_frame.reading_y;
+                    planned[planned_count].kind = kind;
+                    planned[planned_count].code = code;
+                    planned[planned_count].fresh = 1u;
+                    planned_count++;
+                    cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
                     p += advance;
                 }
 
