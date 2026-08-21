@@ -1239,6 +1239,8 @@ static void rif_dma_probe(void)
         hal_uart_send_text("RIF DMA visual restore=FAIL\r\n");
     else
         hal_uart_send_text("RIF DMA visual restore=BLACK-PAGE-0\r\n");
+
+    s_rif_dma_probe_passed = dma_status == LT7680_OK;
 }
 
 static bool rif_cache_pixel_probe(void)
