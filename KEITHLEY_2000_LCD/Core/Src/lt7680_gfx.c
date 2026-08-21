@@ -743,16 +743,19 @@ static lt7680_status_t configure_sdram(void)
     uint8_t ready;
     uint32_t waited;
 
-    /* V16 values: CFG0=0x29, CFG1=0x03 (CAS 3), refresh=0x01E6, CTRL=0x01. */
+    /* V16 values: CFG0=0x29, CFG1=0x03 (CAS 3), refresh=0x01E6, CTRL=0x01.
+     * Speckle mitigation trial: heavy BTE traffic correlates with single-pixel
+     * RGB sparkles around blitted glyphs while all data paths verify clean,
+     * so halve the refresh period (double the refresh rate) vs V16. */
     st = write_reg(LT7680_REG_SDRAM_CTRL, 0x04u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CFG0, 0x29u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CFG1, 0x03u);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0xE6u);
+    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0xF3u);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_SDRAM_REFRESH1, 0x01u);
+    st = write_reg(LT7680_REG_SDRAM_REFRESH1, 0x00u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CTRL, 0x01u);
     if (st != LT7680_OK) return st;
