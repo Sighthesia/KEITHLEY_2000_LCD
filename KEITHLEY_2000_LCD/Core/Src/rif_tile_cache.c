@@ -85,9 +85,16 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
     uint32_t flash_address;
     uint16_t cache_row;
     lt7680_status_t st;
+    lt7680_flash_dma_snapshot_t saved;
 
     if (tile == NULL || entry == NULL || kind == 0u)
         return LT7680_ERR_PARAM;
+
+    /* The builder retargets CVSSA/CVS_IMWTH for off-screen writes; both must
+     * be restored, otherwise every later GE fill wraps at the tile width. */
+    st = lt7680_flash_dma_read_snapshot(&saved);
+    if (st != LT7680_OK)
+        return st;
 
     for (i = 0u; i < RIF_TILE_CACHE_SLOT_COUNT; i++) {
         if (s_entries[i].ready != 0u && s_entries[i].kind == kind &&
@@ -144,6 +151,14 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
         }
 
         row = (uint16_t)(row + chunk_rows);
+    }
+
+    st = lt7680_gfx_set_canvas_base(saved.cvssa);
+    if (st == LT7680_OK)
+        st = lt7680_gfx_set_canvas_width(saved.canvas_stride);
+    if (st != LT7680_OK) {
+        entry->ready = 0u;
+        return st;
     }
 
     entry->ready = 0u;
