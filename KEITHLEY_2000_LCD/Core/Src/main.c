@@ -55,10 +55,10 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
-/* Keep the cached-tile path disabled until cache pixels pass hardware
- * validation. DMA completion alone does not validate the BTE source image. */
+/* Cached-tile BTE renderer enabled after the off-screen cache write/read
+ * probe and the 4x4 BTE visual block both passed hardware acceptance. */
 #ifndef RIF_BTE_RENDERER
-#define RIF_BTE_RENDERER 0U
+#define RIF_BTE_RENDERER 1U
 #endif
 
 /* Demo feed: synthesize K2000 host frames on a timer so the full
