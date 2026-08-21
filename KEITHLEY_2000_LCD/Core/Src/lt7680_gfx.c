@@ -718,18 +718,26 @@ static lt7680_status_t configure_pll(void)
     lt7680_status_t st;
 
     /* PLL values from original V16 firmware (REG[05..0A]):
-     * PCLK C1/C2 = 0x8A/0x19, MCLK C1/C2 = 0x8A/0x64, CCLK C1/C2 = 0x8A/0x64. */
+     * PCLK C1/C2 = 0x8A/0x19, MCLK C1/C2 = 0x8A/0x64, CCLK C1/C2 = 0x8A/0x64.
+     * XI=10MHz: Fout = XI x (N/R) / OD with OD=C1[7:6], R=C1[5:1],
+     * N=C1[0]|C2<<1. V16 values give PCLK=50MHz but MCLK=CCLK=200MHz --
+     * ABOVE the DS V3.0 absolute maximum CLKMPLL=133MHz (table 5-2). The
+     * overshoot makes SDRAM sampling marginal and is the confirmed root
+     * cause of the single-pixel sparkles around blitted glyphs. MCLK/CCLK
+     * are now 100 MHz (N=100, C2=0x32), inside spec; constraints hold:
+     * CCLK x2 >= MCLK >= CCLK and CCLK >= PCLK x 1.5 (100 >= 37.5).
+     * PCLK stays at 25 MHz (N=25, C2=0x0C) to keep scan deadlines wide. */
     st = write_reg(LT7680_REG_PCLK_PLL_1, 0x8Au);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_PCLK_PLL_2, 0x19u);
+    st = write_reg(LT7680_REG_PCLK_PLL_2, 0x0Cu);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_MCLK_PLL_1, 0x8Au);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_MCLK_PLL_2, 0x64u);
+    st = write_reg(LT7680_REG_MCLK_PLL_2, 0x32u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_CCLK_PLL_1, 0x8Au);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_CCLK_PLL_2, 0x64u);
+    st = write_reg(LT7680_REG_CCLK_PLL_2, 0x32u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_CTRL, 0x80u);
     if (st != LT7680_OK) return st;
