@@ -744,16 +744,19 @@ static lt7680_status_t configure_sdram(void)
     uint32_t waited;
 
     /* V16 values: CFG0=0x29, CFG1=0x03 (CAS 3), refresh=0x01E6, CTRL=0x01.
-     * Speckle mitigation trial: heavy BTE traffic correlates with single-pixel
-     * RGB sparkles around blitted glyphs while all data paths verify clean,
-     * so halve the refresh period (double the refresh rate) vs V16. */
+     * Speckle mitigation (2026-08-21): heavy BTE traffic correlated with
+     * single-pixel RGB sparkles around blitted glyphs while all data paths
+     * verified clean (CRC + readback sampling + band scan). Raising the
+     * refresh rate showed a monotone dose-response: 2x fewer, 4x fewer,
+     * 8x only a few sparkles left; 16x gave no further gain. Settled at 8x
+     * (refresh period 0x3C vs V16 0x1E6). */
     st = write_reg(LT7680_REG_SDRAM_CTRL, 0x04u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CFG0, 0x29u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CFG1, 0x03u);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0x1Eu);
+    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0x3Cu);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_REFRESH1, 0x00u);
     if (st != LT7680_OK) return st;
