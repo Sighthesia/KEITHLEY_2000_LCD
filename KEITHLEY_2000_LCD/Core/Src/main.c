@@ -187,7 +187,46 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
+static bool s_rif_band_scanned;
 static void rif_probe_send_hex32(uint32_t value);
+
+/* One-shot anomaly scan over the reading band of the just-presented page.
+ * The band should only contain black (0x0000) and the packed RIF neon-green
+ * foreground (0x07C6); any other pixel is logged with its coordinates. */
+static void rif_band_scan(void)
+{
+    uint8_t logged = 0u;
+    uint16_t fx;
+    uint16_t fy;
+    uint32_t base = (uint32_t)s_visible_page * 0x100000u;
+
+    if (lt7680_gfx_set_canvas_base(base) != LT7680_OK)
+        return;
+    for (fy = 0u; fy < 700u && logged < 10u; fy += 4u) {
+        for (fx = 24u; fx < 192u && logged < 10u; fx += 2u) {
+            uint16_t px = 0u;
+
+            if (lt7680_gfx_peek_pixel(fx, fy, &px) != LT7680_OK)
+                continue;
+            if (px == 0x0000u || px == 0x07C6u)
+                continue;
+            hal_uart_send_text("RIF band scan x=");
+            hal_uart_send_hex8((uint8_t)(fx >> 8));
+            hal_uart_send_hex8((uint8_t)fx);
+            hal_uart_send_text(" y=");
+            hal_uart_send_hex8((uint8_t)(fy >> 8));
+            hal_uart_send_hex8((uint8_t)fy);
+            hal_uart_send_text(" px=");
+            hal_uart_send_hex8((uint8_t)(px >> 8));
+            hal_uart_send_hex8((uint8_t)px);
+            hal_uart_send_text("\r\n");
+            logged++;
+        }
+    }
+    (void)lt7680_gfx_set_canvas_base(
+        (uint32_t)s_render_page * 0x100000u);
+    hal_uart_send_text("RIF band scan done\r\n");
+}
 
 static void perf_record_frame(void)
 {
@@ -217,6 +256,11 @@ static void perf_record_frame(void)
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
         hal_uart_send_text("\r\n");
+        if (!s_rif_band_scanned && s_perf_fps >= 2u)
+        {
+            s_rif_band_scanned = true;
+            rif_band_scan();
+        }
     }
 }
 static uint16_t s_render_column;
