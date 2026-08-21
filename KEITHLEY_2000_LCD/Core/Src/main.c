@@ -92,7 +92,6 @@ static uint16_t s_prev_reading_color = 0xFFFFu;
 static uint8_t s_prev_reading_nodata = 0xFFu;
 static char s_prev_suffix[4];
 static uint16_t s_prev_suffix_x;
-static bool s_frame_synced; /* vsync-wait done for this reading update */
 
 static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
                                  uint16_t code)
@@ -1037,29 +1036,12 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
-                    /* VSYNC-batched blitting: wait for the frame-latch flag
-                     * (INTF bit4) once per reading update, then issue every
-                     * blit of this update back-to-back with no gaps. All
-                     * bursts land in the same post-blank window instead of
-                     * colliding with the scan at random phases. Per-blit
-                     * waits cost a full frame each (measured fps 8), so
-                     * only the first blit of an update waits. */
-                    if (!s_frame_synced)
-                    {
-                        uint8_t waits;
-                        for (waits = 0u; waits < 20u; waits++)
-                        {
-                            uint8_t intf;
-                            if (lt7680_read_reg(0x0Cu, &intf) == LT7680_OK &&
-                                (intf & 0x10u) != 0u)
-                            {
-                                (void)lt7680_write_reg(0x0Cu, 0x10u);
-                                break;
-                            }
-                            (void)lt7680_delay_ms(1u);
-                        }
-                        s_frame_synced = true;
-                    }
+                    /* Small inter-blit gap only. The per-blit VSYNC wait was
+                     * removed: at 25 MHz PCLK the frame period is ~33 ms and
+                     * waiting blocked the main loop long enough to drop demo
+                     * samples; the halved scan rate itself already gives the
+                     * arbiter far more display-fetch slack. */
+                    (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -2088,7 +2070,6 @@ static void reading_scene_render(void)
                 s_prev_reading_nodata == (uint8_t)s_frame.no_data;
             s_prev_reading_color = s_frame.value_color;
             s_prev_reading_nodata = (uint8_t)s_frame.no_data;
-            s_frame_synced = false;
 
             {
                 uint16_t sfx_x = (uint16_t)(
@@ -2157,33 +2138,48 @@ static void reading_scene_render(void)
 
                 if (stable)
                 {
-                    /* Keep identical cells (skip their blit), erase vanished
-                     * ones, then rebuild the table from the planned set --
-                     * planned_count is bounded by RIF_CELL_MAX, so the
-                     * rebuild can never overflow. */
+                    /* Keep identical cells (skip their blit). Erase an old
+                     * cell only when its POSITION has no replacement this
+                     * frame -- a replaced glyph at the same spot must NOT be
+                     * pre-erased, or it sits black until its blit clears the
+                     * vsync wait (visible blank flash). The new tile carries
+                     * an opaque background and self-erases on write. */
                     uint8_t i;
                     for (i = 0u; i < s_cell_count; i++)
                     {
                         uint8_t j;
-                        rif_cell_t *match = NULL;
+                        bool occupied = false;
                         for (j = 0u; j < planned_count; j++)
                         {
                             if (planned[j].x == s_cells[i].x &&
-                                planned[j].y == s_cells[i].y &&
-                                planned[j].kind == s_cells[i].kind &&
-                                planned[j].code == s_cells[i].code)
+                                planned[j].y == s_cells[i].y)
                             {
-                                match = &planned[j];
+                                occupied = true;
                                 break;
                             }
                         }
-                        if (match != NULL)
-                            match->fresh = 0u; /* unchanged: skip blit */
-                        else
+                        if (!occupied)
                             (void)ui_fill_rect(s_cells[i].x, s_cells[i].y,
                                                FONT_DIGIT_WIDTH,
                                                FONT_DIGIT_HEIGHT,
                                                MAIN_DISPLAY_COLOR_BG);
+                    }
+                    /* Mark planned cells that already sit on canvas with the
+                     * same glyph identity: their blit can be skipped. */
+                    for (i = 0u; i < planned_count; i++)
+                    {
+                        uint8_t j;
+                        for (j = 0u; j < s_cell_count; j++)
+                        {
+                            if (s_cells[j].x == planned[i].x &&
+                                s_cells[j].y == planned[i].y &&
+                                s_cells[j].kind == planned[i].kind &&
+                                s_cells[j].code == planned[i].code)
+                            {
+                                planned[i].fresh = 0u;
+                                break;
+                            }
+                        }
                     }
                     s_cell_count = 0u;
                     for (i = 0u; i < planned_count; i++)
