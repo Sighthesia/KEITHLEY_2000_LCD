@@ -753,7 +753,7 @@ static lt7680_status_t configure_sdram(void)
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_CFG1, 0x03u);
     if (st != LT7680_OK) return st;
-    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0xF3u);
+    st = write_reg(LT7680_REG_SDRAM_REFRESH0, 0x79u);
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_SDRAM_REFRESH1, 0x00u);
     if (st != LT7680_OK) return st;
