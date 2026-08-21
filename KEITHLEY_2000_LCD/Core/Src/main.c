@@ -68,6 +68,46 @@
 #define RIF_BLIT_GAP_MS 1U
 #endif
 
+/* Change-diff bookkeeping for the reading band. Each cached tile carries an
+ * opaque black background covering its full 64x128 UI cell, so re-blitting a
+ * cell erases it; unchanged cells can skip the blit entirely and the whole
+ * band clear becomes unnecessary. Item 0 of the reading phase plans this
+ * frame's cells, keeps the ones identical to last frame (state KEPT), erases
+ * vanished ones, and flags new/moved ones (state FRESH) for the drawer. */
+#if RIF_BTE_RENDERER
+typedef struct
+{
+    uint16_t x;
+    uint16_t y;
+    uint32_t kind;
+    uint16_t code;
+    uint8_t fresh; /* 1 = must blit this frame */
+} rif_cell_t;
+
+#define RIF_CELL_MAX 24u
+static rif_cell_t s_cells[RIF_CELL_MAX];
+static uint8_t s_cell_count;
+static bool s_reading_diff;
+static uint16_t s_prev_reading_color = 0xFFFFu;
+static uint8_t s_prev_reading_nodata = 0xFFu;
+static char s_prev_suffix[4];
+static uint16_t s_prev_suffix_x;
+
+static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
+                                 uint16_t code)
+{
+    uint8_t i;
+
+    for (i = 0u; i < s_cell_count; i++)
+    {
+        if (s_cells[i].x == x && s_cells[i].y == y &&
+            s_cells[i].kind == kind && s_cells[i].code == code)
+            return &s_cells[i];
+    }
+    return NULL;
+}
+#endif
+
 /* Demo feed: synthesize K2000 host frames on a timer so the full
  * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
  * verified on the bench without an instrument. Values ramp up/down while the
@@ -776,6 +816,9 @@ static void rif_draw_fail(lt7680_status_t st)
 {
     s_rif_draw_job.active = false;
     s_rif_ready = false;
+#if RIF_BTE_RENDERER
+    s_cell_count = 0u; /* canvas identity no longer matches the cell table */
+#endif
     hal_uart_send_text("RIF fallback=");
     hal_uart_send_hex8((uint8_t)st);
     hal_uart_send_text("\r\n");
@@ -909,6 +952,42 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
 
         st = rif_tile_cache_lookup(s_rif_draw_job.kind, s_rif_draw_job.code,
                                    &entry);
+#if RIF_BTE_RENDERER
+        /* Diff mode: a cell whose glyph identity is unchanged already sits
+         * on the visible canvas pixel-for-pixel; skip the blit entirely. */
+        if (st == LT7680_OK && s_reading_diff)
+        {
+            rif_cell_t *cell = rif_cell_find(s_rif_draw_job.cx,
+                                             s_rif_draw_job.y,
+                                             s_rif_draw_job.kind,
+                                             s_rif_draw_job.code);
+            if (cell != NULL && cell->fresh == 0u)
+            {
+                s_rif_bte_hits++;
+                s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
+                                               s_rif_draw_job.tile.width);
+                s_rif_draw_job.text += s_rif_draw_job.advance;
+                if (*s_rif_draw_job.text == '\0')
+                {
+                    s_rif_draw_job.active = false;
+                    return true;
+                }
+                if (!rif_text_code(s_rif_draw_job.text,
+                                   &s_rif_draw_job.kind,
+                                   &s_rif_draw_job.code,
+                                   &s_rif_draw_job.advance))
+                {
+                    rif_draw_fail(LT7680_ERR_PARAM);
+                    return false;
+                }
+                s_rif_draw_job.resolving = true;
+                s_rif_draw_job.directory_index = 0u;
+                return false;
+            }
+            if (cell != NULL)
+                cell->fresh = 0u;
+        }
+#endif
         if (st == LT7680_OK && entry.ready != 0u && entry.width == 128u &&
             entry.height == 64u && entry.stride >= entry.width)
         {
@@ -1943,8 +2022,139 @@ static void reading_scene_render(void)
         uint8_t first_info;
         if (s_render_item == 0u)
         {
+#if RIF_BTE_RENDERER
+            /* Plan the frame's digit cells and keep every cell whose glyph
+             * identity is unchanged; only changed/vanished cells touch the
+             * hardware. Any state drift falls back to the full band clear. */
+            bool stable =
+                s_renderer.phase == RENDER_PHASE_UPDATE_READING &&
+                s_rif_ready && s_rif_dma_probe_passed && !s_frame.no_data &&
+                s_frame.value_color == MAIN_DISPLAY_COLOR_GREEN &&
+                s_prev_reading_color == s_frame.value_color &&
+                s_prev_reading_nodata == (uint8_t)s_frame.no_data;
+            s_prev_reading_color = s_frame.value_color;
+            s_prev_reading_nodata = (uint8_t)s_frame.no_data;
+
+            {
+                uint16_t sfx_x = (uint16_t)(
+                    s_frame.end_x +
+                    (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH);
+                if (strcmp(s_frame.unit_suffix, s_prev_suffix) != 0 ||
+                    sfx_x != s_prev_suffix_x)
+                {
+                    uint16_t lo = sfx_x < s_prev_suffix_x ? sfx_x
+                                                          : s_prev_suffix_x;
+                    uint16_t hi = sfx_x > s_prev_suffix_x ? sfx_x
+                                                          : s_prev_suffix_x;
+                    (void)ui_fill_rect(
+                        lo, MAIN_DISPLAY_DCAC_Y,
+                        (uint16_t)((hi - lo) + FONT_HALF_WIDTH * 2u),
+                        FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG);
+                    strncpy(s_prev_suffix, s_frame.unit_suffix,
+                            sizeof(s_prev_suffix) - 1u);
+                    s_prev_suffix[sizeof(s_prev_suffix) - 1u] = '\0';
+                    s_prev_suffix_x = sfx_x;
+                }
+            }
+
+            {
+                rif_cell_t planned[RIF_CELL_MAX];
+                uint8_t planned_count = 0u;
+                const char *p;
+                uint16_t cx;
+
+                p = s_frame.value;
+                cx = s_frame.start_x;
+                while (*p != '\0' && planned_count < RIF_CELL_MAX)
+                {
+                    uint32_t kind;
+                    uint16_t code;
+                    uint8_t advance;
+                    if (rif_text_code(p, &kind, &code, &advance))
+                    {
+                        planned[planned_count].x = cx;
+                        planned[planned_count].y = s_frame.reading_y;
+                        planned[planned_count].kind = kind;
+                        planned[planned_count].code = code;
+                        planned[planned_count].fresh = 1u;
+                        planned_count++;
+                        cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
+                    }
+                    p += advance;
+                }
+                p = s_frame.unit;
+                cx = s_frame.end_x;
+                while (*p != '\0' && planned_count < RIF_CELL_MAX)
+                {
+                    uint32_t kind;
+                    uint16_t code;
+                    uint8_t advance;
+                    if (rif_text_code(p, &kind, &code, &advance))
+                    {
+                        planned[planned_count].x = cx;
+                        planned[planned_count].y = s_frame.reading_y;
+                        planned[planned_count].kind = kind;
+                        planned[planned_count].code = code;
+                        planned[planned_count].fresh = 1u;
+                        planned_count++;
+                        cx = (uint16_t)(cx + FONT_DIGIT_WIDTH);
+                    }
+                    p += advance;
+                }
+
+                if (stable)
+                {
+                    /* Keep identical cells, erase vanished ones. */
+                    uint8_t i;
+                    uint8_t kept = 0u;
+                    for (i = 0u; i < s_cell_count; i++)
+                    {
+                        uint8_t j;
+                        rif_cell_t *match = NULL;
+                        for (j = 0u; j < planned_count; j++)
+                        {
+                            if (planned[j].x == s_cells[i].x &&
+                                planned[j].y == s_cells[i].y &&
+                                planned[j].kind == s_cells[i].kind &&
+                                planned[j].code == s_cells[i].code)
+                            {
+                                match = &planned[j];
+                                break;
+                            }
+                        }
+                        if (match != NULL)
+                        {
+                            match->fresh = 0u; /* unchanged: skip blit */
+                            s_cells[kept++] = s_cells[i];
+                        }
+                        else
+                        {
+                            (void)ui_fill_rect(s_cells[i].x, s_cells[i].y,
+                                               FONT_DIGIT_WIDTH,
+                                               FONT_DIGIT_HEIGHT,
+                                               MAIN_DISPLAY_COLOR_BG);
+                        }
+                    }
+                    for (i = 0u; i < planned_count; i++)
+                        s_cells[kept++] = planned[i];
+                    s_cell_count = kept;
+                    s_reading_diff = true;
+                }
+                else
+                {
+                    s_cell_count = 0u;
+                    for (uint8_t i = 0u; i < planned_count; i++)
+                        s_cells[s_cell_count++] = planned[i];
+                    s_reading_diff = false;
+                    (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
+                                       MAIN_DISPLAY_READING_H,
+                                       MAIN_DISPLAY_COLOR_BG);
+                }
+            }
+#else
             (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
                                MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG);
+#endif
             s_render_item++;
             return;
         }
