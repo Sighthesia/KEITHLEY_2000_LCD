@@ -1348,6 +1348,24 @@ static void rif_cache_bte_probe(void)
     hal_uart_send_hex8((uint8_t)(snapshot.height >> 8));
     hal_uart_send_hex8((uint8_t)snapshot.height);
     hal_uart_send_text("\r\n");
+
+    /* One-shot visual acceptance: show the blitted 4x4 block once. The cache
+     * pixel probe wrote pure green 0x07E0 at cache (0,0), so a correct BTE
+     * copy shows a small solid-green square; stretching or wrong colors mean
+     * the cached tile content is still bad. Restore black page 0 afterwards. */
+    if (lt7680_gfx_present_page(1u) == LT7680_OK &&
+        lt7680_write_reg(0x12u, 0x48u) == LT7680_OK) {
+        (void)lt7680_delay_ms(400u);
+        hal_uart_send_text("RIF cache BTE visual=SHOWN\r\n");
+    }
+    if (lt7680_write_reg(0x12u, 0x08u) != LT7680_OK ||
+        lt7680_gfx_select_canvas_page(1u) != LT7680_OK ||
+        lt7680_gfx_clear(0x0000u) != LT7680_OK ||
+        lt7680_gfx_select_canvas_page(0u) != LT7680_OK ||
+        lt7680_gfx_present_page(0u) != LT7680_OK)
+        hal_uart_send_text("RIF cache BTE visual restore=FAIL\r\n");
+    else
+        hal_uart_send_text("RIF cache BTE visual restore=BLACK-PAGE-0\r\n");
 }
 
 static void rif_init(void)
