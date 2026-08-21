@@ -65,7 +65,7 @@
  * display scan for SDRAM bandwidth and leave sparse single-pixel sparkles.
  * A 1 ms gap per glyph keeps ~10 glyphs/frame inside the 33 ms budget. */
 #ifndef RIF_BLIT_GAP_MS
-#define RIF_BLIT_GAP_MS 1U
+#define RIF_BLIT_GAP_MS 2U
 #endif
 
 /* Change-diff bookkeeping for the reading band. Each cached tile carries an
@@ -92,6 +92,7 @@ static uint16_t s_prev_reading_color = 0xFFFFu;
 static uint8_t s_prev_reading_nodata = 0xFFu;
 static char s_prev_suffix[4];
 static uint16_t s_prev_suffix_x;
+static bool s_frame_synced; /* vsync-wait done for this reading update */
 
 static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
                                  uint16_t code)
@@ -236,6 +237,29 @@ static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
 static uint16_t s_diff_skips;
 static uint16_t s_diff_fb;
+static bool s_intf_scanned;
+
+/* One-shot: find periodic interrupt flags in INTF (REG[0Ch]). Flags are
+ * latched (W1C); a bit that re-sets within a few frames is a display-timing
+ * event (VSYNC candidate) we can wait on before BTE bursts. */
+static void rif_intf_scan(void)
+{
+    uint8_t seen = 0u;
+    uint8_t v;
+    uint8_t i;
+
+    if (lt7680_write_reg(0x0Cu, 0xFFu) != LT7680_OK)
+        return;
+    for (i = 0u; i < 60u; i++)
+    {
+        if (lt7680_read_reg(0x0Cu, &v) == LT7680_OK)
+            seen |= v;
+        (void)lt7680_delay_ms(1u);
+    }
+    hal_uart_send_text("RIF INTF scan seen=");
+    hal_uart_send_hex8(seen);
+    hal_uart_send_text("\r\n");
+}
 static void rif_probe_send_hex32(uint32_t value);
 
 static void perf_record_frame(void)
@@ -270,6 +294,11 @@ static void perf_record_frame(void)
         hal_uart_send_text(" fb=");
         perf_send_u32(s_diff_fb);
         hal_uart_send_text("\r\n");
+        if (!s_intf_scanned)
+        {
+            s_intf_scanned = true;
+            rif_intf_scan();
+        }
     }
 }
 static uint16_t s_render_column;
@@ -1008,12 +1037,29 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
-                    /* Inter-blit gap: back-to-back BTE bursts contend with
-                     * the display scan for SDRAM bandwidth and leave sparse
-                     * single-pixel sparkles. A 1 ms pause per glyph keeps
-                     * ~10 glyphs/frame within the 33 ms budget while letting
-                     * the display engine refresh between transfers. */
-                    (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
+                    /* VSYNC-batched blitting: wait for the frame-latch flag
+                     * (INTF bit4) once per reading update, then issue every
+                     * blit of this update back-to-back with no gaps. All
+                     * bursts land in the same post-blank window instead of
+                     * colliding with the scan at random phases. Per-blit
+                     * waits cost a full frame each (measured fps 8), so
+                     * only the first blit of an update waits. */
+                    if (!s_frame_synced)
+                    {
+                        uint8_t waits;
+                        for (waits = 0u; waits < 20u; waits++)
+                        {
+                            uint8_t intf;
+                            if (lt7680_read_reg(0x0Cu, &intf) == LT7680_OK &&
+                                (intf & 0x10u) != 0u)
+                            {
+                                (void)lt7680_write_reg(0x0Cu, 0x10u);
+                                break;
+                            }
+                            (void)lt7680_delay_ms(1u);
+                        }
+                        s_frame_synced = true;
+                    }
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -2042,6 +2088,7 @@ static void reading_scene_render(void)
                 s_prev_reading_nodata == (uint8_t)s_frame.no_data;
             s_prev_reading_color = s_frame.value_color;
             s_prev_reading_nodata = (uint8_t)s_frame.no_data;
+            s_frame_synced = false;
 
             {
                 uint16_t sfx_x = (uint16_t)(
