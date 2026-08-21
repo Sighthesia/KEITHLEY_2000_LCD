@@ -1,11 +1,8 @@
 #include "rif_tile_cache.h"
 
 #include "lt7680_gfx.h"
-#include "hal_board.h"
 
 #include <stddef.h>
-
-static uint16_t s_write_mismatches;
 
 #define RIF_TILE_CACHE_STAGING_BASE 0x00200000u
 #define RIF_TILE_CACHE_BASE         0x00300000u
@@ -169,38 +166,6 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             if (st != LT7680_OK) {
                 entry->ready = 0u;
                 return st;
-            }
-        }
-
-        /* Readback sampling: the input data is CRC-clean, so any mismatch
-         * here proves the MRWDP write path drops or misplaces bytes. */
-        {
-            uint8_t k;
-            for (k = 0u; k < 8u; k++) {
-                uint16_t sr = (uint16_t)((k * 5u + 3u) % chunk_rows);
-                uint16_t sc = (uint16_t)((k * 23u + 11u) % tile->width);
-                uint16_t expect = s_chunk_pixels[
-                    ((uint32_t)sr * tile->stride + sc * 2u) / 2u];
-                uint16_t actual = 0u;
-
-                if (lt7680_gfx_peek_pixel((uint16_t)(row + sr), sc,
-                                          &actual) == LT7680_OK &&
-                    actual != expect) {
-                    s_write_mismatches++;
-                    if (s_write_mismatches <= 4u) {
-                        hal_uart_send_text("RIF tile vrf x=");
-                        hal_uart_send_hex8((uint8_t)(row + sr));
-                        hal_uart_send_text(" y=");
-                        hal_uart_send_hex8((uint8_t)sc);
-                        hal_uart_send_text(" exp=");
-                        hal_uart_send_hex8((uint8_t)(expect >> 8));
-                        hal_uart_send_hex8((uint8_t)expect);
-                        hal_uart_send_text(" act=");
-                        hal_uart_send_hex8((uint8_t)(actual >> 8));
-                        hal_uart_send_hex8((uint8_t)actual);
-                        hal_uart_send_text("\r\n");
-                    }
-                }
             }
         }
 

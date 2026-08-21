@@ -187,46 +187,7 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
-static bool s_rif_band_scanned;
 static void rif_probe_send_hex32(uint32_t value);
-
-/* One-shot anomaly scan over the reading band of the just-presented page.
- * The band should only contain black (0x0000) and the packed RIF neon-green
- * foreground (0x07C6); any other pixel is logged with its coordinates. */
-static void rif_band_scan(void)
-{
-    uint8_t logged = 0u;
-    uint16_t fx;
-    uint16_t fy;
-    uint32_t base = (uint32_t)s_visible_page * 0x100000u;
-
-    if (lt7680_gfx_set_canvas_base(base) != LT7680_OK)
-        return;
-    for (fy = 0u; fy < 700u && logged < 10u; fy += 4u) {
-        for (fx = 24u; fx < 192u && logged < 10u; fx += 2u) {
-            uint16_t px = 0u;
-
-            if (lt7680_gfx_peek_pixel(fx, fy, &px) != LT7680_OK)
-                continue;
-            if (px == 0x0000u || px == 0x07C6u)
-                continue;
-            hal_uart_send_text("RIF band scan x=");
-            hal_uart_send_hex8((uint8_t)(fx >> 8));
-            hal_uart_send_hex8((uint8_t)fx);
-            hal_uart_send_text(" y=");
-            hal_uart_send_hex8((uint8_t)(fy >> 8));
-            hal_uart_send_hex8((uint8_t)fy);
-            hal_uart_send_text(" px=");
-            hal_uart_send_hex8((uint8_t)(px >> 8));
-            hal_uart_send_hex8((uint8_t)px);
-            hal_uart_send_text("\r\n");
-            logged++;
-        }
-    }
-    (void)lt7680_gfx_set_canvas_base(
-        (uint32_t)s_render_page * 0x100000u);
-    hal_uart_send_text("RIF band scan done\r\n");
-}
 
 static void perf_record_frame(void)
 {
@@ -256,11 +217,6 @@ static void perf_record_frame(void)
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
         hal_uart_send_text("\r\n");
-        if (!s_rif_band_scanned && s_perf_fps >= 2u)
-        {
-            s_rif_band_scanned = true;
-            rif_band_scan();
-        }
     }
 }
 static uint16_t s_render_column;
@@ -932,24 +888,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             }
         }
         s_rif_bte_misses++;
-        if (s_rif_bte_misses == 1u)
-        {
-            hal_uart_send_text("RIF BTE first-miss color=");
-            hal_uart_send_hex8((uint8_t)(color >> 8));
-            hal_uart_send_hex8((uint8_t)color);
-            hal_uart_send_text(" kind=");
-            rif_probe_send_hex32(s_rif_draw_job.kind);
-            hal_uart_send_text(" code=");
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.code >> 8));
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.code);
-            hal_uart_send_text(" tfg=");
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.foreground >> 8));
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.foreground);
-            hal_uart_send_text(" tbg=");
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.background >> 8));
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.background);
-            hal_uart_send_text("\r\n");
-        }
     }
 #endif
 
@@ -1345,129 +1283,6 @@ static bool rif_cache_pixel_probe(void)
     return ok;
 }
 
-static void rif_log_bte_snapshot(void)
-{
-    lt7680_bte_snapshot_t snapshot;
-
-    if (lt7680_gfx_get_last_bte_setup(&snapshot) != LT7680_OK) {
-        hal_uart_send_text("RIF BTE snapshot=ERROR\r\n");
-        return;
-    }
-    hal_uart_send_text("RIF BTE snapshot ctrl0=");
-    hal_uart_send_hex8(snapshot.ctrl0);
-    hal_uart_send_text(" ctrl1=");
-    hal_uart_send_hex8(snapshot.ctrl1);
-    hal_uart_send_text(" colr=");
-    hal_uart_send_hex8(snapshot.colr);
-    hal_uart_send_text(" saddr=");
-    rif_probe_send_hex32(snapshot.source_address);
-    hal_uart_send_text(" swth=");
-    hal_uart_send_hex8((uint8_t)(snapshot.source_width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.source_width);
-    hal_uart_send_text(" sxy=");
-    hal_uart_send_hex8((uint8_t)(snapshot.source_x >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.source_x);
-    hal_uart_send_hex8((uint8_t)(snapshot.source_y >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.source_y);
-    hal_uart_send_text(" daddr=");
-    rif_probe_send_hex32(snapshot.destination_address);
-    hal_uart_send_text(" dwth=");
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_width);
-    hal_uart_send_text(" dxy=");
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_x >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_x);
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_y >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_y);
-    hal_uart_send_text(" size=");
-    hal_uart_send_hex8((uint8_t)(snapshot.width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.width);
-    hal_uart_send_hex8((uint8_t)(snapshot.height >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.height);
-    hal_uart_send_text("\r\n");
-}
-
-/* Command-level probe: blit a 4x4 block from the off-screen cache base to a
- * hidden page-1 location without switching the visible page, then log the
- * captured BTE setup so the cache-path parameters can be verified against
- * saddr=00300000 swth=0080 size=00040004. */
-static void rif_cache_bte_probe(void)
-{
-    lt7680_bte_snapshot_t snapshot;
-    lt7680_flash_dma_snapshot_t saved;
-    uint16_t line[4] = {0x07E0u, 0x07E0u, 0x07E0u, 0x07E0u};
-    lt7680_status_t st;
-    uint8_t row;
-
-    /* Fill a full 4x4 solid-green block at cache (0,0) first; the pixel
-     * probe only writes isolated pixels, and an unwritten source area would
-     * show stale SDRAM content as garbled colors. */
-    if (lt7680_flash_dma_read_snapshot(&saved) != LT7680_OK ||
-        lt7680_gfx_set_canvas_base(0x300000u) != LT7680_OK ||
-        lt7680_gfx_set_canvas_width(128u) != LT7680_OK)
-        return;
-    for (row = 0u; row < 4u; row++)
-        (void)lt7680_gfx_write_pixels(0u, row, line, 4u);
-    if (lt7680_gfx_set_canvas_base(saved.cvssa) != LT7680_OK ||
-        lt7680_gfx_set_canvas_width(saved.canvas_stride) != LT7680_OK)
-        return;
-
-    st = lt7680_gfx_blit(1u, 0x300000u, 128u, 200u, 500u, 4u, 4u);
-    if (st != LT7680_OK) {
-        hal_uart_send_text("RIF cache BTE probe status=");
-        hal_uart_send_hex8((uint8_t)st);
-        hal_uart_send_text("\r\n");
-        return;
-    }
-    if (lt7680_gfx_get_last_bte_setup(&snapshot) != LT7680_OK) {
-        hal_uart_send_text("RIF cache BTE probe snapshot=ERROR\r\n");
-        return;
-    }
-    hal_uart_send_text("RIF cache BTE probe ctrl1=");
-    hal_uart_send_hex8(snapshot.ctrl1);
-    hal_uart_send_text(" colr=");
-    hal_uart_send_hex8(snapshot.colr);
-    hal_uart_send_text(" saddr=");
-    rif_probe_send_hex32(snapshot.source_address);
-    hal_uart_send_text(" swth=");
-    hal_uart_send_hex8((uint8_t)(snapshot.source_width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.source_width);
-    hal_uart_send_text(" daddr=");
-    rif_probe_send_hex32(snapshot.destination_address);
-    hal_uart_send_text(" dwth=");
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_width);
-    hal_uart_send_text(" dxy=");
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_x >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_x);
-    hal_uart_send_hex8((uint8_t)(snapshot.destination_y >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.destination_y);
-    hal_uart_send_text(" size=");
-    hal_uart_send_hex8((uint8_t)(snapshot.width >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.width);
-    hal_uart_send_hex8((uint8_t)(snapshot.height >> 8));
-    hal_uart_send_hex8((uint8_t)snapshot.height);
-    hal_uart_send_text("\r\n");
-
-    /* One-shot visual acceptance: show the blitted 4x4 block once. The cache
-     * pixel probe wrote pure green 0x07E0 at cache (0,0), so a correct BTE
-     * copy shows a small solid-green square; stretching or wrong colors mean
-     * the cached tile content is still bad. Restore black page 0 afterwards. */
-    if (lt7680_gfx_present_page(1u) == LT7680_OK &&
-        lt7680_write_reg(0x12u, 0x48u) == LT7680_OK) {
-        (void)lt7680_delay_ms(400u);
-        hal_uart_send_text("RIF cache BTE visual=SHOWN\r\n");
-    }
-    if (lt7680_write_reg(0x12u, 0x08u) != LT7680_OK ||
-        lt7680_gfx_select_canvas_page(1u) != LT7680_OK ||
-        lt7680_gfx_clear(0x0000u) != LT7680_OK ||
-        lt7680_gfx_select_canvas_page(0u) != LT7680_OK ||
-        lt7680_gfx_present_page(0u) != LT7680_OK)
-        hal_uart_send_text("RIF cache BTE visual restore=FAIL\r\n");
-    else
-        hal_uart_send_text("RIF cache BTE visual restore=BLACK-PAGE-0\r\n");
-}
-
 static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
@@ -1632,8 +1447,6 @@ static void rif_init(void)
         bool cache_pixel_ok = rif_cache_pixel_probe();
         s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
     }
-    rif_log_bte_snapshot();
-    rif_cache_bte_probe();
     /* The BTE probe currently reports command completion only; until its
      * pixels are independently accepted, do not present its diagnostic page
      * during normal boot. */

@@ -137,7 +137,6 @@ lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
                                  uint16_t src_stride, uint16_t dst_x,
                                  uint16_t dst_y, uint16_t w, uint16_t h);
 lt7680_status_t lt7680_gfx_read_bte_snapshot(lt7680_bte_snapshot_t *snapshot);
-lt7680_status_t lt7680_gfx_get_last_bte_setup(lt7680_bte_snapshot_t *snapshot);
 lt7680_status_t lt7680_gfx_show_color_bars(void);
 lt7680_status_t lt7680_gfx_clear(uint16_t rgb565);
 lt7680_status_t lt7680_gfx_fill_rect(const lt7680_rect_t *rect, uint16_t rgb565);
