@@ -834,10 +834,13 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         return rif_find_next_tile();
 
 #if RIF_BTE_RENDERER
-    /* The cache stores the pure-transposed large glyph in framebuffer space.
-     * Any unverified color, size, cache, or BTE result uses the renderer below. */
+    /* The cache stores the pure-transposed large glyph in framebuffer space
+     * with colors baked in (RIF neon-green foreground on black). Only the
+     * background must match the canvas so the blit overlays cleanly; the
+     * packed foreground (#00FF33 -> 0x07C6) intentionally differs from the
+     * UI green constant. Any unverified size, cache, or BTE result uses the
+     * renderer below. */
     if (color == MAIN_DISPLAY_COLOR_GREEN &&
-        s_rif_draw_job.tile.foreground == MAIN_DISPLAY_COLOR_GREEN &&
         s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
         s_rif_draw_job.tile.width == 64u &&
         s_rif_draw_job.tile.height == 128u &&
