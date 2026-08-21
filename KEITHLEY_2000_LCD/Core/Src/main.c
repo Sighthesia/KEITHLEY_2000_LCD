@@ -234,6 +234,8 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
+static uint16_t s_diff_skips;
+static uint16_t s_diff_fb;
 static void rif_probe_send_hex32(uint32_t value);
 
 static void perf_record_frame(void)
@@ -263,6 +265,10 @@ static void perf_record_frame(void)
         perf_send_u32(s_rif_bte_hits);
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
+        hal_uart_send_text(" skip=");
+        perf_send_u32(s_diff_skips);
+        hal_uart_send_text(" fb=");
+        perf_send_u32(s_diff_fb);
         hal_uart_send_text("\r\n");
     }
 }
@@ -964,6 +970,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             if (cell != NULL && cell->fresh == 0u)
             {
                 s_rif_bte_hits++;
+                s_diff_skips++;
                 s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                s_rif_draw_job.tile.width);
                 s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -1113,6 +1120,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         return false;
 
     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx + s_rif_draw_job.tile.width);
+    s_diff_fb++;
     s_rif_draw_job.text += s_rif_draw_job.advance;
     if (*s_rif_draw_job.text == '\0')
     {
@@ -2102,9 +2110,11 @@ static void reading_scene_render(void)
 
                 if (stable)
                 {
-                    /* Keep identical cells, erase vanished ones. */
+                    /* Keep identical cells (skip their blit), erase vanished
+                     * ones, then rebuild the table from the planned set --
+                     * planned_count is bounded by RIF_CELL_MAX, so the
+                     * rebuild can never overflow. */
                     uint8_t i;
-                    uint8_t kept = 0u;
                     for (i = 0u; i < s_cell_count; i++)
                     {
                         uint8_t j;
@@ -2121,21 +2131,16 @@ static void reading_scene_render(void)
                             }
                         }
                         if (match != NULL)
-                        {
                             match->fresh = 0u; /* unchanged: skip blit */
-                            s_cells[kept++] = s_cells[i];
-                        }
                         else
-                        {
                             (void)ui_fill_rect(s_cells[i].x, s_cells[i].y,
                                                FONT_DIGIT_WIDTH,
                                                FONT_DIGIT_HEIGHT,
                                                MAIN_DISPLAY_COLOR_BG);
-                        }
                     }
+                    s_cell_count = 0u;
                     for (i = 0u; i < planned_count; i++)
-                        s_cells[kept++] = planned[i];
-                    s_cell_count = kept;
+                        s_cells[s_cell_count++] = planned[i];
                     s_reading_diff = true;
                 }
                 else
