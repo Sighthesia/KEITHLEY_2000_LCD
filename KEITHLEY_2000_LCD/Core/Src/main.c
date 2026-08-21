@@ -187,6 +187,7 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
+static void rif_probe_send_hex32(uint32_t value);
 
 static void perf_record_frame(void)
 {
@@ -884,6 +885,24 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             }
         }
         s_rif_bte_misses++;
+        if (s_rif_bte_misses == 1u)
+        {
+            hal_uart_send_text("RIF BTE first-miss color=");
+            hal_uart_send_hex8((uint8_t)(color >> 8));
+            hal_uart_send_hex8((uint8_t)color);
+            hal_uart_send_text(" kind=");
+            rif_probe_send_hex32(s_rif_draw_job.kind);
+            hal_uart_send_text(" code=");
+            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.code >> 8));
+            hal_uart_send_hex8((uint8_t)s_rif_draw_job.code);
+            hal_uart_send_text(" tfg=");
+            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.foreground >> 8));
+            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.foreground);
+            hal_uart_send_text(" tbg=");
+            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.background >> 8));
+            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.background);
+            hal_uart_send_text("\r\n");
+        }
     }
 #endif
 
