@@ -187,6 +187,14 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
+static uint32_t s_prof_fill_ms;
+static uint32_t s_prof_fill_n;
+static uint32_t s_prof_line_ms;
+static uint32_t s_prof_line_n;
+static uint32_t s_prof_blit_ms;
+static uint32_t s_prof_blit_n;
+static uint32_t s_prof_flash_ms;
+static uint32_t s_prof_flash_n;
 static void rif_probe_send_hex32(uint32_t value);
 
 static void perf_record_frame(void)
@@ -216,6 +224,22 @@ static void perf_record_frame(void)
         perf_send_u32(s_rif_bte_hits);
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
+        hal_uart_send_text(" fill=");
+        perf_send_u32(s_prof_fill_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_fill_n);
+        hal_uart_send_text(" line=");
+        perf_send_u32(s_prof_line_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_line_n);
+        hal_uart_send_text(" blit=");
+        perf_send_u32(s_prof_blit_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_blit_n);
+        hal_uart_send_text(" flsh=");
+        perf_send_u32(s_prof_flash_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_flash_n);
         hal_uart_send_text("\r\n");
     }
 }
@@ -506,6 +530,10 @@ static bool begin_hidden_frame(void)
         s_render_full_page = false;
         s_waiting_visible = false;
         s_perf_frame_start_tick = HAL_GetTick();
+        s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
+        s_prof_line_ms = 0u; s_prof_line_n = 0u;
+        s_prof_blit_ms = 0u; s_prof_blit_n = 0u;
+        s_prof_flash_ms = 0u; s_prof_flash_n = 0u;
     }
     s_frame_rendering = true;
     s_frame_has_trend_update = s_render_full_page;
@@ -612,20 +640,31 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
                                     uint16_t h, uint16_t color)
 {
     lt7680_rect_t rect;
+    uint32_t t0 = HAL_GetTick();
+    lt7680_status_t st;
 
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
-    return lt7680_gfx_fill_rect(&rect, color);
+    st = lt7680_gfx_fill_rect(&rect, color);
+    s_prof_fill_ms += HAL_GetTick() - t0;
+    s_prof_fill_n++;
+    return st;
 }
 
 static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
                                     uint16_t y1, uint16_t color)
 {
     uint16_t fx0, fy0, fx1, fy1;
+    uint32_t t0 = HAL_GetTick();
+    lt7680_status_t st;
+
     panel_transform_ui_to_fb(x0, y0, &fx0, &fy0);
     panel_transform_ui_to_fb(x1, y1, &fx1, &fy1);
-    return lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
-                                (int16_t)fx1, (int16_t)fy1, color);
+    st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
+                              (int16_t)fx1, (int16_t)fy1, color);
+    s_prof_line_ms += HAL_GetTick() - t0;
+    s_prof_line_n++;
+    return st;
 }
 
 static const uint8_t *text_glyph(const char *text, uint8_t *advance)
@@ -783,9 +822,14 @@ static bool rif_find_next_tile(void)
         rif_draw_fail(LT7680_ERR_PARAM);
         return false;
     }
-    st = lt7680_flash_read(s_rif_image.flash_base + s_rif_image.directory_offset +
-                               (uint32_t)s_rif_draw_job.directory_index * RIF_READER_ENTRY_SIZE,
-                           s_rif_draw_job.entry, RIF_READER_ENTRY_SIZE);
+    {
+        uint32_t t0 = HAL_GetTick();
+        st = lt7680_flash_read(s_rif_image.flash_base + s_rif_image.directory_offset +
+                                   (uint32_t)s_rif_draw_job.directory_index * RIF_READER_ENTRY_SIZE,
+                               s_rif_draw_job.entry, RIF_READER_ENTRY_SIZE);
+        s_prof_flash_ms += HAL_GetTick() - t0;
+        s_prof_flash_n++;
+    }
     if (st != LT7680_OK ||
         rif_reader_parse_entry(&s_rif_image, s_rif_draw_job.entry,
                                RIF_READER_ENTRY_SIZE, &entry) != RIF_OK)
@@ -849,6 +893,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         rif_tile_cache_entry_t entry;
         uint16_t fb_x;
         uint16_t fb_y;
+        uint32_t t_blit = HAL_GetTick();
 
         st = rif_tile_cache_lookup(s_rif_draw_job.kind, s_rif_draw_job.code,
                                    &entry);
@@ -862,6 +907,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             {
                 st = lt7680_gfx_blit(s_render_page, entry.address, entry.stride,
                                      fb_x, fb_y, entry.width, entry.height);
+                s_prof_blit_ms += HAL_GetTick() - t_blit;
+                s_prof_blit_n++;
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
@@ -900,11 +947,16 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                        s_rif_draw_job.row);
             s_rif_draw_job.block_row = s_rif_draw_job.row;
             s_rif_draw_job.block_rows = (uint8_t)(rows > 8u ? 8u : rows);
-            st = lt7680_flash_read(
-                s_rif_draw_job.tile.offset +
-                    (uint32_t)s_rif_draw_job.block_row * s_rif_draw_job.tile.stride,
-                s_rif_draw_job.pixels,
-                (uint16_t)s_rif_draw_job.block_rows * s_rif_draw_job.tile.stride);
+            {
+                uint32_t t0 = HAL_GetTick();
+                st = lt7680_flash_read(
+                    s_rif_draw_job.tile.offset +
+                        (uint32_t)s_rif_draw_job.block_row * s_rif_draw_job.tile.stride,
+                    s_rif_draw_job.pixels,
+                    (uint16_t)s_rif_draw_job.block_rows * s_rif_draw_job.tile.stride);
+                s_prof_flash_ms += HAL_GetTick() - t0;
+                s_prof_flash_n++;
+            }
             if (st != LT7680_OK)
             {
                 rif_draw_fail(st);
