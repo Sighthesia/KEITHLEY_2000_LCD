@@ -44,6 +44,21 @@ static uint32_t cache_tile_bytes(const rif_tile_t *tile, uint16_t *cache_width,
     return 0u;
 }
 
+static uint32_t crc32_update(uint32_t crc, const uint8_t *data, uint32_t len)
+{
+    uint32_t i;
+
+    for (i = 0u; i < len; i++) {
+        uint8_t b = data[i];
+        uint8_t bit;
+
+        crc ^= b;
+        for (bit = 0u; bit < 8u; bit++)
+            crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return crc;
+}
+
 static lt7680_status_t validate_slot(uint32_t address, uint32_t bytes)
 {
     uint64_t end = (uint64_t)address + bytes;
@@ -84,6 +99,7 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
     uint16_t col;
     uint32_t flash_address;
     uint16_t cache_row;
+    uint32_t crc;
     lt7680_status_t st;
     lt7680_flash_dma_snapshot_t saved;
 
@@ -113,6 +129,7 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
     }
 
     cache_address = s_next_address;
+    crc = 0xFFFFFFFFu;
     for (row = 0u; row < tile->height; ) {
         chunk_rows = (uint16_t)(tile->height - row);
         if (chunk_rows > RIF_TILE_CACHE_MAX_DMA_ROWS)
@@ -126,6 +143,8 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
             entry->ready = 0u;
             return st;
         }
+        crc = crc32_update(crc, (const uint8_t *)s_chunk_pixels,
+                           (uint32_t)tile->stride * chunk_rows);
 
         st = lt7680_gfx_set_canvas_base(cache_address);
         if (st != LT7680_OK) {
@@ -159,6 +178,11 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
     if (st != LT7680_OK) {
         entry->ready = 0u;
         return st;
+    }
+
+    if ((~crc) != tile->crc32) {
+        entry->ready = 0u;
+        return LT7680_ERR_BUS;
     }
 
     entry->ready = 0u;

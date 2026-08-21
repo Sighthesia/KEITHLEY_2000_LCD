@@ -98,5 +98,6 @@ rif_status_t rif_reader_find_glyph(const rif_image_t *image,
     out->stride = entry->stride;
     out->foreground = entry->foreground;
     out->background = entry->background;
+    out->crc32 = entry->crc32;
     return RIF_OK;
 }

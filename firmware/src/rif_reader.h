@@ -48,6 +48,7 @@ typedef struct {
     uint16_t stride;
     uint16_t foreground;
     uint16_t background;
+    uint32_t crc32;
 } rif_tile_t;
 
 rif_status_t rif_reader_parse_header(const uint8_t *data, uint16_t len,

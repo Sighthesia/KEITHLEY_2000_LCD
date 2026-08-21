@@ -1145,7 +1145,7 @@ static void rif_dma_probe(void)
     static const uint16_t probe_y = 16u;
     static const uint16_t probe_w = 64u;
     static const uint16_t probe_heights[] = {20u};
-    rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
+    rif_tile_t tile = {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u};
     lt7680_flash_dma_snapshot_t before;
     lt7680_flash_dma_snapshot_t after;
     lt7680_status_t dma_status = LT7680_ERR_UNSUPPORTED;
@@ -1616,7 +1616,14 @@ static void rif_init(void)
                                         &cache_tile,
                                         &cache_entry);
             if (st != LT7680_OK || cache_entry.ready == 0u)
+            {
                 cache_ready = false;
+                hal_uart_send_text("RIF tile build fail code=");
+                hal_uart_send_hex8((uint8_t)cache_chars[char_index]);
+                hal_uart_send_text(" status=");
+                hal_uart_send_hex8((uint8_t)st);
+                hal_uart_send_text("\r\n");
+            }
         }
         for (uint8_t sym = 0u; sym < FONT_DIGIT_SYM_COUNT; sym++)
         {
