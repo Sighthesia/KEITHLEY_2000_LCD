@@ -61,6 +61,13 @@
 #define RIF_BTE_RENDERER 1U
 #endif
 
+/* Pause between glyph blits (ms): back-to-back BTE bursts contend with the
+ * display scan for SDRAM bandwidth and leave sparse single-pixel sparkles.
+ * A 1 ms gap per glyph keeps ~10 glyphs/frame inside the 33 ms budget. */
+#ifndef RIF_BLIT_GAP_MS
+#define RIF_BLIT_GAP_MS 1U
+#endif
+
 /* Demo feed: synthesize K2000 host frames on a timer so the full
  * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
  * verified on the bench without an instrument. Values ramp up/down while the
@@ -915,6 +922,12 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
+                    /* Inter-blit gap: back-to-back BTE bursts contend with
+                     * the display scan for SDRAM bandwidth and leave sparse
+                     * single-pixel sparkles. A 1 ms pause per glyph keeps
+                     * ~10 glyphs/frame within the 33 ms budget while letting
+                     * the display engine refresh between transfers. */
+                    (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
