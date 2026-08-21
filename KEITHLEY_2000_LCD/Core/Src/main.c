@@ -65,7 +65,7 @@
  * display scan for SDRAM bandwidth and leave sparse single-pixel sparkles.
  * A 1 ms gap per glyph keeps ~10 glyphs/frame inside the 33 ms budget. */
 #ifndef RIF_BLIT_GAP_MS
-#define RIF_BLIT_GAP_MS 2U
+#define RIF_BLIT_GAP_MS 0U
 #endif
 
 /* Change-diff bookkeeping for the reading band. Each cached tile carries an
@@ -234,32 +234,6 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
-static uint16_t s_diff_skips;
-static uint16_t s_diff_fb;
-static bool s_intf_scanned;
-
-/* One-shot: find periodic interrupt flags in INTF (REG[0Ch]). Flags are
- * latched (W1C); a bit that re-sets within a few frames is a display-timing
- * event (VSYNC candidate) we can wait on before BTE bursts. */
-static void rif_intf_scan(void)
-{
-    uint8_t seen = 0u;
-    uint8_t v;
-    uint8_t i;
-
-    if (lt7680_write_reg(0x0Cu, 0xFFu) != LT7680_OK)
-        return;
-    for (i = 0u; i < 60u; i++)
-    {
-        if (lt7680_read_reg(0x0Cu, &v) == LT7680_OK)
-            seen |= v;
-        (void)lt7680_delay_ms(1u);
-    }
-    hal_uart_send_text("RIF INTF scan seen=");
-    hal_uart_send_hex8(seen);
-    hal_uart_send_text("\r\n");
-}
-static void rif_probe_send_hex32(uint32_t value);
 
 static void perf_record_frame(void)
 {
@@ -288,16 +262,7 @@ static void perf_record_frame(void)
         perf_send_u32(s_rif_bte_hits);
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
-        hal_uart_send_text(" skip=");
-        perf_send_u32(s_diff_skips);
-        hal_uart_send_text(" fb=");
-        perf_send_u32(s_diff_fb);
         hal_uart_send_text("\r\n");
-        if (!s_intf_scanned)
-        {
-            s_intf_scanned = true;
-            rif_intf_scan();
-        }
     }
 }
 static uint16_t s_render_column;
@@ -519,12 +484,19 @@ static void display_enable_after_initial_frame(void)
         }
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
-        s_page_text_generation[s_render_page] = s_frame_text_generation;
+        /* Dual-page rendering keeps both canvases identical; publish the
+         * per-page snapshots to BOTH so next-frame comparisons against
+         * either page match and never force a spurious full repaint. */
+        s_page_text_generation[0] = s_frame_text_generation;
+        s_page_text_generation[1] = s_frame_text_generation;
         if (s_frame_has_trend_update)
         {
-            s_page_trend_has_data[s_render_page] = s_frame.trend_has_data;
-            s_page_trend_minimum[s_render_page] = s_frame.trend_minimum;
-            s_page_trend_maximum[s_render_page] = s_frame.trend_maximum;
+            s_page_trend_has_data[0] = s_frame.trend_has_data;
+            s_page_trend_has_data[1] = s_frame.trend_has_data;
+            s_page_trend_minimum[0] = s_frame.trend_minimum;
+            s_page_trend_minimum[1] = s_frame.trend_minimum;
+            s_page_trend_maximum[0] = s_frame.trend_maximum;
+            s_page_trend_maximum[1] = s_frame.trend_maximum;
         }
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
@@ -708,8 +680,6 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
         if (st == LT7680_OK)
             st = lt7680_gfx_fill_rect(&rect, color);
     }
-    if (st == LT7680_OK)
-        st = lt7680_gfx_select_canvas_page(s_render_page);
     return st;
 }
 
@@ -729,8 +699,6 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
             st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
                                       (int16_t)fx1, (int16_t)fy1, color);
     }
-    if (st == LT7680_OK)
-        st = lt7680_gfx_select_canvas_page(s_render_page);
     return st;
 }
 
@@ -1022,7 +990,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             if (cell != NULL && cell->fresh == 0u)
             {
                 s_rif_bte_hits++;
-                s_diff_skips++;
                 s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                s_rif_draw_job.tile.width);
                 s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -1181,7 +1148,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         return false;
 
     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx + s_rif_draw_job.tile.width);
-    s_diff_fb++;
     s_rif_draw_job.text += s_rif_draw_job.advance;
     if (*s_rif_draw_job.text == '\0')
     {

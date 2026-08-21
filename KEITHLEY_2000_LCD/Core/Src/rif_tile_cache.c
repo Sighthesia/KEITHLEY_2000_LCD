@@ -185,6 +185,7 @@ lt7680_status_t rif_tile_cache_prepare(uint32_t kind, uint16_t code,
         return LT7680_ERR_BUS;
     }
 
+
     entry->ready = 0u;
     for (i = 0u; i < RIF_TILE_CACHE_SLOT_COUNT; i++) {
         if (s_entries[i].ready == 0u) {
