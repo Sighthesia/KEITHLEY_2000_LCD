@@ -1057,7 +1057,14 @@ static void rif_probe_send_hex32(uint32_t value)
     hal_uart_send_hex8((uint8_t)value);
 }
 
+static bool rif_find_tile_kind(uint32_t kind, uint16_t code, rif_tile_t *tile);
+
 static bool rif_find_tile_char(uint16_t code, rif_tile_t *tile)
+{
+    return rif_find_tile_kind(RIF_KIND_DIGIT_CHAR, code, tile);
+}
+
+static bool rif_find_tile_kind(uint32_t kind, uint16_t code, rif_tile_t *tile)
 {
     rif_entry_t entry;
     uint8_t entry_data[RIF_READER_ENTRY_SIZE];
@@ -1072,7 +1079,7 @@ static bool rif_find_tile_char(uint16_t code, rif_tile_t *tile)
             rif_reader_parse_entry(&s_rif_image, entry_data,
                                    RIF_READER_ENTRY_SIZE, &entry) != RIF_OK)
             return false;
-        if (rif_reader_find_glyph(&s_rif_image, &entry, RIF_KIND_DIGIT_CHAR,
+        if (rif_reader_find_glyph(&s_rif_image, &entry, kind,
                                   code, tile) == RIF_OK)
             return true;
     }
@@ -1608,6 +1615,20 @@ static void rif_init(void)
                                         (uint16_t)cache_chars[char_index],
                                         &cache_tile,
                                         &cache_entry);
+            if (st != LT7680_OK || cache_entry.ready == 0u)
+                cache_ready = false;
+        }
+        for (uint8_t sym = 0u; sym < FONT_DIGIT_SYM_COUNT; sym++)
+        {
+            rif_tile_t cache_tile;
+            rif_tile_cache_entry_t cache_entry;
+
+            if (!rif_find_tile_kind(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile))
+            {
+                continue;
+            }
+            st = rif_tile_cache_prepare(RIF_KIND_DIGIT_SYMBOL, sym,
+                                        &cache_tile, &cache_entry);
             if (st != LT7680_OK || cache_entry.ready == 0u)
                 cache_ready = false;
         }
