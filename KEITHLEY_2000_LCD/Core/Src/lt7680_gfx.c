@@ -18,6 +18,7 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
     0u, {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
          0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u}, LT7680_ERR_BUS
 };
+static lt7680_bte_snapshot_t s_last_bte_setup;
 
 /* LT7680A-R register map. Display timings follow the values reverse-engineered
  * from the original V16 display firmware (see DEBUG_NOTES / panel protocol). */
@@ -1043,6 +1044,8 @@ lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
     if (st != LT7680_OK) return st;
     st = wr13((uint8_t)(LT7680_REG_BTE_SIZE + 2u), h);
     if (st != LT7680_OK) return st;
+    st = lt7680_gfx_read_bte_snapshot(&s_last_bte_setup);
+    if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
     if (st != LT7680_OK) return st;
     return wait_bte_idle();
@@ -1097,6 +1100,14 @@ lt7680_status_t lt7680_gfx_read_bte_snapshot(lt7680_bte_snapshot_t *snapshot)
     if (st != LT7680_OK) return st;
     snapshot->status = LT7680_OK;
     return LT7680_OK;
+}
+
+lt7680_status_t lt7680_gfx_get_last_bte_setup(lt7680_bte_snapshot_t *snapshot)
+{
+    if (snapshot == NULL)
+        return LT7680_ERR_PARAM;
+    *snapshot = s_last_bte_setup;
+    return snapshot->status;
 }
 
 lt7680_status_t lt7680_gfx_show_color_bars(void)

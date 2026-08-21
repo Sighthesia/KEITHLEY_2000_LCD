@@ -1265,7 +1265,7 @@ static void rif_log_bte_snapshot(void)
 {
     lt7680_bte_snapshot_t snapshot;
 
-    if (lt7680_gfx_read_bte_snapshot(&snapshot) != LT7680_OK) {
+    if (lt7680_gfx_get_last_bte_setup(&snapshot) != LT7680_OK) {
         hal_uart_send_text("RIF BTE snapshot=ERROR\r\n");
         return;
     }
