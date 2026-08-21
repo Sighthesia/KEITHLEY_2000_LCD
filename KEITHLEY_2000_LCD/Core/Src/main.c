@@ -185,6 +185,9 @@ static void perf_format_display(char *out)
     out[12] = '\0';
 }
 
+static uint16_t s_rif_bte_hits;
+static uint16_t s_rif_bte_misses;
+
 static void perf_record_frame(void)
 {
     uint32_t now = HAL_GetTick();
@@ -208,6 +211,10 @@ static void perf_record_frame(void)
         perf_send_u32(s_perf_sample_count);
         hal_uart_send_text(" missed=");
         perf_send_u32(s_perf_sample_missed);
+        hal_uart_send_text(" bte-hit=");
+        perf_send_u32(s_rif_bte_hits);
+        hal_uart_send_text(" bte-miss=");
+        perf_send_u32(s_rif_bte_misses);
         hal_uart_send_text("\r\n");
     }
 }
@@ -853,6 +860,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                      fb_x, fb_y, entry.width, entry.height);
                 if (st == LT7680_OK)
                 {
+                    s_rif_bte_hits++;
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -875,6 +883,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 }
             }
         }
+        s_rif_bte_misses++;
     }
 #endif
 
