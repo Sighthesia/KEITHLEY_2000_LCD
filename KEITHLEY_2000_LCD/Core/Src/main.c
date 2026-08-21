@@ -1310,7 +1310,23 @@ static void rif_log_bte_snapshot(void)
 static void rif_cache_bte_probe(void)
 {
     lt7680_bte_snapshot_t snapshot;
+    lt7680_flash_dma_snapshot_t saved;
+    uint16_t line[4] = {0x07E0u, 0x07E0u, 0x07E0u, 0x07E0u};
     lt7680_status_t st;
+    uint8_t row;
+
+    /* Fill a full 4x4 solid-green block at cache (0,0) first; the pixel
+     * probe only writes isolated pixels, and an unwritten source area would
+     * show stale SDRAM content as garbled colors. */
+    if (lt7680_flash_dma_read_snapshot(&saved) != LT7680_OK ||
+        lt7680_gfx_set_canvas_base(0x300000u) != LT7680_OK ||
+        lt7680_gfx_set_canvas_width(128u) != LT7680_OK)
+        return;
+    for (row = 0u; row < 4u; row++)
+        (void)lt7680_gfx_write_pixels(0u, row, line, 4u);
+    if (lt7680_gfx_set_canvas_base(saved.cvssa) != LT7680_OK ||
+        lt7680_gfx_set_canvas_width(saved.canvas_stride) != LT7680_OK)
+        return;
 
     st = lt7680_gfx_blit(1u, 0x300000u, 128u, 200u, 500u, 4u, 4u);
     if (st != LT7680_OK) {
