@@ -37,10 +37,11 @@ int main(void)
 
     memcpy(entry, "DGTC", 4u);
     put32(entry + 8u, 0x1000u);
+    /* Transposed fb-orientation tile: 128x64, stride 256. */
     put32(entry + 12u, 16384u);
-    put16(entry + 16u, 64u);
-    put16(entry + 18u, 128u);
-    put16(entry + 20u, 128u);
+    put16(entry + 16u, 128u);
+    put16(entry + 18u, 64u);
+    put16(entry + 20u, 256u);
     entry[22] = '8';
     put16(entry + 28u, 0x07E6u);
     assert(rif_reader_parse_entry(&image, entry, sizeof(entry), &parsed) == RIF_OK);

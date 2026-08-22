@@ -86,13 +86,14 @@ rif_status_t rif_reader_find_glyph(const rif_image_t *image,
     if (entry->kind != kind || entry->code != code) {
         return RIF_ERR_FORMAT;
     }
-    /* Accept both orientations: UI-space 64x128 (legacy) and the
-     * framebuffer-transposed 128x64 used for direct flash DMA. */
-    if (!((entry->width == 64u && entry->height == 128u &&
-           entry->stride == 128u) ||
-          (entry->width == 128u && entry->height == 64u &&
-           entry->stride == 256u)) ||
-        entry->size != 16384u ||
+    /* Accept both orientations of the large-digit tile: UI-space
+     * WxH and its framebuffer transpose. Size must equal w*h*2. */
+    if (!(entry->width != 0u && entry->height != 0u &&
+          ((entry->width == entry->height * 2u &&
+            entry->stride == entry->width * 2u) ||
+           (entry->height == entry->width * 2u &&
+            entry->stride == entry->height * 2u))) ||
+        entry->size != (uint32_t)entry->width * entry->height * 2u ||
         entry->offset > image->image_size - entry->size) {
         return RIF_ERR_FORMAT;
     }

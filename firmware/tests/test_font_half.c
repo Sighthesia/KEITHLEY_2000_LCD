@@ -3,13 +3,13 @@
 #include "font_half.h"
 
 /* The half-height DC/AC suffix font is static data; the host test verifies
- * the module contract: 'D'/'C'/'A' resolve to a 32x64 MSB-first bitmap and
+ * the module contract: 'D'/'C'/'A' resolve to a 16x32 MSB-first bitmap and
  * are not blank, and unknown chars resolve to NULL. The base unit stays at
  * digit size, so only the DC/AC suffix uses this font. */
 int main(void)
 {
-    assert(font_half_width() == 32);
-    assert(font_half_height() == 64);
+    assert(font_half_width() == 16);
+    assert(font_half_height() == 32);
 
     const uint8_t *b = font_half_bitmap('D');
     assert(b != 0);
@@ -18,7 +18,7 @@ int main(void)
 
     unsigned nonzero = 0;
     int i;
-    for (i = 0; i < (32 * 64 / 8); i++) {
+    for (i = 0; i < (16 * 32 / 8); i++) {
         if (b[i] != 0) {
             nonzero++;
         }

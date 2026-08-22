@@ -966,9 +966,9 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
      * geometry or color falls through to the run-length renderer below. */
     if (color == MAIN_DISPLAY_COLOR_GREEN &&
         s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
-        s_rif_draw_job.tile.width == 128u &&
-        s_rif_draw_job.tile.height == 64u &&
-        s_rif_draw_job.tile.stride == 256u)
+        s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
+        s_rif_draw_job.tile.height == FONT_DIGIT_WIDTH &&
+        s_rif_draw_job.tile.stride == FONT_DIGIT_HEIGHT * 2u)
     {
         uint16_t fb_x;
         uint16_t fb_y;
@@ -1010,8 +1010,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             if (cell != NULL)
                 cell->fresh = 0u;
 
-            if ((uint32_t)fb_x + 128u <= MAIN_DISPLAY_UI_HEIGHT &&
-                (uint32_t)fb_y + 64u <= MAIN_DISPLAY_UI_WIDTH)
+            if ((uint32_t)fb_x + FONT_DIGIT_HEIGHT <= MAIN_DISPLAY_UI_HEIGHT &&
+                (uint32_t)fb_y + FONT_DIGIT_WIDTH <= MAIN_DISPLAY_UI_WIDTH)
             {
                 st = LT7680_OK;
                 for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
@@ -1019,7 +1019,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                     st = lt7680_flash_dma_tile_to_canvas(
                         s_rif_draw_job.tile.offset,
                         (uint32_t)pg * 0x100000u, 320u,
-                        fb_x, fb_y, 128u, 64u);
+                        fb_x, fb_y,
+                        FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
                 }
                 if (st == LT7680_OK)
                 {
