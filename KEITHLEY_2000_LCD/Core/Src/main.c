@@ -92,6 +92,7 @@ static uint16_t s_prev_reading_color = 0xFFFFu;
 static uint8_t s_prev_reading_nodata = 0xFFu;
 static char s_prev_suffix[4];
 static uint16_t s_prev_suffix_x;
+static bool s_suffix_pending;   /* suffix erased/changed, needs redraw */
 
 static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
                                  uint16_t code)
@@ -2132,6 +2133,9 @@ static void reading_scene_render(void)
                 if (strcmp(s_frame.unit_suffix, s_prev_suffix) != 0 ||
                     sfx_x != s_prev_suffix_x)
                 {
+                    /* Erase the union of old and new suffix footprints.
+                     * s_prev_suffix keeps describing what is actually on
+                     * canvas until the new suffix finishes drawing. */
                     uint16_t lo = sfx_x < s_prev_suffix_x ? sfx_x
                                                           : s_prev_suffix_x;
                     uint16_t hi = sfx_x > s_prev_suffix_x ? sfx_x
@@ -2140,11 +2144,10 @@ static void reading_scene_render(void)
                         lo, MAIN_DISPLAY_DCAC_Y,
                         (uint16_t)((hi - lo) + FONT_HALF_WIDTH * 2u),
                         FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG);
-                    strncpy(s_prev_suffix, s_frame.unit_suffix,
-                            sizeof(s_prev_suffix) - 1u);
-                    s_prev_suffix[sizeof(s_prev_suffix) - 1u] = '\0';
-                    s_prev_suffix_x = sfx_x;
+                    s_suffix_pending = true;
                 }
+                else
+                    s_suffix_pending = false;
             }
 
             {
