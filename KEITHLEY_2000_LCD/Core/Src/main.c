@@ -122,7 +122,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #define K2000_DEMO_FEED 1U
 
 /* The sample clock and the display clock are deliberately independent. */
-#define DEMO_SAMPLE_PERIOD_MS 2u
+#define DEMO_SAMPLE_PERIOD_MS 100u
 #define DISPLAY_FRAME_PERIOD_MS 33u
 
 /* USER CODE END PD */
@@ -179,7 +179,6 @@ static float s_page_trend_maximum[2];
 static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
-static uint32_t s_status_refresh_tick;
 static uint32_t s_trend_refresh_tick;
 static uint32_t s_display_due_tick;
 static uint32_t s_perf_frame_start_tick;
@@ -1759,16 +1758,35 @@ static bool reading_draw_info(uint8_t n)
             return ui_draw_text(vx, ty, s_frame.rate,
                                 MAIN_DISPLAY_COLOR_WHITE);
         default:
-            if (!ui_draw_text(vx, ty, "FILT",
-                              s_frame.status_active[7] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
-                return false;
-            if (!ui_draw_text((uint16_t)(vx + 4u * FONT_TEXT_WIDTH), ty, "REL",
-                              s_frame.status_active[6] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
-                return false;
-            if (!ui_draw_text((uint16_t)(vx + 8u * FONT_TEXT_WIDTH), ty, "MATH",
-                              s_frame.status_active[11] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED))
-                return false;
-            return true;
+        {
+            /* The three lamps form one resumable sequence. An interrupted
+             * slice must resume the INTERRUPTED string: restarting from
+             * "FILT" would complete the still-active job, then re-init and
+             * redraw the finished strings every slice, starving the last
+             * lamp's budget forever (item never advances, frame never
+             * commits). */
+            static const char *const lamps[3] = {"FILT", "REL", "MATH"};
+            static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
+            static uint8_t lamp_index;
+            for (;;)
+            {
+                uint16_t lx =
+                    (uint16_t)(vx + (uint16_t)lamp_index *
+                                        4u * FONT_TEXT_WIDTH);
+                uint16_t lc =
+                    s_frame.status_active[lamp_bits[lamp_index]]
+                        ? MAIN_DISPLAY_COLOR_GREEN
+                        : MAIN_DISPLAY_COLOR_MUTED;
+                if (!ui_draw_text(lx, ty, lamps[lamp_index], lc))
+                    return false;
+                lamp_index++;
+                if (lamp_index >= 3u)
+                {
+                    lamp_index = 0u;
+                    return true;
+                }
+            }
+        }
         }
     }
 }
@@ -1920,11 +1938,46 @@ static bool trend_scale_close(float page_min, float page_max,
     return dmin <= tol && dmax <= tol;
 }
 
+/* True when any rendered status/info text differs from what is on screen.
+ * Status TAGs arrive with every sample, but a top-bar + info-cell repaint
+ * costs thousands of GE fill transactions; only a real content change may
+ * schedule one. The perf GPIB string is deliberately excluded (it changes
+ * every frame and is decorative). */
+static bool status_view_changed(void)
+{
+    static const uint8_t lamp_idx[8] = {0u, 1u, 2u, 3u, 5u, 7u, 6u, 11u};
+    static char prev_impedance[12];
+    static char prev_range[12];
+    static char prev_rate[16];
+    static uint8_t prev_lamps;
+    static bool valid;
+    uint8_t lamps = 0u;
+    uint8_t i;
+
+    for (i = 0u; i < 8u; i++)
+    {
+        if (s_frame.status_active[lamp_idx[i]])
+            lamps = (uint8_t)(lamps | (uint8_t)(1u << i));
+    }
+    if (valid && strcmp(prev_impedance, s_frame.impedance) == 0 &&
+        strcmp(prev_range, s_frame.range) == 0 &&
+        strcmp(prev_rate, s_frame.rate) == 0 && lamps == prev_lamps)
+        return false;
+    strncpy(prev_impedance, s_frame.impedance, sizeof(prev_impedance) - 1u);
+    prev_impedance[sizeof(prev_impedance) - 1u] = '\0';
+    strncpy(prev_range, s_frame.range, sizeof(prev_range) - 1u);
+    prev_range[sizeof(prev_range) - 1u] = '\0';
+    strncpy(prev_rate, s_frame.rate, sizeof(prev_rate) - 1u);
+    prev_rate[sizeof(prev_rate) - 1u] = '\0';
+    prev_lamps = lamps;
+    valid = true;
+    return true;
+}
+
 static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
     bool initial_phase;
-    bool status_due;
     uint8_t due_regions;
     bool trend_due;
     bool display_due;
@@ -1951,23 +2004,30 @@ static void reading_scene_render(void)
      * restarted, so every bitmap/graph slice progresses at 500 readings/s. */
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
+        bool status_dirty =
+            (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
         due_regions = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
-        /* Status text (top bar + reading info cells) redraws at most 1 Hz so
-         * its many small glyph transactions cannot monopolize the renderer. */
-        status_due = (uint32_t)(now - s_status_refresh_tick) >= 1000u;
-        if (status_due)
-            due_regions |= (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_STATUS);
         trend_due = (now - s_trend_refresh_tick) >= 200u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
-        if (display_due && (due_regions != 0u || trend_due ||
-                            s_perf_sample_count != 0u))
+        if (display_due && (due_regions != 0u || status_dirty ||
+                            trend_due || s_perf_sample_count != 0u))
         {
             s_render_page = (uint8_t)(s_visible_page ^ 1u);
             s_render_full_page =
                 (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
             main_display_format(&s_ui, &s_frame);
             perf_format_display(s_frame.gpib);
+            /* Content-change gate: a STATUS flag alone (set by every
+             * sample's status TAGs) must not trigger the expensive
+             * top-bar + info-cell repaint unless something rendered in
+             * them actually changed. */
+            if (status_dirty)
+            {
+                s_ui_dirty_regions &= (uint8_t)~RENDER_DIRTY_STATUS;
+                if (status_view_changed())
+                    due_regions |= RENDER_DIRTY_STATUS;
+            }
             (void)trend_buffer_project(&s_trend, now, s_trend_columns,
                                        TREND_MAX_COLUMNS);
             main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
@@ -1993,8 +2053,6 @@ static void reading_scene_render(void)
                 page_text_stale = due_regions != 0u;
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
                     s_text_refresh_tick = now;
-                if ((due_regions & RENDER_DIRTY_STATUS) != 0u)
-                    s_status_refresh_tick = now;
                 if (trend_due)
                     s_trend_refresh_tick = now;
                 s_display_due_tick = now;
