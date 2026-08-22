@@ -561,9 +561,10 @@ lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
                 (uint32_t)width_px * height * 2u;
     dest_end = (uint64_t)canvas_base + dy * canvas_stride * 2u +
                dx * 2u + (uint32_t)width_px * height * 2u;
+    /* Canvas pages live at 0x000000/0x100000 -- any in-range SDRAM base
+     * is legal as long as the whole destination rectangle fits. */
     if (flash_end > 0x01000000u ||
-        canvas_base < 0x00200000u || dest_end < canvas_base ||
-        dest_end > 0x01000000u) {
+        dest_end < canvas_base || dest_end > 0x01000000u) {
         return LT7680_ERR_PARAM;
     }
 

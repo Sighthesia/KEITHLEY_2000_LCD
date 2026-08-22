@@ -1303,8 +1303,8 @@ static void rif_dma_probe(void)
      * The staging address is outside both canvas pages; the current API cannot
      * target a hidden page directly. */
     if (rif_find_tile_char((uint16_t)'8', &tile) &&
-        tile.width == 64u && tile.height == 128u &&
-        tile.stride == 128u && tile.size == 16384u)
+        tile.width != 0u && tile.height != 0u &&
+        tile.size == (uint32_t)tile.width * tile.height * 2u)
     {
         for (uint8_t i = 0u; i < (uint8_t)(sizeof(probe_heights) /
                                            sizeof(probe_heights[0])); ++i)

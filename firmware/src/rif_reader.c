@@ -91,8 +91,7 @@ rif_status_t rif_reader_find_glyph(const rif_image_t *image,
     if (!(entry->width != 0u && entry->height != 0u &&
           ((entry->width == entry->height * 2u &&
             entry->stride == entry->width * 2u) ||
-           (entry->height == entry->width * 2u &&
-            entry->stride == entry->height * 2u))) ||
+           (entry->height == entry->width * 2u))) ||
         entry->size != (uint32_t)entry->width * entry->height * 2u ||
         entry->offset > image->image_size - entry->size) {
         return RIF_ERR_FORMAT;
