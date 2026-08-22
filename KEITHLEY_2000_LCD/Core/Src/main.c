@@ -372,6 +372,7 @@ static const demo_unit_t s_demo_units[] = {
 #define DEMO_SAMPLES_PER_UNIT 40u
 
 static uint32_t s_demo_last_tick;
+static uint32_t s_demo_status_tick;
 static uint32_t s_demo_sample;
 static bool s_demo_event_reported;
 static bool s_demo_commit_reported;
@@ -459,12 +460,16 @@ static void k2000_demo_feed(void)
         for (p = text; *p != '\0'; p++)
             k2000_proto_feed((uint8_t)*p);
         demo_feed_unit(u->unit);
-        k2000_proto_feed(K2000_TAG_STATUS_REL);
-        k2000_proto_feed(u->status09);
-        k2000_proto_feed(K2000_TAG_STATUS_HOLD);
-        k2000_proto_feed(u->status08);
-        k2000_proto_feed(K2000_TAG_STATUS_SHIFT);
-        k2000_proto_feed((unit_index % 4u == 3u) ? 0x20u : 0x00u);
+        if ((uint16_t)(now - s_demo_status_tick) >= 2000u)
+        {
+            k2000_proto_feed(K2000_TAG_STATUS_REL);
+            k2000_proto_feed(u->status09);
+            k2000_proto_feed(K2000_TAG_STATUS_HOLD);
+            k2000_proto_feed(u->status08);
+            k2000_proto_feed(K2000_TAG_STATUS_SHIFT);
+            k2000_proto_feed((unit_index % 4u == 3u) ? 0x20u : 0x00u);
+            s_demo_status_tick = now;
+        }
         s_demo_sample++;
         s_perf_sample_count++;
     }
@@ -533,6 +538,7 @@ static void display_enable_after_initial_frame(void)
             s_renderer.initial_complete_edge = false;
 #if K2000_DEMO_FEED
             s_demo_last_tick = HAL_GetTick();
+            s_demo_status_tick = HAL_GetTick();
 #endif
             if (!initial_complete)
                 hal_uart_send_text("PASS frame page enabled\r\n");

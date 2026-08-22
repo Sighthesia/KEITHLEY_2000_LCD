@@ -615,6 +615,12 @@ lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
     if (write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE) != LT7680_OK) {
         restore_st = LT7680_ERR_BUS;
     }
+    /* Restore the safe FIFO divisor: tile_to_canvas runs the DMA at
+     * full speed (DIV=0), but lt7680_flash_read's byte-wise CS
+     * transactions are only proven at DIVISOR_SAFE. */
+    if (write_reg(LT7680_REG_SPI_DIV, LT7680_SPI_DIVISOR_SAFE) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
     if (write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_SFCS1_DMA) != LT7680_OK) {
         restore_st = LT7680_ERR_BUS;
     }
