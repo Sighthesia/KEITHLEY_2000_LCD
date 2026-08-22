@@ -121,6 +121,9 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 #define LT7680_SPI_STATUS_RX_EMPTY 0x20u
 #define LT7680_SPI_STATUS_OVERFLOW 0x08u
 #define LT7680_SPI_DIVISOR_SAFE 0x0Fu
+/* Vendor V16 firmware drives the serial-flash DMA at SPI_DIV=0 (full
+ * speed) for both full-screen strips and per-glyph linear transfers. */
+#define LT7680_SPI_DIVISOR_DMA  0x00u
 #define LT7680_SFL_CTRL_SFCS1_DMA 0xC0u
 #define LT7680_SPI_CTRL_DMA 0x3Cu
 /* SFCS0, host FIFO access, 24-bit address, standard 03h/9Fh command mode.
@@ -520,6 +523,97 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
         restore_st = LT7680_ERR_BUS;
     }
     /* Keep U5 selected on SFCS1 without issuing any Flash write command. */
+    if (write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_SFCS1_DMA) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    return st != LT7680_OK ? st : restore_st;
+}
+
+/* Draw a pre-transposed RGB565 tile straight from serial flash onto the
+ * CURRENT canvas page -- one hardware block DMA, no BTE, no MCU pixel work.
+ * This mirrors the vendor V16 firmware, whose glyph path is exactly this:
+ * SFL flash-DMA mode, full-speed SPI divisor, block geometry with the
+ * destination at (dx,dy) inside the selected canvas.
+ *
+ * canvas_base/canvas_stride describe the destination page; they are saved
+ * and restored so the caller can keep composing on its render page. */
+lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
+                                                uint32_t canvas_base,
+                                                uint16_t canvas_stride,
+                                                uint16_t dx, uint16_t dy,
+                                                uint16_t width_px,
+                                                uint16_t height)
+{
+    uint64_t flash_end;
+    uint64_t dest_end;
+    uint32_t saved_cvssa;
+    uint16_t saved_canvas_stride;
+    lt7680_status_t st;
+    lt7680_status_t restore_st = LT7680_OK;
+    uint8_t value;
+
+    if (flash_address > 0x00FFFFFFu || width_px == 0u || height == 0u ||
+        canvas_stride == 0u ||
+        (uint32_t)dx + width_px > canvas_stride) {
+        return LT7680_ERR_PARAM;
+    }
+    flash_end = (uint64_t)flash_address +
+                (uint32_t)width_px * height * 2u;
+    dest_end = (uint64_t)canvas_base + dy * canvas_stride * 2u +
+               dx * 2u + (uint32_t)width_px * height * 2u;
+    if (flash_end > 0x01000000u ||
+        canvas_base < 0x00200000u || dest_end < canvas_base ||
+        dest_end > 0x01000000u) {
+        return LT7680_ERR_PARAM;
+    }
+
+    st = lt7680_read_reg(LT7680_REG_CVSSA0, &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 1u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 8;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 2u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 16;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVSSA0 + 3u), &value);
+    if (st != LT7680_OK) return st;
+    saved_cvssa |= (uint32_t)value << 24;
+    st = lt7680_read_reg(LT7680_REG_CVS_IMWTH0, &value);
+    if (st != LT7680_OK) return st;
+    saved_canvas_stride = value;
+    st = lt7680_read_reg((uint8_t)(LT7680_REG_CVS_IMWTH0 + 1u), &value);
+    if (st != LT7680_OK) return st;
+    saved_canvas_stride |= (uint16_t)value << 8;
+
+    /* Aim the canvas at the destination page. */
+    st = wr32le(LT7680_REG_CVSSA0, canvas_base);
+    if (st == LT7680_OK) st = wr13(LT7680_REG_CVS_IMWTH0, canvas_stride);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SFL_CTRL,
+                                        LT7680_SFL_CTRL_SFCS1_DMA);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPIMCR2,
+                                        LT7680_SPI_CTRL_DMA);
+    /* Vendor runs the glyph DMA at full SPI speed. */
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_SPI_DIV,
+                                        LT7680_SPI_DIVISOR_DMA);
+    if (st == LT7680_OK) st = wr32le(LT7680_REG_DMA_SSTR, flash_address);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DX, dx);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_DY, dy);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_WTH, width_px);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_HIGH, height);
+    if (st == LT7680_OK) st = wr16le(LT7680_REG_DMA_SWTH, width_px);
+    if (st == LT7680_OK) st = write_reg(LT7680_REG_DMA_CTRL, 0x01u);
+    if (st == LT7680_OK) st = wait_dma_idle();
+
+    if (wr32le(LT7680_REG_CVSSA0, saved_cvssa) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    if (wr13(LT7680_REG_CVS_IMWTH0, saved_canvas_stride) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
+    if (write_reg(LT7680_REG_SPIMCR2, LT7680_SPI_CTRL_IDLE) != LT7680_OK) {
+        restore_st = LT7680_ERR_BUS;
+    }
     if (write_reg(LT7680_REG_SFL_CTRL, LT7680_SFL_CTRL_SFCS1_DMA) != LT7680_OK) {
         restore_st = LT7680_ERR_BUS;
     }

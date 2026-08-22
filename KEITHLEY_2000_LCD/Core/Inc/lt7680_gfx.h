@@ -163,6 +163,15 @@ lt7680_status_t lt7680_flash_dma_to_sdram(uint32_t flash_address,
                                           uint16_t width_bytes,
                                           uint16_t height,
                                           uint16_t destination_stride_pixels);
+/* One block DMA from serial flash straight onto a canvas page: the vendor
+ * glyph path. Tile must be pre-transposed (fb orientation). Selects the
+ * destination page internally and restores the previous canvas. */
+lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
+                                                uint32_t canvas_base,
+                                                uint16_t canvas_stride,
+                                                uint16_t dx, uint16_t dy,
+                                                uint16_t width_px,
+                                                uint16_t height);
 lt7680_status_t lt7680_flash_read_jedec_id(uint8_t id[3]);
 lt7680_status_t lt7680_flash_jedec_diagnostic(lt7680_flash_jedec_diag_t *diag);
 lt7680_status_t lt7680_flash_cs_diagnostic(lt7680_flash_cs_diag_t *diag);

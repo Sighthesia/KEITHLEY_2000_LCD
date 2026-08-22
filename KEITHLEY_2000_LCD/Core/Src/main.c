@@ -309,7 +309,7 @@ typedef struct
     uint8_t entry[RIF_READER_ENTRY_SIZE];
     /* Eight 64-pixel RGB565 rows. Keeping the read contiguous avoids
      * reinitializing the LT7680 Flash Master for every 32-pixel half-row. */
-    uint8_t pixels[1024];
+    uint8_t pixels[2048];
 } rif_draw_job_t;
 
 static rif_image_t s_rif_image;
@@ -960,33 +960,30 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         return rif_find_next_tile();
 
 #if RIF_BTE_RENDERER
-    /* The cache stores the pure-transposed large glyph in framebuffer space
-     * with colors baked in (RIF neon-green foreground on black). Only the
-     * background must match the canvas so the blit overlays cleanly; the
-     * packed foreground (#00FF33 -> 0x07C6) intentionally differs from the
-     * UI green constant. Any unverified size, cache, or BTE result uses the
-     * renderer below. */
+    /* Vendor glyph path: tiles are stored PRE-TRANSPOSED in U5 (128x64,
+     * stride 256) and drawn with a single block DMA flash->canvas. Colors
+     * are baked in; only the background must match the canvas. Any other
+     * geometry or color falls through to the run-length renderer below. */
     if (color == MAIN_DISPLAY_COLOR_GREEN &&
         s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
-        s_rif_draw_job.tile.width == 64u &&
-        s_rif_draw_job.tile.height == 128u &&
-        s_rif_draw_job.tile.stride == 128u)
+        s_rif_draw_job.tile.width == 128u &&
+        s_rif_draw_job.tile.height == 64u &&
+        s_rif_draw_job.tile.stride == 256u)
     {
-        rif_tile_cache_entry_t entry;
         uint16_t fb_x;
         uint16_t fb_y;
 
-        st = rif_tile_cache_lookup(s_rif_draw_job.kind, s_rif_draw_job.code,
-                                   &entry);
-#if RIF_BTE_RENDERER
-        /* Diff mode: a cell whose glyph identity is unchanged already sits
-         * on the visible canvas pixel-for-pixel; skip the blit entirely. */
-        if (st == LT7680_OK && s_reading_diff)
         {
-            rif_cell_t *cell = rif_cell_find(s_rif_draw_job.cx,
-                                             s_rif_draw_job.y,
-                                             s_rif_draw_job.kind,
-                                             s_rif_draw_job.code);
+            rif_cell_t *cell = NULL;
+            panel_transform_ui_to_fb(s_rif_draw_job.cx, s_rif_draw_job.y,
+                                     &fb_x, &fb_y);
+            /* Diff mode: a cell whose glyph identity is unchanged already
+             * sits on both canvases pixel-for-pixel; skip entirely. */
+            if (s_reading_diff)
+                cell = rif_cell_find(s_rif_draw_job.cx,
+                                     s_rif_draw_job.y,
+                                     s_rif_draw_job.kind,
+                                     s_rif_draw_job.code);
             if (cell != NULL && cell->fresh == 0u)
             {
                 s_rif_bte_hits++;
@@ -1012,36 +1009,21 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             }
             if (cell != NULL)
                 cell->fresh = 0u;
-        }
-#endif
-        if (st == LT7680_OK && entry.ready != 0u && entry.width == 128u &&
-            entry.height == 64u && entry.stride >= entry.width)
-        {
-            panel_transform_ui_to_fb(s_rif_draw_job.cx, s_rif_draw_job.y,
-                                     &fb_x, &fb_y);
-            if ((uint32_t)fb_x + entry.width <= MAIN_DISPLAY_UI_HEIGHT &&
-                (uint32_t)fb_y + entry.height <= MAIN_DISPLAY_UI_WIDTH)
+
+            if ((uint32_t)fb_x + 128u <= MAIN_DISPLAY_UI_HEIGHT &&
+                (uint32_t)fb_y + 64u <= MAIN_DISPLAY_UI_WIDTH)
             {
                 st = LT7680_OK;
                 for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
                 {
-                    st = lt7680_gfx_select_canvas_page(pg);
-                    if (st == LT7680_OK)
-                        st = lt7680_gfx_blit(pg, entry.address, entry.stride,
-                                             fb_x, fb_y, entry.width,
-                                             entry.height);
+                    st = lt7680_flash_dma_tile_to_canvas(
+                        s_rif_draw_job.tile.offset,
+                        (uint32_t)pg * 0x100000u, 320u,
+                        fb_x, fb_y, 128u, 64u);
                 }
-                st = lt7680_gfx_select_canvas_page(s_render_page) == LT7680_OK
-                         ? st : LT7680_ERR_BUS;
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
-                    /* Small inter-blit gap only. The per-blit VSYNC wait was
-                     * removed: at 25 MHz PCLK the frame period is ~33 ms and
-                     * waiting blocked the main loop long enough to drop demo
-                     * samples. Blits target the hidden page (dual-page sync),
-                     * so scan collisions cannot corrupt visible pixels. */
-                    (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    s_rif_draw_job.tile.width);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
@@ -1630,7 +1612,9 @@ static void rif_init(void)
      * during normal boot. */
     if (s_rif_dma_probe_passed)
     {
-        bool cache_ready = true;
+        /* Glyphs draw straight from U5 via block DMA -- no SDRAM cache to
+         * build. Just walk the directory once into the RAM lookup table so
+         * per-glyph resolution is O(1) at render time. */
         static const char cache_chars[] =
             "0123456789.+-Ee%mukKMWVOhDAC?RFLHzs";
         uint16_t char_index;
@@ -1638,49 +1622,22 @@ static void rif_init(void)
         for (char_index = 0u; cache_chars[char_index] != '\0'; char_index++)
         {
             rif_tile_t cache_tile;
-            rif_tile_cache_entry_t cache_entry;
 
             if (!rif_find_tile_char((uint16_t)cache_chars[char_index],
                                     &cache_tile))
-            {
-                cache_ready = false;
                 continue;
-            }
             rif_dir_remember(RIF_KIND_DIGIT_CHAR,
                              (uint16_t)cache_chars[char_index], &cache_tile);
-            st = rif_tile_cache_prepare(RIF_KIND_DIGIT_CHAR,
-                                        (uint16_t)cache_chars[char_index],
-                                        &cache_tile,
-                                        &cache_entry);
-            if (st != LT7680_OK || cache_entry.ready == 0u)
-            {
-                cache_ready = false;
-                hal_uart_send_text("RIF tile build fail code=");
-                hal_uart_send_hex8((uint8_t)cache_chars[char_index]);
-                hal_uart_send_text(" status=");
-                hal_uart_send_hex8((uint8_t)st);
-                hal_uart_send_text("\r\n");
-            }
         }
         for (uint8_t sym = 0u; sym < FONT_DIGIT_SYM_COUNT; sym++)
         {
             rif_tile_t cache_tile;
-            rif_tile_cache_entry_t cache_entry;
 
             if (!rif_find_tile_kind(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile))
-            {
                 continue;
-            }
             rif_dir_remember(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile);
-            st = rif_tile_cache_prepare(RIF_KIND_DIGIT_SYMBOL, sym,
-                                        &cache_tile, &cache_entry);
-            if (st != LT7680_OK || cache_entry.ready == 0u)
-                cache_ready = false;
         }
-        if (!cache_ready)
-            hal_uart_send_text("RIF tile cache unavailable\r\n");
-        else
-            hal_uart_send_text("RIF digit cache ready\r\n");
+        hal_uart_send_text("RIF glyph dir ready\r\n");
     }
 #if RIF_BTE_RENDERER
     hal_uart_send_text("RIF BTE renderer=");

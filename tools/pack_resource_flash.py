@@ -92,7 +92,8 @@ def count_entries(digit, half):
     return n + 1 + len(RSVD_REGIONS)   # 1 diagnostic + reserved regions
 
 
-def build_payloads(digit, half, fg565, bg565, fill_byte, payload_start):
+def build_payloads(digit, half, fg565, bg565, fill_byte,
+                   payload_start, transpose=False):
     """Return (entries, chunks, total_payload_bytes). Chunk i starts at
     payload_start + cumulative 4 KiB-aligned offsets."""
     entries = []
@@ -116,11 +117,34 @@ def build_payloads(digit, half, fg565, bg565, fill_byte, payload_start):
     width, height, bpr = dim[0], dim[1], dim[2]
     for i, (ch, glyph) in enumerate(zip(chars, glyphs)):
         tile = render_tile(glyph, width, height, bpr, fg565, bg565)
-        add(KIND_DIGIT_CHAR, i, tile, width, height, ord(ch), fg565, bg565,
+        ew, eh = width, height
+        if transpose:
+            # Pure transpose (fb_x=ui_y, fb_y=ui_x): the framebuffer-
+            # oriented tile lets one block DMA draw the glyph directly.
+            tile = bytes(tile)  # index [ui_x][ui_y] below
+            out = bytearray(len(tile))
+            for uy in range(height):
+                for ux in range(width):
+                    src = (uy * width + ux) * 2
+                    dst = (ux * height + uy) * 2
+                    out[dst:dst + 2] = tile[src:src + 2]
+            tile = bytes(out)
+            ew, eh = height, width
+        add(KIND_DIGIT_CHAR, i, tile, ew, eh, ord(ch), fg565, bg565,
             "digit_chars")
     for i, (_name, glyph) in enumerate(symbols):
         tile = render_tile(glyph, width, height, bpr, fg565, bg565)
-        add(KIND_DIGIT_SYM, i, tile, width, height, i, fg565, bg565,
+        ew, eh = width, height
+        if transpose:
+            out = bytearray(len(tile))
+            for uy in range(height):
+                for ux in range(width):
+                    src = (uy * width + ux) * 2
+                    dst = (ux * height + uy) * 2
+                    out[dst:dst + 2] = tile[src:src + 2]
+            tile = bytes(out)
+            ew, eh = height, width
+        add(KIND_DIGIT_SYM, i, tile, ew, eh, i, fg565, bg565,
             "digit_syms")
 
     if half is not None:
@@ -154,6 +178,10 @@ def main(argv=None):
     parser.add_argument("--bg", type=parse_color,
                         default=parse_color("#%02X%02X%02X" % DEFAULT_BG_RGB))
     parser.add_argument("--fill", type=parse_byte, default=DEFAULT_FILL)
+    parser.add_argument("--transpose", action="store_true",
+                        help="emit large digit tiles pre-transposed to "
+                             "framebuffer orientation (fb_x=ui_y) so a "
+                             "single block DMA flash->canvas can draw them")
     parser.add_argument("--no-verify", action="store_true")
     args = parser.parse_args(argv)
 
@@ -172,7 +200,8 @@ def main(argv=None):
     payload_start = align_up(HEADER_SIZE + dir_size, ALIGN)
 
     entries, chunks, payload_bytes = build_payloads(
-        digit, half, args.fg, args.bg, args.fill, payload_start)
+        digit, half, args.fg, args.bg, args.fill, payload_start,
+        transpose=args.transpose)
     image_size = payload_start + payload_bytes
     if args.base_offset + image_size > FLASH_SIZE:
         raise SystemExit(
