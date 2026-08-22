@@ -234,6 +234,10 @@ static void perf_format_display(char *out)
 
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
+static uint32_t s_prof_fill_ms;
+static uint32_t s_prof_fill_n;
+static uint32_t s_prof_dma_ms;
+static uint32_t s_prof_dma_n;
 
 static void perf_record_frame(void)
 {
@@ -262,7 +266,17 @@ static void perf_record_frame(void)
         perf_send_u32(s_rif_bte_hits);
         hal_uart_send_text(" bte-miss=");
         perf_send_u32(s_rif_bte_misses);
+        hal_uart_send_text(" fl=");
+        perf_send_u32(s_prof_fill_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_fill_n);
+        hal_uart_send_text(" dm=");
+        perf_send_u32(s_prof_dma_ms);
+        hal_uart_send_text("/");
+        perf_send_u32(s_prof_dma_n);
         hal_uart_send_text("\r\n");
+        s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
+        s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
     }
 }
 static uint16_t s_render_column;
@@ -669,6 +683,7 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     lt7680_status_t st = LT7680_OK;
     uint8_t p;
 
+    uint32_t t0 = HAL_GetTick();
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
     /* Dual-page write: both canvas pages stay identical so a frame can be
@@ -680,6 +695,8 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
         if (st == LT7680_OK)
             st = lt7680_gfx_fill_rect(&rect, color);
     }
+    s_prof_fill_ms += HAL_GetTick() - t0;
+    s_prof_fill_n++;
     return st;
 }
 
@@ -1013,6 +1030,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             if ((uint32_t)fb_x + FONT_DIGIT_HEIGHT <= MAIN_DISPLAY_UI_HEIGHT &&
                 (uint32_t)fb_y + FONT_DIGIT_WIDTH <= MAIN_DISPLAY_UI_WIDTH)
             {
+                uint32_t t0 = HAL_GetTick();
                 st = LT7680_OK;
                 for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
                 {
@@ -1022,6 +1040,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                         fb_x, fb_y,
                         FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
                 }
+                s_prof_dma_ms += HAL_GetTick() - t0;
+                s_prof_dma_n++;
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
@@ -1819,8 +1839,13 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     }
     if (!s_trend_full_repaint &&
         occupied == trend_drawn_occupied(column) &&
-        (!occupied || (s_drawn_trend_y0[s_render_page][column] == y0 &&
-                       s_drawn_trend_y1[s_render_page][column] == y1)))
+        (!occupied ||
+         ((s_drawn_trend_y0[s_render_page][column] > y0
+               ? s_drawn_trend_y0[s_render_page][column] - y0
+               : y0 - s_drawn_trend_y0[s_render_page][column]) < 2u &&
+          (s_drawn_trend_y1[s_render_page][column] > y1
+               ? s_drawn_trend_y1[s_render_page][column] - y1
+               : y1 - s_drawn_trend_y1[s_render_page][column]) < 2u)))
     {
         return;
     }
@@ -1965,7 +1990,7 @@ static void reading_scene_render(void)
         bool status_dirty =
             (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
         due_regions = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
-        trend_due = (now - s_trend_refresh_tick) >= 200u;
+        trend_due = (now - s_trend_refresh_tick) >= 500u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
         if (display_due && (due_regions != 0u || status_dirty ||
