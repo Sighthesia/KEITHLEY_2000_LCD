@@ -1665,7 +1665,41 @@ static void rif_init(void)
                 continue;
             rif_dir_remember(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile);
         }
-        hal_uart_send_text("RIF glyph dir ready\r\n");
+        /* Validate on-screen geometry against what the active renderer
+         * expects. A mismatched image (e.g. packed without --transpose)
+         * used to fall into the run-length renderer, which advances x by
+         * tile.width and smears the reading across the info panel. */
+        {
+            rif_tile_t probe;
+            if (rif_find_tile_char((uint16_t)'0', &probe))
+            {
+                hal_uart_send_text("RIF geom0 w=");
+                hal_uart_send_hex8((uint8_t)probe.width);
+                hal_uart_send_text(" h=");
+                hal_uart_send_hex8((uint8_t)probe.height);
+                hal_uart_send_text(" stride=0x");
+                hal_uart_send_hex8((uint8_t)(probe.stride >> 8));
+                hal_uart_send_hex8((uint8_t)(probe.stride & 0xFFu));
+                hal_uart_send_text("\r\n");
+#if RIF_BTE_RENDERER
+                if (probe.width != FONT_DIGIT_HEIGHT ||
+                    probe.height != FONT_DIGIT_WIDTH ||
+                    probe.stride != (uint16_t)(FONT_DIGIT_HEIGHT * 2u))
+#else
+                if (probe.width != FONT_DIGIT_WIDTH ||
+                    probe.height != FONT_DIGIT_HEIGHT ||
+                    probe.stride != (uint16_t)(FONT_DIGIT_WIDTH * 2u))
+#endif
+                {
+                    hal_uart_send_text("FAIL rif-geom mismatch: "
+                                       "disable external digits\r\n");
+                    s_rif_dma_probe_passed = false;
+                    s_rif_ready = false;
+                }
+            }
+        }
+        if (s_rif_dma_probe_passed)
+            hal_uart_send_text("RIF glyph dir ready\r\n");
     }
 #if RIF_BTE_RENDERER
     hal_uart_send_text("RIF BTE renderer=");
