@@ -92,7 +92,6 @@ static uint16_t s_prev_reading_color = 0xFFFFu;
 static uint8_t s_prev_reading_nodata = 0xFFu;
 static char s_prev_suffix[4];
 static uint16_t s_prev_suffix_x;
-static bool s_suffix_pending;   /* suffix erased/changed, needs redraw */
 
 static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
                                  uint16_t code)
@@ -2232,28 +2231,13 @@ static void reading_scene_render(void)
             s_prev_reading_color = s_frame.value_color;
             s_prev_reading_nodata = (uint8_t)s_frame.no_data;
 
+            /* Remember the previous frame's suffix footprint so the tail
+             * erase below can cover it. No band fill here: a mid-band erase
+             * punches through to the visible page before the replacement
+             * glyphs blit later in the same frame. */
+            if (s_frame.unit_suffix[0] == '\0')
             {
-                uint16_t sfx_x = (uint16_t)(
-                    s_frame.end_x +
-                    (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH);
-                if (strcmp(s_frame.unit_suffix, s_prev_suffix) != 0 ||
-                    sfx_x != s_prev_suffix_x)
-                {
-                    /* Erase the union of old and new suffix footprints.
-                     * s_prev_suffix keeps describing what is actually on
-                     * canvas until the new suffix finishes drawing. */
-                    uint16_t lo = sfx_x < s_prev_suffix_x ? sfx_x
-                                                          : s_prev_suffix_x;
-                    uint16_t hi = sfx_x > s_prev_suffix_x ? sfx_x
-                                                          : s_prev_suffix_x;
-                    (void)ui_fill_rect(
-                        lo, MAIN_DISPLAY_DCAC_Y,
-                        (uint16_t)((hi - lo) + FONT_HALF_WIDTH * 2u),
-                        FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG);
-                    s_suffix_pending = true;
-                }
-                else
-                    s_suffix_pending = false;
+                s_prev_suffix[0] = '\0';
             }
 
             {
@@ -2301,31 +2285,41 @@ static void reading_scene_render(void)
 
                 if (stable)
                 {
-                    /* Keep identical cells (skip their blit). Erase an old
-                     * cell only when its POSITION has no replacement this
-                     * frame -- a replaced glyph at the same spot must NOT be
-                     * pre-erased, or it sits black until its blit clears the
-                     * vsync wait (visible blank flash). The new tile carries
-                     * an opaque background and self-erases on write. */
+                    /* Keep identical cells (skip their blit). Vanished cells
+                     * always form one contiguous tail (left-aligned text),
+                     * so erase it as a single rect that starts at the new
+                     * content edge -- never on top of a glyph that this
+                     * frame will redraw. */
                     uint8_t i;
+                    uint16_t new_extent = s_frame.start_x;
+                    uint16_t old_extent = s_frame.start_x;
+                    for (i = 0u; i < planned_count; i++)
+                    {
+                        uint16_t e = (uint16_t)(planned[i].x +
+                                                FONT_DIGIT_WIDTH);
+                        if (e > new_extent)
+                            new_extent = e;
+                    }
                     for (i = 0u; i < s_cell_count; i++)
                     {
-                        uint8_t j;
-                        bool occupied = false;
-                        for (j = 0u; j < planned_count; j++)
-                        {
-                            if (planned[j].x == s_cells[i].x &&
-                                planned[j].y == s_cells[i].y)
-                            {
-                                occupied = true;
-                                break;
-                            }
-                        }
-                        if (!occupied)
-                            (void)ui_fill_rect(s_cells[i].x, s_cells[i].y,
-                                               FONT_DIGIT_WIDTH,
-                                               FONT_DIGIT_HEIGHT,
-                                               MAIN_DISPLAY_COLOR_BG);
+                        uint16_t e = (uint16_t)(s_cells[i].x +
+                                                FONT_DIGIT_WIDTH);
+                        if (e > old_extent)
+                            old_extent = e;
+                    }
+                    if (s_prev_suffix[0] != '\0')
+                    {
+                        uint16_t e = (uint16_t)(s_prev_suffix_x +
+                                                FONT_HALF_WIDTH * 2u);
+                        if (e > old_extent)
+                            old_extent = e;
+                    }
+                    if (old_extent > new_extent)
+                    {
+                        (void)ui_fill_rect(
+                            new_extent, MAIN_DISPLAY_READING_VALUE_Y,
+                            (uint16_t)(old_extent - new_extent),
+                            FONT_DIGIT_HEIGHT, MAIN_DISPLAY_COLOR_BG);
                     }
                     /* Mark planned cells that already sit on canvas with the
                      * same glyph identity: their blit can be skipped. */
@@ -2394,11 +2388,20 @@ static void reading_scene_render(void)
             }
             if (s_render_item == 3u && s_frame.unit_suffix[0] != '\0')
             {
-                DRAW_ITEM(ui_draw_half(
-                    (uint16_t)(s_frame.end_x +
-                               (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH),
-                    MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
-                    s_frame.value_color));
+                uint16_t sfx_x = (uint16_t)(
+                    s_frame.end_x +
+                    (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH);
+                if (ui_draw_half(sfx_x, MAIN_DISPLAY_DCAC_Y,
+                                 s_frame.unit_suffix,
+                                 s_frame.value_color))
+                {
+                    /* Record the footprint for the next frame's tail erase. */
+                    strncpy(s_prev_suffix, s_frame.unit_suffix,
+                            sizeof(s_prev_suffix) - 1u);
+                    s_prev_suffix[sizeof(s_prev_suffix) - 1u] = '\0';
+                    s_prev_suffix_x = sfx_x;
+                    s_render_item++;
+                }
                 return;
             }
             first_info = s_frame.unit_suffix[0] != '\0' ? 4u : 3u;
