@@ -994,35 +994,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
         s_rif_draw_job.tile.height == FONT_DIGIT_WIDTH &&
         s_rif_draw_job.tile.stride == FONT_DIGIT_HEIGHT * 2u)
-    {
-        /* DIAG: identify which glyphs reach the BTE path */
-        if (s_rif_bte_hits < 6u)
-        {
-            hal_uart_send_text("[BTE] code=0x");
-            hal_uart_send_hex8(s_rif_draw_job.code & 0xFFu);
-            hal_uart_send_text("\r\n");
-        }
-    }
-    else
-    {
-        static uint8_t miss_logged;
-        if (miss_logged < 8u)
-        {
-            miss_logged++;
-            hal_uart_send_text("[MISS] code=0x");
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.code & 0xFFu));
-            hal_uart_send_text(" kind=");
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.kind);
-            hal_uart_send_text(" w=");
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.width);
-            hal_uart_send_text(" h=");
-            hal_uart_send_hex8((uint8_t)s_rif_draw_job.tile.height);
-            hal_uart_send_text(" bg=0x");
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.background >> 8));
-            hal_uart_send_hex8((uint8_t)(s_rif_draw_job.tile.background & 0xFFu));
-            hal_uart_send_text("\r\n");
-        }
-    }
     if (color == MAIN_DISPLAY_COLOR_GREEN &&
         s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
         s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
@@ -1047,7 +1018,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             {
                 s_rif_bte_hits++;
                 s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
-                                               s_rif_draw_job.tile.width);
+                                               FONT_DIGIT_WIDTH);
                 s_rif_draw_job.text += s_rif_draw_job.advance;
                 if (*s_rif_draw_job.text == '\0')
                 {
@@ -1093,19 +1064,11 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                      * the glyph so the frame can still commit. */
                     if (s_rif_draw_job.dma_retries < 200u)
                         s_rif_draw_job.dma_retries++;
-                    if ((s_rif_draw_job.dma_retries & 0x07u) == 1u)
-                    {
-                        hal_uart_send_text("[DMAF] code=0x");
-                        hal_uart_send_hex8((uint8_t)(s_rif_draw_job.code & 0xFFu));
-                        hal_uart_send_text(" st=");
-                        hal_uart_send_hex8((uint8_t)st);
-                        hal_uart_send_text("\r\n");
-                    }
                     if (s_rif_draw_job.dma_retries >= 3u)
                     {
                         s_rif_draw_job.dma_retries = 0u;
                         s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
-                                                       s_rif_draw_job.tile.width);
+                                                       FONT_DIGIT_WIDTH);
                         s_rif_draw_job.text += s_rif_draw_job.advance;
                         if (*s_rif_draw_job.text == '\0')
                         {
@@ -1130,7 +1093,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 {
                     s_rif_bte_hits++;
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
-                                                   s_rif_draw_job.tile.width);
+                                                   FONT_DIGIT_WIDTH);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
                     if (*s_rif_draw_job.text == '\0')
                     {
@@ -1152,6 +1115,32 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             }
         }
         s_rif_bte_misses++;
+        /* Hard gate: on a pre-transposed image the run-length renderer
+         * cannot draw digit tiles correctly (they are framebuffer-
+         * oriented). Skip the glyph instead of smearing it. */
+        if (s_rif_draw_job.kind == RIF_KIND_DIGIT_CHAR ||
+            s_rif_draw_job.kind == RIF_KIND_DIGIT_SYMBOL)
+        {
+            s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
+                                           FONT_DIGIT_WIDTH);
+            s_rif_draw_job.text += s_rif_draw_job.advance;
+            if (*s_rif_draw_job.text == '\0')
+            {
+                s_rif_draw_job.active = false;
+                return true;
+            }
+            if (!rif_text_code(s_rif_draw_job.text,
+                               &s_rif_draw_job.kind,
+                               &s_rif_draw_job.code,
+                               &s_rif_draw_job.advance))
+            {
+                rif_draw_fail(LT7680_ERR_PARAM);
+                return false;
+            }
+            s_rif_draw_job.resolving = true;
+            s_rif_draw_job.directory_index = 0u;
+            return false;
+        }
     }
 #endif
 
@@ -2234,9 +2223,12 @@ static void reading_scene_render(void)
             /* Plan the frame's digit cells and keep every cell whose glyph
              * identity is unchanged; only changed/vanished cells touch the
              * hardware. Any state drift falls back to the full band clear. */
-            /* DIAG: diff-mode bookkeeping suspected of leaving ghosts;
-             * force the full-band clear path until root-caused. */
-            bool stable = false;
+            bool stable =
+                s_renderer.phase == RENDER_PHASE_UPDATE_READING &&
+                s_rif_ready && s_rif_dma_probe_passed && !s_frame.no_data &&
+                s_frame.value_color == MAIN_DISPLAY_COLOR_GREEN &&
+                s_prev_reading_color == s_frame.value_color &&
+                s_prev_reading_nodata == (uint8_t)s_frame.no_data;
             s_prev_reading_color = s_frame.value_color;
             s_prev_reading_nodata = (uint8_t)s_frame.no_data;
 
