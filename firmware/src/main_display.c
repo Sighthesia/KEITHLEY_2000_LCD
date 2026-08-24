@@ -115,6 +115,20 @@ static void format_fixed_axis(float value, const char *unit, float step,
     append_text(out, out_size, unit);
 }
 
+void main_display_set_trend_axis(main_display_frame_t *frame, float step,
+                                 float top, const char *unit)
+{
+    uint8_t i;
+    if (frame == 0 || step <= 0.0f || unit == 0)
+        return;
+    frame->trend_axis_step = step;
+    frame->trend_axis_top = top;
+    copy_text(frame->trend_axis_unit, sizeof(frame->trend_axis_unit), unit);
+    for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
+        format_fixed_axis(top - step * i, unit, step,
+                          frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
+}
+
 static void format_impedance(const ui_model_t *model, char *out, uint8_t size)
 {
     /* The observed panel protocol does not provide range. Even AC impedance

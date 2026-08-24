@@ -125,6 +125,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 /* The sample clock and the display clock are deliberately independent. */
 #define DEMO_SAMPLE_PERIOD_MS 100u
 #define DISPLAY_FRAME_PERIOD_MS 33u
+#define TREND_AXIS_REBUILD_COOLDOWN_MS 10000u
 
 /* USER CODE END PD */
 
@@ -182,6 +183,7 @@ static float s_page_trend_axis_step[2];
 static float s_page_trend_axis_top[2];
 static char s_page_trend_axis_unit[2][8];
 static bool s_trend_full_repaint;
+static uint32_t s_trend_axis_rebuild_tick;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
 static uint32_t s_trend_refresh_tick;
@@ -1959,10 +1961,18 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     if (occupied)
     {
         float span = s_frame.trend_maximum - s_frame.trend_minimum;
-        y0 = (uint8_t)((s_frame.trend_maximum - c->maximum) *
-                       MAIN_DISPLAY_PLOT_H / span);
-        y1 = (uint8_t)((s_frame.trend_maximum - c->minimum) *
-                       MAIN_DISPLAY_PLOT_H / span);
+        float fy0 = (s_frame.trend_maximum - c->maximum) *
+                    MAIN_DISPLAY_PLOT_H / span;
+        float fy1 = (s_frame.trend_maximum - c->minimum) *
+                    MAIN_DISPLAY_PLOT_H / span;
+        if (fy0 < 0.0f) fy0 = 0.0f;
+        if (fy1 < 0.0f) fy1 = 0.0f;
+        if (fy0 > MAIN_DISPLAY_PLOT_H - 1.0f)
+            fy0 = MAIN_DISPLAY_PLOT_H - 1.0f;
+        if (fy1 > MAIN_DISPLAY_PLOT_H - 1.0f)
+            fy1 = MAIN_DISPLAY_PLOT_H - 1.0f;
+        y0 = (uint8_t)fy0;
+        y1 = (uint8_t)fy1;
     }
     if (!s_trend_full_repaint &&
         occupied == trend_drawn_occupied(column) &&
@@ -2039,22 +2049,27 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
 static bool trend_axis_changed(float page_step, float page_top,
                                const main_display_frame_t *frame)
 {
-    float tol;
+    float scale;
+    float minimum;
+    float maximum;
+    float bottom;
+    float margin;
     if (!frame->trend_has_data)
         return false;
     if (page_step <= 0.0f || page_top <= 0.0f)
         return true;
-    tol = page_step * 1e-4f;
-    if (page_step - frame->trend_axis_step > tol ||
-        frame->trend_axis_step - page_step > tol)
+    /* Keep the current 1/2/5 grid while the signal moves inside it. A new
+     * grid is justified only after the data exceeds the visible range by
+     * 12.5%; this prevents a sliding peak from making the axis oscillate. */
+    if (strcmp(s_page_trend_axis_unit[s_visible_page],
+               frame->trend_axis_unit) != 0)
         return true;
-    if (page_top - frame->trend_axis_top > tol ||
-        frame->trend_axis_top - page_top > tol)
-        return true;
-    /* Same geometry but new unit: the labels must be repainted with the
-     * new prefix (e.g. mV -> V), otherwise the Y axis lies about the data. */
-    return strcmp(s_page_trend_axis_unit[s_visible_page],
-                  frame->trend_axis_unit) != 0;
+    scale = trend_buffer_display_scale(&s_trend);
+    minimum = frame->trend_minimum * scale;
+    maximum = frame->trend_maximum * scale;
+    bottom = page_top - 3.0f * page_step;
+    margin = 3.0f * page_step * 0.125f;
+    return minimum < bottom - margin || maximum > page_top + margin;
 }
 
 /* True when any rendered status/info text differs from what is on screen.
@@ -2172,12 +2187,14 @@ static void reading_scene_render(void)
                                     * pre-copy cache would force a needless full trend rebuild. */
                                    s_page_trend_has_data[s_visible_page] !=
                                        s_frame.trend_has_data ||
-                                    trend_axis_changed(
-                                        s_page_trend_axis_step[s_visible_page],
-                                        s_page_trend_axis_top[s_visible_page],
-                                        &s_frame);
+                                     trend_axis_changed(
+                                         s_page_trend_axis_step[s_visible_page],
+                                         s_page_trend_axis_top[s_visible_page],
+                                         &s_frame);
              if (s_trend_full_repaint && (!s_frame.trend_has_data ||
-                !trend_buffer_window_full(&s_trend)))
+                 (!trend_buffer_window_full(&s_trend) &&
+                  strcmp(s_page_trend_axis_unit[s_visible_page],
+                         s_frame.trend_axis_unit) == 0)))
             {
                 /* Empty or still-filling buffer (unit switch cleared it):
                  * the range grows with every sample, so axis auto-scaling
@@ -2185,9 +2202,43 @@ static void reading_scene_render(void)
                  * crossing costs a full grid+label rebuild. Freeze the
                  * resident axis until the window refills; incremental
                  * column updates absorb the drift meanwhile. */
-                s_trend_full_repaint = false;
-            }
-            trend_needed = trend_due || s_trend_full_repaint;
+                 s_trend_full_repaint = false;
+             }
+             if (s_trend_full_repaint &&
+                 strcmp(s_page_trend_axis_unit[s_visible_page],
+                        s_frame.trend_axis_unit) == 0 &&
+                 s_trend_axis_rebuild_tick != 0u &&
+                 (uint32_t)(now - s_trend_axis_rebuild_tick) <
+                     TREND_AXIS_REBUILD_COOLDOWN_MS)
+             {
+                 s_trend_full_repaint = false;
+             }
+             if (s_trend_full_repaint && s_frame.trend_has_data &&
+                 strcmp(s_page_trend_axis_unit[s_visible_page],
+                        s_frame.trend_axis_unit) != 0)
+             {
+                 s_trend_axis_rebuild_tick = now;
+             }
+             else if (s_trend_full_repaint && trend_buffer_window_full(&s_trend))
+             {
+                 s_trend_axis_rebuild_tick = now;
+             }
+             if (!s_trend_full_repaint && s_frame.trend_has_data &&
+                 strcmp(s_page_trend_axis_unit[s_visible_page],
+                        s_frame.trend_axis_unit) == 0 &&
+                 s_page_trend_axis_step[s_visible_page] > 0.0f)
+             {
+                 float scale = trend_buffer_display_scale(&s_trend);
+                 float stable_top = s_page_trend_axis_top[s_visible_page];
+                 float stable_step = s_page_trend_axis_step[s_visible_page];
+                 main_display_set_trend_axis(&s_frame, stable_step,
+                                             stable_top,
+                                             s_page_trend_axis_unit[s_visible_page]);
+                 s_frame.trend_minimum =
+                     (stable_top - 3.0f * stable_step) / scale;
+                 s_frame.trend_maximum = stable_top / scale;
+             }
+             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)

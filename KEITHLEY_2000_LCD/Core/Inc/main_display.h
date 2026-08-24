@@ -140,3 +140,5 @@ const char *main_display_function_text(ui_function_t function);
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
                                const char *unit, main_display_frame_t *frame);
+void main_display_set_trend_axis(main_display_frame_t *frame, float step,
+                                 float top, const char *unit);
