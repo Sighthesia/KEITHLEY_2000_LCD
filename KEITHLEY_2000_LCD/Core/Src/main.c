@@ -125,7 +125,6 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 /* The sample clock and the display clock are deliberately independent. */
 #define DEMO_SAMPLE_PERIOD_MS 100u
 #define DISPLAY_FRAME_PERIOD_MS 33u
-#define TREND_AXIS_REBUILD_COOLDOWN_MS 10000u
 
 /* USER CODE END PD */
 
@@ -183,7 +182,6 @@ static float s_page_trend_axis_step[2];
 static float s_page_trend_axis_top[2];
 static char s_page_trend_axis_unit[2][8];
 static bool s_trend_full_repaint;
-static uint32_t s_trend_axis_rebuild_tick;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
 static uint32_t s_trend_refresh_tick;
@@ -709,19 +707,17 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
 {
     lt7680_rect_t rect;
     lt7680_status_t st = LT7680_OK;
-    uint8_t p;
-
     uint32_t t0 = HAL_GetTick();
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
-    /* Dual-page write: both canvas pages stay identical so a frame can be
-     * composed on the hidden page and flipped atomically -- a BTE burst must
-     * never land on the page the panel is scanning (single-pixel sparkles). */
-    for (p = 0u; p < 2u && st == LT7680_OK; p++)
     {
-        st = lt7680_gfx_select_canvas_page(p);
-        if (st == LT7680_OK)
-            st = lt7680_gfx_fill_rect(&rect, color);
+        uint8_t p;
+        for (p = 0u; p < 2u && st == LT7680_OK; p++)
+        {
+            st = lt7680_gfx_select_canvas_page(p);
+            if (st == LT7680_OK)
+                st = lt7680_gfx_fill_rect(&rect, color);
+        }
     }
     s_prof_fill_ms += HAL_GetTick() - t0;
     s_prof_fill_n++;
@@ -733,16 +729,17 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
 {
     uint16_t fx0, fy0, fx1, fy1;
     lt7680_status_t st = LT7680_OK;
-    uint8_t p;
-
     panel_transform_ui_to_fb(x0, y0, &fx0, &fy0);
     panel_transform_ui_to_fb(x1, y1, &fx1, &fy1);
-    for (p = 0u; p < 2u && st == LT7680_OK; p++)
     {
-        st = lt7680_gfx_select_canvas_page(p);
-        if (st == LT7680_OK)
-            st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
-                                      (int16_t)fx1, (int16_t)fy1, color);
+        uint8_t p;
+        for (p = 0u; p < 2u && st == LT7680_OK; p++)
+        {
+            st = lt7680_gfx_select_canvas_page(p);
+            if (st == LT7680_OK)
+                st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
+                                          (int16_t)fx1, (int16_t)fy1, color);
+        }
     }
     return st;
 }
@@ -2049,11 +2046,6 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
 static bool trend_axis_changed(float page_step, float page_top,
                                const main_display_frame_t *frame)
 {
-    float scale;
-    float minimum;
-    float maximum;
-    float bottom;
-    float margin;
     if (!frame->trend_has_data)
         return false;
     if (page_step <= 0.0f || page_top <= 0.0f)
@@ -2064,12 +2056,10 @@ static bool trend_axis_changed(float page_step, float page_top,
     if (strcmp(s_page_trend_axis_unit[s_visible_page],
                frame->trend_axis_unit) != 0)
         return true;
-    scale = trend_buffer_display_scale(&s_trend);
-    minimum = frame->trend_minimum * scale;
-    maximum = frame->trend_maximum * scale;
-    bottom = page_top - 3.0f * page_step;
-    margin = 3.0f * page_step * 0.125f;
-    return minimum < bottom - margin || maximum > page_top + margin;
+    /* Keep the axis fixed for the current unit. The plotted columns are
+     * clamped to the resident range, so a drifting peak cannot trigger a
+     * full grid/label rebuild on every 1/2/5 boundary crossing. */
+    return false;
 }
 
 /* True when any rendered status/info text differs from what is on screen.
@@ -2204,26 +2194,8 @@ static void reading_scene_render(void)
                  * column updates absorb the drift meanwhile. */
                  s_trend_full_repaint = false;
              }
-             if (s_trend_full_repaint &&
-                 strcmp(s_page_trend_axis_unit[s_visible_page],
-                        s_frame.trend_axis_unit) == 0 &&
-                 s_trend_axis_rebuild_tick != 0u &&
-                 (uint32_t)(now - s_trend_axis_rebuild_tick) <
-                     TREND_AXIS_REBUILD_COOLDOWN_MS)
-             {
-                 s_trend_full_repaint = false;
-             }
-             if (s_trend_full_repaint && s_frame.trend_has_data &&
-                 strcmp(s_page_trend_axis_unit[s_visible_page],
-                        s_frame.trend_axis_unit) != 0)
-             {
-                 s_trend_axis_rebuild_tick = now;
-             }
-             else if (s_trend_full_repaint && trend_buffer_window_full(&s_trend))
-             {
-                 s_trend_axis_rebuild_tick = now;
-             }
-             if (!s_trend_full_repaint && s_frame.trend_has_data &&
+             if (!s_trend_full_repaint &&
+                 s_frame.trend_has_data &&
                  strcmp(s_page_trend_axis_unit[s_visible_page],
                         s_frame.trend_axis_unit) == 0 &&
                  s_page_trend_axis_step[s_visible_page] > 0.0f)
@@ -2604,9 +2576,6 @@ static void reading_scene_render(void)
         }
         if (s_render_item == 0u)
         {
-            /* Pages are rendered independently after their one-time base
-             * build. Clear the canvas and restore the info-style L-shaped
-             * axis cells before drawing the new projection. */
             trend_draw_background();
             s_render_item = 1u;
             return;
