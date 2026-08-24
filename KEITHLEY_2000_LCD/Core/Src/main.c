@@ -92,6 +92,7 @@ static uint16_t s_prev_reading_color = 0xFFFFu;
 static uint8_t s_prev_reading_nodata = 0xFFu;
 static char s_prev_suffix[4];
 static uint16_t s_prev_suffix_x;
+static uint16_t s_prev_suffix_color;
 
 static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
                                  uint16_t code)
@@ -2273,6 +2274,8 @@ static void reading_scene_render(void)
             if (s_frame.unit_suffix[0] == '\0')
             {
                 s_prev_suffix[0] = '\0';
+                s_prev_suffix_x = 0u;
+                s_prev_suffix_color = 0u;
             }
 
             {
@@ -2426,6 +2429,16 @@ static void reading_scene_render(void)
                 uint16_t sfx_x = (uint16_t)(
                     s_frame.end_x +
                     (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH);
+                /* Skip when the suffix already sits on canvas unchanged:
+                 * redrawing it every reading frame churned dozens of GE
+                 * fills through the visible page for zero visual change. */
+                if (strcmp(s_frame.unit_suffix, s_prev_suffix) == 0 &&
+                    sfx_x == s_prev_suffix_x &&
+                    s_frame.value_color == s_prev_suffix_color)
+                {
+                    s_render_item++;
+                    return;
+                }
                 if (ui_draw_half(sfx_x, MAIN_DISPLAY_DCAC_Y,
                                  s_frame.unit_suffix,
                                  s_frame.value_color))
@@ -2435,6 +2448,7 @@ static void reading_scene_render(void)
                             sizeof(s_prev_suffix) - 1u);
                     s_prev_suffix[sizeof(s_prev_suffix) - 1u] = '\0';
                     s_prev_suffix_x = sfx_x;
+                    s_prev_suffix_color = s_frame.value_color;
                     s_render_item++;
                 }
                 return;
