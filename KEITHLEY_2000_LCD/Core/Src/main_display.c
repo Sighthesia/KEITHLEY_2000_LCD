@@ -196,6 +196,9 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
         frame->y_labels[i][0] = '\0';
     if (!trend_buffer_range(trend, now_ms, &minimum, &maximum)) {
         frame->trend_has_data = false;
+        frame->trend_axis_step = 0.0f;
+        frame->trend_axis_top = 0.0f;
+        frame->trend_axis_unit[0] = '\0';
         return;
     }
     frame->trend_has_data = true;
@@ -211,6 +214,10 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     step = nice_step(maximum - minimum);
     top = (float)((int32_t)(maximum / step)) * step;
     if (top < maximum) top += step;
+    frame->trend_axis_step = step;
+    frame->trend_axis_top = top;
+    copy_text(frame->trend_axis_unit, sizeof(frame->trend_axis_unit),
+              axis_unit);
     for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
         format_fixed_axis(top - step * i, axis_unit, step,
                           frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);

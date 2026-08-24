@@ -31,6 +31,7 @@ typedef struct {
     float maximum[TREND_BUCKET_COUNT];
     uint8_t occupied[(TREND_BUCKET_COUNT + 7u) / 8u];
     uint32_t newest_bucket;
+    uint32_t first_sample_ms;   /* 0 = no sample since reset */
     uint32_t last_sample_ms;
     trend_dimension_t dimension;
     char unit_identity[TREND_UNIT_ID_MAX];
@@ -44,6 +45,9 @@ bool trend_parse_reading_display(const char *text, const char *unit,
                                  const char **base_unit, char *display_unit,
                                  uint8_t display_unit_size);
 const char *trend_buffer_display_unit(const trend_buffer_t *trend);
+/* True when the ring has samples spanning the whole window: before that,
+ * the range grows every sample and axis auto-scaling would thrash. */
+bool trend_buffer_window_full(const trend_buffer_t *trend);
 float trend_buffer_display_scale(const trend_buffer_t *trend);
 bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
                       const char *unit);

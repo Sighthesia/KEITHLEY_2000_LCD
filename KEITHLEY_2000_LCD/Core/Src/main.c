@@ -176,6 +176,9 @@ static uint8_t s_drawn_trend_occupied[2][(TREND_MAX_COLUMNS + 7u) / 8u];
 static bool s_page_trend_has_data[2];
 static float s_page_trend_minimum[2];
 static float s_page_trend_maximum[2];
+static float s_page_trend_axis_step[2];
+static float s_page_trend_axis_top[2];
+static char s_page_trend_axis_unit[2][8];
 static bool s_trend_full_repaint;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
@@ -349,27 +352,27 @@ typedef struct
 } demo_unit_t;
 
 static const demo_unit_t s_demo_units[] = {
-    {"VDC", 2u, 5u, 20000u, 1250000u, 0x10u, 0x04u},
-    {"VAC", 3u, 5u, 20000u, 7000000u, 0x30u, 0x02u},
-    {"ADC", 2u, 5u, 10000u, 300000u, 0x10u, 0x01u},
-    {"AAC", 2u, 5u, 10000u, 300000u, 0x40u, 0x12u},
-    {"mVDC", 3u, 5u, 10000u, 100000u, 0x30u, 0x04u},
-    {"mVAC", 3u, 5u, 10000u, 100000u, 0x10u, 0x01u},
-    {"mADC", 2u, 5u, 10000u, 200000u, 0x50u, 0x04u},
-    {"mAAC", 2u, 5u, 10000u, 200000u, 0x30u, 0x02u},
-    {"OHM", 4u, 4u, 1000u, 2000000u, 0x10u, 0x02u},
-    {"kOHM", 3u, 4u, 1000u, 1000000u, 0x50u, 0x01u},
-    {"MOHM", 3u, 4u, 1000u, 1000000u, 0x30u, 0x0Cu},
-    {"Hz", 3u, 3u, 1000u, 1000000u, 0x10u, 0x04u},
-    {"kHz", 3u, 3u, 1000u, 1000000u, 0x00u, 0x14u},
-    {"MHz", 2u, 3u, 1000u, 50000u, 0x40u, 0x02u},
+    {"VDC", 2u, 5u, 60000u, 120000u, 0x10u, 0x04u},
+    {"VAC", 3u, 5u, 30000u, 60000u, 0x30u, 0x02u},
+    {"ADC", 2u, 5u, 15000u, 30000u, 0x10u, 0x01u},
+    {"AAC", 2u, 5u, 15000u, 30000u, 0x40u, 0x12u},
+    {"mVDC", 3u, 5u, 20000u, 40000u, 0x30u, 0x04u},
+    {"mVAC", 3u, 5u, 20000u, 40000u, 0x10u, 0x01u},
+    {"mADC", 2u, 5u, 20000u, 40000u, 0x50u, 0x04u},
+    {"mAAC", 2u, 5u, 20000u, 40000u, 0x30u, 0x02u},
+    {"OHM", 4u, 4u, 20000u, 40000u, 0x10u, 0x02u},
+    {"kOHM", 3u, 4u, 20000u, 40000u, 0x50u, 0x01u},
+    {"MOHM", 3u, 4u, 20000u, 40000u, 0x30u, 0x0Cu},
+    {"Hz", 3u, 3u, 20000u, 40000u, 0x10u, 0x04u},
+    {"kHz", 3u, 3u, 20000u, 40000u, 0x00u, 0x14u},
+    {"MHz", 2u, 3u, 20000u, 40000u, 0x40u, 0x02u},
     {"\xC2\xB0"
      "CEL",
      2u, 3u, 1000u, 50000u, 0x30u, 0x01u},
 };
 #define DEMO_UNIT_COUNT \
     ((uint8_t)(sizeof(s_demo_units) / sizeof(s_demo_units[0])))
-#define DEMO_SAMPLES_PER_UNIT 40u
+#define DEMO_SAMPLES_PER_UNIT 200u
 
 static uint32_t s_demo_last_tick;
 static uint32_t s_demo_status_tick;
@@ -518,6 +521,20 @@ static void display_enable_after_initial_frame(void)
             s_page_trend_maximum[0] = s_frame.trend_maximum;
             s_page_trend_maximum[1] = s_frame.trend_maximum;
         }
+        /* Axis identity must be published on EVERY commit: it gates the next
+         * frame's rebuild decision. Publishing only on full-page frames left
+         * the cache stale forever (runtime frames are never full-page), so
+         * the unit comparison fired every frame -- a rebuild storm. */
+        strncpy(s_page_trend_axis_unit[0], s_frame.trend_axis_unit,
+                sizeof(s_page_trend_axis_unit[0]) - 1u);
+        s_page_trend_axis_unit[0][sizeof(s_page_trend_axis_unit[0]) - 1u] = '\0';
+        strncpy(s_page_trend_axis_unit[1], s_frame.trend_axis_unit,
+                sizeof(s_page_trend_axis_unit[1]) - 1u);
+        s_page_trend_axis_unit[1][sizeof(s_page_trend_axis_unit[1]) - 1u] = '\0';
+        s_page_trend_axis_step[0] = s_frame.trend_axis_step;
+        s_page_trend_axis_step[1] = s_frame.trend_axis_step;
+        s_page_trend_axis_top[0] = s_frame.trend_axis_top;
+        s_page_trend_axis_top[1] = s_frame.trend_axis_top;
         /* Keep the panel blank while GE completes the frame. Enabling scan only
          * after the last draw avoids exposing an in-progress SDRAM frame. */
         if (lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
@@ -2011,20 +2028,29 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
     return x;
 }
 
-/* Hysteresis for the trend axes rebuild: the sliding-window min/max drifts
- * with every sample, so an exact comparison would force a full background +
- * axis-label repaint on every frame (seconds of GE work). Incremental column
- * updates absorb small scale drift; only a change beyond 1/16 of the span
- * justifies rebuilding the axes. */
-static bool trend_scale_close(float page_min, float page_max,
-                              float frame_min, float frame_max)
+/* True when the trend's 1/2/5 axis geometry (or unit) changed. Raw buffer
+ * min/max drift continuously with the signal; rebuilding the grid+labels
+ * for that drift repainted the trend every ~2s even though the stepped
+ * axis was identical. */
+static bool trend_axis_changed(float page_step, float page_top,
+                               const main_display_frame_t *frame)
 {
-    float tol = (frame_max - frame_min) * (1.0f / 16.0f);
-    float dmin = page_min - frame_min;
-    float dmax = page_max - frame_max;
-    if (dmin < 0.0f) dmin = -dmin;
-    if (dmax < 0.0f) dmax = -dmax;
-    return dmin <= tol && dmax <= tol;
+    float tol;
+    if (!frame->trend_has_data)
+        return false;
+    if (page_step <= 0.0f || page_top <= 0.0f)
+        return true;
+    tol = page_step * 1e-4f;
+    if (page_step - frame->trend_axis_step > tol ||
+        frame->trend_axis_step - page_step > tol)
+        return true;
+    if (page_top - frame->trend_axis_top > tol ||
+        frame->trend_axis_top - page_top > tol)
+        return true;
+    /* Same geometry but new unit: the labels must be repainted with the
+     * new prefix (e.g. mV -> V), otherwise the Y axis lies about the data. */
+    return strcmp(s_page_trend_axis_unit[s_visible_page],
+                  frame->trend_axis_unit) != 0;
 }
 
 /* True when any rendered status/info text differs from what is on screen.
@@ -2127,12 +2153,21 @@ static void reading_scene_render(void)
                                     * pre-copy cache would force a needless full trend rebuild. */
                                    s_page_trend_has_data[s_visible_page] !=
                                        s_frame.trend_has_data ||
-                                   (s_frame.trend_has_data &&
-                                    !trend_scale_close(
-                                        s_page_trend_minimum[s_visible_page],
-                                        s_page_trend_maximum[s_visible_page],
-                                        s_frame.trend_minimum,
-                                        s_frame.trend_maximum));
+                                   trend_axis_changed(
+                                       s_page_trend_axis_step[s_visible_page],
+                                       s_page_trend_axis_top[s_visible_page],
+                                       &s_frame);
+            if (s_trend_full_repaint && (!s_frame.trend_has_data ||
+                !trend_buffer_window_full(&s_trend)))
+            {
+                /* Empty or still-filling buffer (unit switch cleared it):
+                 * the range grows with every sample, so axis auto-scaling
+                 * would cross a 1/2/5 boundary every few seconds and each
+                 * crossing costs a full grid+label rebuild. Freeze the
+                 * resident axis until the window refills; incremental
+                 * column updates absorb the drift meanwhile. */
+                s_trend_full_repaint = false;
+            }
             trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {

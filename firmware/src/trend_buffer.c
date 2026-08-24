@@ -174,12 +174,22 @@ bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
         if (value < trend->minimum[index]) trend->minimum[index] = value;
         if (value > trend->maximum[index]) trend->maximum[index] = value;
     }
+    if (trend->first_sample_ms == 0u)
+        trend->first_sample_ms = now_ms == 0u ? 1u : now_ms;
     trend->dimension = dim;
     copy_unit(trend->unit_identity, sizeof(trend->unit_identity), display_unit);
     trend->newest_bucket = bucket;
     trend->last_sample_ms = now_ms;
     trend->has_sample = true;
     return true;
+}
+
+bool trend_buffer_window_full(const trend_buffer_t *trend)
+{
+    return trend != 0 && trend->first_sample_ms != 0u &&
+           trend->has_sample &&
+           (trend->last_sample_ms - trend->first_sample_ms) >=
+               TREND_WINDOW_MS;
 }
 
 const char *trend_buffer_display_unit(const trend_buffer_t *trend)

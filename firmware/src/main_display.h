@@ -122,6 +122,11 @@ typedef struct {
     bool trend_has_data;
     float trend_minimum;
     float trend_maximum;
+    /* Derived 1/2/5 axis geometry: the full trend rebuild (grid + labels)
+     * is only needed when these change, not when raw min/max drift. */
+    float trend_axis_step;
+    float trend_axis_top;
+    char trend_axis_unit[8];
 } main_display_frame_t;
 
 main_display_layout_t main_display_layout_value(uint8_t value_len,
