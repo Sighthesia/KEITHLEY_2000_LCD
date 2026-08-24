@@ -162,6 +162,7 @@ static uint8_t s_page_text_generation[2];
 static uint8_t s_frame_text_generation;
 static bool s_frame_has_trend_update;
 static bool s_render_status_regions;
+static uint8_t s_status_info_dirty_rows;
 
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
@@ -655,7 +656,7 @@ static void proto_on_event(const k2000_event_t *evt)
         break;
     case K2000_EVT_STATUS:
         ui_model_apply_status(&s_ui, evt->status_tag, evt->status_value);
-        s_ui_dirty_regions |= RENDER_DIRTY_STATUS | RENDER_DIRTY_READING;
+        s_ui_dirty_regions |= RENDER_DIRTY_STATUS;
         break;
     case K2000_EVT_CURSOR:
         ui_model_apply_cursor(&s_ui, evt->pos);
@@ -1831,6 +1832,8 @@ static bool reading_draw_info(uint8_t n)
     uint16_t ty;
     if (row >= 4u)
         return true;
+    if ((s_status_info_dirty_rows & (uint8_t)(1u << row)) == 0u)
+        return true;
     ty = (uint16_t)(info_ys[row] +
                     (MAIN_DISPLAY_INFO_ROW_H - FONT_TEXT_HEIGHT) / 2u);
     switch (sub)
@@ -2066,28 +2069,43 @@ static bool status_view_changed(void)
     static char prev_range[12];
     static char prev_rate[16];
     static uint8_t prev_lamps;
+    static uint8_t prev_info_lamps;
     static bool valid;
-    uint8_t lamps = 0u;
+    uint8_t top_lamps = 0u;
+    uint8_t info_lamps = 0u;
+    uint8_t dirty_rows = 0u;
+    bool top_changed;
     uint8_t i;
 
-    for (i = 0u; i < 8u; i++)
-    {
+    for (i = 0u; i < 6u; i++)
         if (s_frame.status_active[lamp_idx[i]])
-            lamps = (uint8_t)(lamps | (uint8_t)(1u << i));
-    }
-    if (valid && strcmp(prev_impedance, s_frame.impedance) == 0 &&
-        strcmp(prev_range, s_frame.range) == 0 &&
-        strcmp(prev_rate, s_frame.rate) == 0 && lamps == prev_lamps)
-        return false;
+            top_lamps = (uint8_t)(top_lamps | (uint8_t)(1u << i));
+    if (s_frame.status_active[7u])
+        info_lamps |= 1u;
+    if (s_frame.status_active[6u])
+        info_lamps |= 2u;
+    if (s_frame.status_active[11u])
+        info_lamps |= 4u;
+    top_changed = !valid || top_lamps != prev_lamps;
+    if (!valid || strcmp(prev_impedance, s_frame.impedance) != 0)
+        dirty_rows |= 1u << 0;
+    if (!valid || strcmp(prev_range, s_frame.range) != 0)
+        dirty_rows |= 1u << 1;
+    if (!valid || strcmp(prev_rate, s_frame.rate) != 0)
+        dirty_rows |= 1u << 2;
+    if (!valid || info_lamps != prev_info_lamps)
+        dirty_rows |= 1u << 3;
     strncpy(prev_impedance, s_frame.impedance, sizeof(prev_impedance) - 1u);
     prev_impedance[sizeof(prev_impedance) - 1u] = '\0';
     strncpy(prev_range, s_frame.range, sizeof(prev_range) - 1u);
     prev_range[sizeof(prev_range) - 1u] = '\0';
     strncpy(prev_rate, s_frame.rate, sizeof(prev_rate) - 1u);
     prev_rate[sizeof(prev_rate) - 1u] = '\0';
-    prev_lamps = lamps;
+    prev_lamps = top_lamps;
+    prev_info_lamps = info_lamps;
     valid = true;
-    return true;
+    s_status_info_dirty_rows = dirty_rows;
+    return top_changed || dirty_rows != 0u;
 }
 
 static void reading_scene_render(void)
@@ -2146,7 +2164,7 @@ static void reading_scene_render(void)
             }
             (void)trend_buffer_project(&s_trend, now, s_trend_columns,
                                        TREND_MAX_COLUMNS);
-            main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
+             main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
              s_trend_full_repaint = s_initial_page_pending ||
                                    /* The non-visible page receives the current visible trend
                                     * band before incremental columns are drawn, so compare this
@@ -2154,11 +2172,11 @@ static void reading_scene_render(void)
                                     * pre-copy cache would force a needless full trend rebuild. */
                                    s_page_trend_has_data[s_visible_page] !=
                                        s_frame.trend_has_data ||
-                                   trend_axis_changed(
-                                       s_page_trend_axis_step[s_visible_page],
-                                       s_page_trend_axis_top[s_visible_page],
-                                       &s_frame);
-            if (s_trend_full_repaint && (!s_frame.trend_has_data ||
+                                    trend_axis_changed(
+                                        s_page_trend_axis_step[s_visible_page],
+                                        s_page_trend_axis_top[s_visible_page],
+                                        &s_frame);
+             if (s_trend_full_repaint && (!s_frame.trend_has_data ||
                 !trend_buffer_window_full(&s_trend)))
             {
                 /* Empty or still-filling buffer (unit switch cleared it):
