@@ -199,10 +199,29 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     }
 }
 
-void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
-                               const char *unit, main_display_frame_t *frame)
+void main_display_get_trend_axis(const main_display_frame_t *frame,
+                                 main_display_trend_axis_t *axis)
 {
-    float minimum, maximum, step, top;
+    if (axis == 0) return;
+    axis->valid = frame != 0 && frame->trend_has_data &&
+                  frame->trend_axis_step > 0.0f;
+    if (!axis->valid) {
+        axis->step = 0.0f;
+        axis->top = 0.0f;
+        axis->unit[0] = '\0';
+        return;
+    }
+    axis->step = frame->trend_axis_step;
+    axis->top = frame->trend_axis_top;
+    copy_text(axis->unit, sizeof(axis->unit), frame->trend_axis_unit);
+}
+
+void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
+                               const char *unit,
+                               const main_display_trend_axis_t *resident,
+                               main_display_frame_t *frame)
+{
+    float minimum, maximum, step, top, scale;
     const char *axis_unit = unit;
     uint8_t i;
     if (frame == 0) return;
@@ -216,18 +235,31 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
         return;
     }
     frame->trend_has_data = true;
+    /* trend_minimum/trend_maximum stay DATA bounds (scaled window range).
+     * The projection bounds of the resident axis are applied by the caller
+     * that decides residency, right before columns are drawn. */
     frame->trend_minimum = minimum; frame->trend_maximum = maximum;
     /* trend_buffer stores normalized base-unit values. Axis labels must use
      * that same unit even when the latest host reading changes prefix. */
+    scale = trend_buffer_display_scale(trend);
     if (trend != 0) {
         if (trend_buffer_display_unit(trend)[0] != '\0')
             axis_unit = trend_buffer_display_unit(trend);
     }
-    minimum *= trend_buffer_display_scale(trend);
-    maximum *= trend_buffer_display_scale(trend);
+    minimum *= scale;
+    maximum *= scale;
     step = nice_step(maximum - minimum);
     top = (float)((int32_t)(maximum / step)) * step;
     if (top < maximum) top += step;
+    /* Resident rule: within one unit the display identity is sticky. The
+     * sliding window drifting inside the current 1/2/5 grid must not mint
+     * a new identity (that used to force a full grid+label rebuild every
+     * few seconds). Callers without resident state get the auto fit. */
+    if (resident != 0 && resident->valid && resident->step > 0.0f &&
+        strcmp(resident->unit, axis_unit) == 0) {
+        step = resident->step;
+        top = resident->top;
+    }
     frame->trend_axis_step = step;
     frame->trend_axis_top = top;
     copy_text(frame->trend_axis_unit, sizeof(frame->trend_axis_unit),

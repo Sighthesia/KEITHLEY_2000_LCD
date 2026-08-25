@@ -99,19 +99,19 @@ int main(void)
     trend_buffer_init(&trend);
     assert(trend_buffer_add(&trend, 0u, "1.0", "V"));
     assert(trend_buffer_add(&trend, 20u, "2.0", "V"));
-    main_display_format_trend(&trend, 20u, "V", &frame);
+    main_display_format_trend(&trend, 20u, "V", 0, &frame);
     assert(frame.trend_has_data && frame.trend_maximum > 2.0f &&
            frame.trend_minimum < 1.0f);
     assert(strstr(frame.y_labels[0], "V") != 0);
     trend_buffer_reset(&trend);
     assert(trend_buffer_add(&trend, 40u, "1000", "mV"));
-    main_display_format_trend(&trend, 40u, "mV", &frame);
+    main_display_format_trend(&trend, 40u, "mV", 0, &frame);
     assert(strstr(frame.y_labels[0], "mV") != 0);
     assert(strstr(frame.y_labels[0], "1000") == 0);
     trend_buffer_reset(&trend);
     assert(trend_buffer_add(&trend, 60u, "1", "A"));
     assert(trend_buffer_add(&trend, 80u, "1.2", "A"));
-    main_display_format_trend(&trend, 80u, "A", &frame);
+    main_display_format_trend(&trend, 80u, "A", 0, &frame);
     assert(strstr(frame.y_labels[0], "A") != 0);
     assert(strstr(frame.y_labels[0], "6.89") == 0);
 
@@ -119,9 +119,46 @@ int main(void)
     trend_buffer_reset(&trend);
     assert(trend_buffer_add(&trend, 100u, "-0.002", "mA"));
     assert(trend_buffer_add(&trend, 120u, "-0.001", "mA"));
-    main_display_format_trend(&trend, 120u, "mA", &frame);
+    main_display_format_trend(&trend, 120u, "mA", 0, &frame);
     assert(frame.trend_has_data);
     assert(strstr(frame.y_labels[0], "mA") != 0);
     assert(strstr(frame.y_labels[3], "mA") != 0);
+
+    /* Task 2: within one unit the display axis identity (unit/step/top)
+     * must stay fixed while the sliding-window data bounds move. The
+     * resident axis is explicit state carried across frames; without it
+     * every window drift re-derived a new 1/2/5 grid (0.02 vs 0.005 step
+     * for these two frames) and forced a full trend rebuild. */
+    {
+        main_display_frame_t first;
+        main_display_frame_t second;
+        main_display_frame_t third;
+        main_display_trend_axis_t resident;
+
+        trend_buffer_reset(&trend);
+        assert(trend_buffer_add(&trend, 1000u, "1.20000", "VDC"));
+        main_display_format_trend(&trend, 1000u, "VDC", 0, &first);
+
+        main_display_get_trend_axis(&first, &resident);
+        assert(resident.valid);
+        assert(trend_buffer_add(&trend, 1020u, "1.21000", "VDC"));
+        main_display_format_trend(&trend, 1020u, "VDC", &resident, &second);
+
+        assert(strcmp(first.trend_axis_unit, second.trend_axis_unit) == 0);
+        assert(first.trend_axis_step == second.trend_axis_step);
+        assert(first.trend_axis_top == second.trend_axis_top);
+        assert(strcmp(first.y_labels[0], second.y_labels[0]) == 0);
+        /* The data bounds moved even though the identity did not. */
+        assert(second.trend_minimum > first.trend_minimum);
+        assert(second.trend_maximum > first.trend_maximum);
+
+        /* A unit switch must still mint a fresh identity immediately. */
+        trend_buffer_reset(&trend);
+        assert(trend_buffer_add(&trend, 2000u, "2.00000", "ADC"));
+        main_display_format_trend(&trend, 2000u, "ADC", &resident, &third);
+        assert(strcmp(third.trend_axis_unit, "ADC") == 0);
+        assert(strcmp(third.trend_axis_unit,
+                      second.trend_axis_unit) != 0);
+    }
     return 0;
 }

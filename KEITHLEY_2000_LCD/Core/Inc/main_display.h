@@ -123,11 +123,23 @@ typedef struct {
     float trend_minimum;
     float trend_maximum;
     /* Derived 1/2/5 axis geometry: the full trend rebuild (grid + labels)
-     * is only needed when these change, not when raw min/max drift. */
+     * is only needed when these change, not when raw min/max drift.
+     * trend_minimum/trend_maximum remain DATA bounds; the projection onto
+     * the stable axis is applied by the caller that owns residency. */
     float trend_axis_step;
     float trend_axis_top;
     char trend_axis_unit[8];
 } main_display_frame_t;
+
+/* Stable display-axis identity (the 1/2/5 geometry currently painted).
+ * Carried explicitly across frames so a sliding-window drift inside one
+ * unit never mints a new identity. */
+typedef struct {
+    bool valid;
+    char unit[8];
+    float step;
+    float top;
+} main_display_trend_axis_t;
 
 main_display_layout_t main_display_layout_value(uint8_t value_len,
                                                  uint16_t start_x,
@@ -138,7 +150,17 @@ uint16_t main_display_special_color(uint8_t special);
 const char *main_display_rate_text(ui_rate_t rate);
 const char *main_display_function_text(ui_function_t function);
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
+/* Extracts the axis identity a frame was rendered with, for use as the
+ * resident axis of the next frame. */
+void main_display_get_trend_axis(const main_display_frame_t *frame,
+                                 main_display_trend_axis_t *axis);
+/* trend_minimum/trend_maximum are always left as the scaled window DATA
+ * bounds. When `resident` is valid and matches the buffer unit, the axis
+ * identity (unit/step/top) is kept from it and the labels are regenerated
+ * from that identity; otherwise a fresh 1/2/5 fit of the window is used. */
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
-                               const char *unit, main_display_frame_t *frame);
+                               const char *unit,
+                               const main_display_trend_axis_t *resident,
+                               main_display_frame_t *frame);
 void main_display_set_trend_axis(main_display_frame_t *frame, float step,
                                  float top, const char *unit);
