@@ -127,6 +127,26 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #define DEMO_SAMPLE_PERIOD_MS 100u
 #define DISPLAY_FRAME_PERIOD_MS 33u
 
+/* Runtime composition writes ONLY the hidden render page; initialization
+ * and the blanked first frame keep the verified dual-page writes so both
+ * canvases start identical. The switch exists for A/B hardware validation
+ * of Task 3 and must be removed (hard-wired to 1) before final commit. */
+#ifndef LT7680_RUNTIME_HIDDEN_ONLY
+#define LT7680_RUNTIME_HIDDEN_ONLY 1
+#endif
+
+/* Dirty bands of one composition, in UI space. They drive the frame-begin
+ * page synchronization: only bands a previous frame touched can differ
+ * between the two SDRAM pages, so only those are BTE-copied -- never a
+ * whole-canvas clone. LT7680_SYNC_REGIONS stages the hardware validation
+ * one band at a time and is removed together with the switch above. */
+#define FRAME_REGION_STATUS  0x01u
+#define FRAME_REGION_READING 0x02u
+#define FRAME_REGION_TREND   0x04u
+#ifndef LT7680_SYNC_REGIONS
+#define LT7680_SYNC_REGIONS 0x07u
+#endif
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -158,6 +178,9 @@ static uint8_t s_visible_page;
 static uint8_t s_render_page;
 static uint8_t s_ready_page_mask;
 static bool s_render_full_page;
+/* Bands touched since the render page last caught up with the visible one.
+ * Consumed by the frame-begin BTE band copies (hidden-page rendering). */
+static uint8_t s_frame_regions;
 static uint8_t s_text_generation;
 static uint8_t s_page_text_generation[2];
 static uint8_t s_frame_text_generation;
@@ -589,6 +612,94 @@ static void display_enable_after_initial_frame(void)
     }
 }
 
+/* Map a scheduler phase to the UI band its drawing owns. Bands are the
+ * unit of inter-page synchronization: a runtime frame only mutates pixels
+ * inside the band(s) of its phases, so a band copy can never miss a write. */
+static uint8_t frame_region_for_phase(render_phase_t phase)
+{
+    switch (phase)
+    {
+    case RENDER_PHASE_INITIAL_STATUS:
+    case RENDER_PHASE_UPDATE_STATUS:
+        return FRAME_REGION_STATUS;
+    case RENDER_PHASE_INITIAL_READING:
+    case RENDER_PHASE_UPDATE_READING:
+        return FRAME_REGION_READING;
+    case RENDER_PHASE_INITIAL_TREND_STATIC:
+    case RENDER_PHASE_INITIAL_TREND_COLUMNS:
+    case RENDER_PHASE_UPDATE_TREND_AXES:
+    case RENDER_PHASE_UPDATE_TREND_COLUMNS:
+        return FRAME_REGION_TREND;
+    default:
+        return 0u;
+    }
+}
+
+/* Bring the freshly selected hidden page level with the committed page for
+ * every band still flagged in s_frame_regions: one BTE rectangle copy per
+ * band with full-canvas strides, never a whole-canvas clone. A band bit is
+ * cleared only after its copy succeeds, so a bus error retries exactly the
+ * remaining work on the next attempt. */
+static bool hidden_page_sync_regions(void)
+{
+    static const struct
+    {
+        uint8_t region;
+        uint16_t y;
+        uint16_t h;
+    } bands[3] = {
+        {FRAME_REGION_STATUS, MAIN_DISPLAY_STATUS_Y, MAIN_DISPLAY_STATUS_H},
+        {FRAME_REGION_READING, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_READING_H},
+        {FRAME_REGION_TREND, MAIN_DISPLAY_TREND_Y, MAIN_DISPLAY_TREND_H},
+    };
+    uint8_t i;
+
+    for (i = 0u; i < 3u; i++)
+    {
+        lt7680_rect_t rect;
+
+        if ((s_frame_regions & bands[i].region &
+             (uint8_t)LT7680_SYNC_REGIONS) == 0u)
+            continue;
+        panel_transform_ui_rect_to_fb(0u, bands[i].y, MAIN_DISPLAY_UI_WIDTH,
+                                      bands[i].h, &rect.x, &rect.y,
+                                      &rect.w, &rect.h);
+        if (rect.w == 0u || rect.h == 0u)
+            return false;
+        if (lt7680_gfx_copy_rect(s_visible_page, s_render_page, &rect) !=
+            LT7680_OK)
+            return false;
+        s_frame_regions &= (uint8_t)~bands[i].region;
+    }
+    return true;
+}
+
+#if LT7680_RUNTIME_HIDDEN_ONLY
+/* True when normal runtime composition may write the render page only.
+ * The blanked first frame builds with dual-page writes so both canvases
+ * start pixel-identical; every later frame composes on one page and lets
+ * hidden_page_sync_regions() level the sibling at the next frame start.
+ * LT7680_SYNC_REGIONS keeps the staged hardware validation safe: a band
+ * excluded from synchronization stays on dual-page writes, so the pages
+ * can never diverge inside it. */
+static bool ui_runtime_single_page(void)
+{
+    return s_frame_rendering && !s_render_full_page &&
+           (frame_region_for_phase(s_renderer.phase) &
+            (uint8_t)LT7680_SYNC_REGIONS) != 0u;
+}
+#endif
+
+/* Page invariant (Task 3, hidden-page rendering):
+ *   - At begin_hidden_frame() the composition target s_render_page carries
+ *     the last committed scene plus every change not yet committed: the
+ *     bands flagged in s_frame_regions are BTE-copied from the visible
+ *     page before any new drawing.
+ *   - Runtime GE/BTE writes target ONLY s_render_page; initialization and
+ *     the blanked first frame keep dual-page writes.
+ *   - present_page() atomically makes s_render_page visible, after which
+ *     s_visible_page == s_render_page and the sibling page catches up via
+ *     the next frame's band copies. */
 static bool begin_hidden_frame(void)
 {
     lt7680_status_t st;
@@ -603,6 +714,7 @@ static bool begin_hidden_frame(void)
         if (st != LT7680_OK)
             return false;
         s_render_full_page = true;
+        s_frame_regions = 0u;
         st = lt7680_gfx_clear(MAIN_DISPLAY_COLOR_BG);
         if (st != LT7680_OK)
             return false;
@@ -614,11 +726,19 @@ static bool begin_hidden_frame(void)
         /* Compose runtime updates on the HIDDEN page and flip atomically at
          * commit. Writing the scanned page makes BTE bursts collide with
          * display fetches (single-pixel sparkles); the hidden page never
-         * collides, and both pages are kept identical by dual-page writes. */
+         * collides. First replay the previous frames' band deltas so this
+         * page starts from the committed scene, then draw on it alone. */
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK)
             return false;
+#if LT7680_RUNTIME_HIDDEN_ONLY
+        if (!hidden_page_sync_regions())
+            return false;
+#else
+        /* Dual-page writes keep both canvases identical; no band replay. */
+        s_frame_regions = 0u;
+#endif
         s_render_full_page = false;
         s_waiting_visible = false;
         s_perf_frame_start_tick = HAL_GetTick();
@@ -733,6 +853,15 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     uint32_t t0 = HAL_GetTick();
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
+#if LT7680_RUNTIME_HIDDEN_ONLY
+    if (ui_runtime_single_page())
+    {
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_fill_rect(&rect, color);
+    }
+    else
+#endif
     {
         uint8_t p;
         for (p = 0u; p < 2u && st == LT7680_OK; p++)
@@ -754,6 +883,16 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
     lt7680_status_t st = LT7680_OK;
     panel_transform_ui_to_fb(x0, y0, &fx0, &fy0);
     panel_transform_ui_to_fb(x1, y1, &fx1, &fy1);
+#if LT7680_RUNTIME_HIDDEN_ONLY
+    if (ui_runtime_single_page())
+    {
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_draw_line((int16_t)fx0, (int16_t)fy0,
+                                      (int16_t)fx1, (int16_t)fy1, color);
+    }
+    else
+#endif
     {
         uint8_t p;
         for (p = 0u; p < 2u && st == LT7680_OK; p++)
@@ -1085,6 +1224,17 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             {
                 uint32_t t0 = HAL_GetTick();
                 st = LT7680_OK;
+#if LT7680_RUNTIME_HIDDEN_ONLY
+                if (ui_runtime_single_page())
+                {
+                    st = lt7680_flash_dma_tile_to_canvas(
+                        s_rif_draw_job.tile.offset,
+                        (uint32_t)s_render_page * 0x100000u, 320u,
+                        fb_x, fb_y,
+                        FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
+                }
+                else
+#endif
                 for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
                 {
                     st = lt7680_flash_dma_tile_to_canvas(
@@ -2241,6 +2391,11 @@ static void reading_scene_render(void)
         }
     }
     initial_phase = s_renderer.phase <= RENDER_PHASE_INITIAL_TREND_COLUMNS;
+    /* Record which band this frame is mutating. The flag survives until the
+     * NEXT begin_hidden_frame() replays it onto the sibling page, so a band
+     * written while this page was hidden can never be lost at the flip. */
+    if (s_frame_rendering)
+        s_frame_regions |= frame_region_for_phase(s_renderer.phase);
     /* One bounded region/slice per call. RX and keypad are serviced between
      * calls by the main loop. Routine phases clear only their own local band. */
     switch (s_renderer.phase)
@@ -2777,7 +2932,7 @@ int main(void)
         k2000_proto_init(&proto_cb);
         panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
                              panel.width, panel.height);
-        hal_uart_send_text("\r\nK2000 TFT build13 trend-layout v16");
+        hal_uart_send_text("\r\nK2000 TFT build14 hidden-page v1");
 #if K2000_DEMO_FEED
         hal_uart_send_text(" DEMO-FEED v16\r\n");
 #else

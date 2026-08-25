@@ -130,6 +130,13 @@ lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
 lt7680_status_t lt7680_gfx_present_page(uint8_t page);
 /* Clone one complete RGB565 canvas page with the verified BTE copy ROP. */
 lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page);
+/* Copy an RGB565 rectangle between the two canvas pages with the verified
+ * BTE copy ROP. Source and destination strides are the full canvas width,
+ * so a dirty band clones without touching the rest of either page. This is
+ * the per-frame hidden-page synchronization primitive; the full-page clone
+ * above stays reserved for one-shot init leveling. */
+lt7680_status_t lt7680_gfx_copy_rect(uint8_t source_page, uint8_t target_page,
+                                     const lt7680_rect_t *rect);
 /* Copy an RGB565 rectangle from an absolute SDRAM source (e.g. a pre-built
  * transposed glyph tile library) onto the given canvas page with the verified
  * BTE copy ROP. Source and destination strides (pixels) are independent. */

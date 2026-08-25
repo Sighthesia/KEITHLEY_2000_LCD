@@ -1117,6 +1117,54 @@ lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
     return wait_bte_idle();
 }
 
+/* Copy an RGB565 rectangle between the two canvas pages with the verified
+ * BTE ROP. Both strides stay at the full canvas width so the source and
+ * destination rectangles address identical geometry on each page; only the
+ * band between (x,y) and (x+w,y+h) is touched. */
+lt7680_status_t lt7680_gfx_copy_rect(uint8_t source_page, uint8_t target_page,
+                                     const lt7680_rect_t *rect)
+{
+    lt7680_status_t st;
+
+    if (source_page > 1u || target_page > 1u || source_page == target_page ||
+        rect == 0 || s_panel.width == 0u || s_panel.height == 0u ||
+        rect->w == 0u || rect->h == 0u ||
+        (uint32_t)rect->x + rect->w > s_panel.width ||
+        (uint32_t)rect->y + rect->h > s_panel.height) {
+        return LT7680_ERR_PARAM;
+    }
+    /* RGB565 memory-copy-with-ROP: ROP C copies S0; F is whiteness. */
+    st = write_reg(LT7680_REG_BTE_CTRL1, 0xC2u);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_COLR, 0x25u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_S0_STR,
+                (uint32_t)source_page * LT7680_CANVAS_PAGE_BYTES);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_WTH, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_X, rect->x);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_S0_Y, rect->y);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_BTE_DT_STR,
+                (uint32_t)target_page * LT7680_CANVAS_PAGE_BYTES);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_WTH, s_panel.width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_X, rect->x);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_DT_Y, rect->y);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_BTE_SIZE, rect->w);
+    if (st != LT7680_OK) return st;
+    st = wr13((uint8_t)(LT7680_REG_BTE_SIZE + 2u), rect->h);
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_BTE_CTRL0, 0x10u);
+    if (st != LT7680_OK) return st;
+    return wait_bte_idle();
+}
+
 /* Copy an RGB565 rectangle from an absolute SDRAM source to the given canvas
  * page with the verified BTE ROP. The source is any packed tile area (e.g. a
  * pre-transposed glyph library at 0x200000+), so source and destination

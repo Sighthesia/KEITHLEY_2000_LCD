@@ -56,5 +56,33 @@ int main(void)
     assert(scheduler.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
     render_scheduler_complete_phase(&scheduler);
     assert(scheduler.phase == RENDER_PHASE_IDLE);
+
+    /* Hidden-frame page invariant, scheduler side: an active hidden frame
+     * remains on its phase until that phase completes. A pending reading
+     * update is not restarted by a trend request -- the request is queued
+     * and serviced only after the reading phase finishes. */
+    render_scheduler_request_regions(&scheduler, RENDER_DIRTY_READING);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_READING);
+    render_scheduler_request_trend(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_READING);
+    render_scheduler_complete_phase(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+    render_scheduler_complete_phase(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
+    render_scheduler_complete_phase(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_IDLE);
+
+    /* Likewise a request arriving mid-status-phase neither restarts the
+     * running phase nor drops the still-pending reading: the queue is
+     * serviced strictly after the active phase completes. */
+    render_scheduler_request_regions(&scheduler,
+        RENDER_DIRTY_STATUS | RENDER_DIRTY_READING);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_STATUS);
+    render_scheduler_request_regions(&scheduler, RENDER_DIRTY_READING);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_STATUS);
+    render_scheduler_complete_phase(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_UPDATE_READING);
+    render_scheduler_complete_phase(&scheduler);
+    assert(scheduler.phase == RENDER_PHASE_IDLE);
     return 0;
 }
