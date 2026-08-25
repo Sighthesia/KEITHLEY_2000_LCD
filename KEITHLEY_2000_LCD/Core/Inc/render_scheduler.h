@@ -22,6 +22,11 @@ typedef struct {
     render_phase_t phase;
     uint8_t pending_regions;
     bool trend_pending;
+    /* Frame-level phase state of the active trend pass: true once its
+     * axes phase has completed, so any resume after a yield continues at
+     * the columns phase instead of restarting the axes rebuild. Cleared
+     * when the pass finishes. */
+    bool trend_resume_at_columns;
     bool initial_complete;
     bool initial_complete_edge;
 } render_scheduler_t;
@@ -38,8 +43,15 @@ void render_scheduler_kick(render_scheduler_t *scheduler);
 /* Bounded-slice handoff: callable between trend slices. When region work
  * is pending, re-flags the unfinished trend and selects the higher-priority
  * phase so the main loop regains control; returns true when preempted.
- * The active slice is never restarted -- column progress lives in the
- * renderer, and select_pending resumes the graph afterwards. */
+ * A pass whose axes phase already completed resumes directly at the
+ * columns phase -- a runtime axis rebuild can never restart and erase
+ * columns it already rendered. An axes phase interrupted mid-pass replays
+ * its deterministic background/grid/label operations from the first item
+ * after the region phases (the renderer shares one item cursor with the
+ * region bands); safe because no column of that pass exists yet.
+ * Wait bound for a pending status/reading region: at most one trend
+ * slice, i.e. <=8 column draws or one axis background/grid/label
+ * operation; between boundaries arriving snapshots wait coalesced. */
 bool render_scheduler_yield_trend(render_scheduler_t *scheduler);
 void render_scheduler_complete_phase(render_scheduler_t *scheduler);
 bool render_scheduler_take_initial_complete(render_scheduler_t *scheduler);

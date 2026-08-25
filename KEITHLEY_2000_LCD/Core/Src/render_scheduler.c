@@ -10,7 +10,13 @@ static void select_pending(render_scheduler_t *scheduler)
         scheduler->phase = RENDER_PHASE_UPDATE_READING;
     } else if (scheduler->trend_pending) {
         scheduler->trend_pending = false;
-        scheduler->phase = RENDER_PHASE_UPDATE_TREND_AXES;
+        /* Frame-level resume point: a pass whose axes phase already ran
+         * continues at the columns phase. Re-selecting AXES would replay
+         * the axis rebuild and erase columns rendered earlier in this
+         * pass (review C-1). */
+        scheduler->phase = scheduler->trend_resume_at_columns
+                               ? RENDER_PHASE_UPDATE_TREND_COLUMNS
+                               : RENDER_PHASE_UPDATE_TREND_AXES;
     } else {
         scheduler->phase = RENDER_PHASE_IDLE;
     }
@@ -22,6 +28,7 @@ void render_scheduler_init(render_scheduler_t *scheduler)
     scheduler->phase = RENDER_PHASE_INITIAL_STATUS;
     scheduler->pending_regions = 0u;
     scheduler->trend_pending = false;
+    scheduler->trend_resume_at_columns = false;
     scheduler->initial_complete = false;
     scheduler->initial_complete_edge = false;
 }
@@ -57,7 +64,9 @@ bool render_scheduler_yield_trend(render_scheduler_t *scheduler)
         return false;
     if (scheduler->pending_regions == 0u) return false;
     /* Re-flag the unfinished pass; select_pending services the regions
-     * first and resumes the graph afterwards without restarting it. */
+     * first and then resumes it -- directly at columns when the axes
+     * already completed, so an interrupted full rebuild cannot restart
+     * and erase rendered columns. */
     scheduler->trend_pending = true;
     select_pending(scheduler);
     return true;
@@ -82,7 +91,16 @@ void render_scheduler_complete_phase(render_scheduler_t *scheduler)
         select_pending(scheduler);
         break;
     case RENDER_PHASE_UPDATE_TREND_AXES:
+        /* Frame-level state: this pass must never re-enter its axes
+         * phase, not even across a yield/preempt cycle. */
+        scheduler->trend_resume_at_columns = true;
         scheduler->phase = RENDER_PHASE_UPDATE_TREND_COLUMNS;
+        break;
+    case RENDER_PHASE_UPDATE_TREND_COLUMNS:
+        /* Pass boundary: forget the resume point so the next requested
+         * pass performs a fresh axes evaluation. */
+        scheduler->trend_resume_at_columns = false;
+        select_pending(scheduler);
         break;
     case RENDER_PHASE_IDLE:
         select_pending(scheduler);

@@ -614,6 +614,7 @@ static void display_enable_after_initial_frame(void)
             s_renderer.phase = RENDER_PHASE_IDLE;
             s_renderer.pending_regions = 0u;
             s_renderer.trend_pending = false;
+            s_renderer.trend_resume_at_columns = false;
             s_renderer.initial_complete = true;
             s_renderer.initial_complete_edge = false;
 #if K2000_DEMO_FEED
@@ -2305,9 +2306,12 @@ static void reading_scene_render(void)
     }
     /* Publish immutable render snapshots only while idle. Queue a due trend
      * before text regions so a continuously dirty 10 Hz reading cannot starve
-     * the 5 Hz graph; the region request is retained by the scheduler and runs
-     * immediately after the two incremental trend phases. Active work is never
-     * restarted, so every bitmap/graph slice progresses at 500 readings/s. */
+     * the 5 Hz graph. While a trend pass runs, arriving region dirties
+     * preempt it at the next slice boundary (<=8 columns or one axis
+     * background/grid/label operation); between boundaries the newest
+     * snapshot simply waits -- it is coalesced, never dropped, and active
+     * trend work is never restarted (the scheduler resumes an interrupted
+     * pass at its saved phase state). */
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
         bool status_dirty =
@@ -2761,6 +2765,15 @@ static void reading_scene_render(void)
         {
             trend_draw_background();
             s_render_item = 1u;
+            /* One axis draw operation per bounded slice, like the column
+             * budget below: a pending region preempts here, and on resume
+             * the deterministic axis sequence replays from item 0 -- the
+             * region phases share s_render_item, and replay is idempotent
+             * because this pass has drawn no columns yet. A full rebuild
+             * spans 19 such slices (background + 2x(Y labels) + 2x(X
+             * labels)); without the handoff a reading would wait for all
+             * of them. */
+            (void)render_scheduler_yield_trend(&s_renderer);
             return;
         }
         /* Axis text owns x=0..95 only; the plot and resident grid start at 96.
@@ -2777,6 +2790,7 @@ static void reading_scene_render(void)
                                MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
                                MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
+            (void)render_scheduler_yield_trend(&s_renderer);
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u)
@@ -2790,6 +2804,7 @@ static void reading_scene_render(void)
                               MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
+            (void)render_scheduler_yield_trend(&s_renderer);
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
@@ -2806,6 +2821,7 @@ static void reading_scene_render(void)
                                    MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
                                    MAIN_DISPLAY_COLOR_GRID);
                 s_render_item++;
+                (void)render_scheduler_yield_trend(&s_renderer);
                 return;
             }
             if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
@@ -2813,6 +2829,7 @@ static void reading_scene_render(void)
                               s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
+            (void)render_scheduler_yield_trend(&s_renderer);
             return;
         }
         render_scheduler_complete_phase(&s_renderer);
@@ -2844,8 +2861,11 @@ static void reading_scene_render(void)
         }
         /* Bounded slice: hand control back to a reading/status update that
          * arrived while the graph was running. The unfinished pass stays
-         * flagged and resumes after the region phases -- s_render_column is
-         * untouched, so no column is redrawn or skipped. */
+         * flagged and resumes DIRECTLY at this columns phase -- its axes
+         * phase already completed, so the rebuild can never replay the
+         * background clear over columns rendered before the handoff.
+         * s_render_column is untouched across the slice boundary: no
+         * column is redrawn, skipped, or erased. */
         if (s_render_column < TREND_MAX_COLUMNS &&
             render_scheduler_yield_trend(&s_renderer))
             return;

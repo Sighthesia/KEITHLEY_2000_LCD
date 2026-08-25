@@ -8,6 +8,7 @@ int main(void)
 
     render_scheduler_init(&scheduler);
     assert(scheduler.phase == RENDER_PHASE_INITIAL_STATUS);
+    assert(!scheduler.trend_resume_at_columns);
     render_scheduler_complete_phase(&scheduler);
     assert(scheduler.phase == RENDER_PHASE_INITIAL_READING);
     render_scheduler_complete_phase(&scheduler);
@@ -145,19 +146,23 @@ int main(void)
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
 
         /* Mid-graph reading arrival: yield hands control to the reading
-         * band for one turn and re-flags the unfinished trend. */
+         * band for one turn and re-flags the unfinished trend. This pass
+         * already completed its axes phase, so the graph must resume
+         * DIRECTLY at the columns phase. */
         render_scheduler_request_regions(&slice, RENDER_DIRTY_READING);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
         assert(render_scheduler_yield_trend(&slice));
         assert(slice.phase == RENDER_PHASE_UPDATE_READING);
         render_scheduler_complete_phase(&slice);
-        assert(slice.phase == RENDER_PHASE_UPDATE_TREND_AXES);
-        render_scheduler_complete_phase(&slice);
+        /* Regression (review C-1): re-entering the axes phase here would
+         * erase every column already rendered in this pass while the
+         * column cursor stays past them -- they could never be redrawn. */
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_IDLE);
 
-        /* Yield inside the axes phase behaves identically. */
+        /* Yield inside the axes phase resumes the axes phase itself (the
+         * pass has not completed it yet), then flows on into columns. */
         render_scheduler_request_trend(&slice);
         render_scheduler_kick(&slice);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_AXES);
@@ -174,6 +179,48 @@ int main(void)
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_IDLE);
+    }
+
+    /* --- Review C-1 regression: a runtime FULL trend rebuild (axis
+     * identity change) that yields to a reading mid-columns must resume at
+     * the columns phase. Re-running UPDATE_TREND_AXES would replay the
+     * background clear and erase columns already rendered in this pass;
+     * with the column cursor past them they could never be redrawn. The
+     * scheduler therefore carries frame-level state recording that this
+     * pass finished its axes, cleared again at the pass boundary. --- */
+    {
+        render_scheduler_t full;
+        render_scheduler_init(&full);
+        assert(!full.trend_resume_at_columns);
+        render_scheduler_kick(&full);
+        while (full.phase != RENDER_PHASE_IDLE)
+            render_scheduler_complete_phase(&full);
+        assert(render_scheduler_take_initial_complete(&full));
+
+        /* Full-rebuild pass: axes complete, then a partial column slice. */
+        render_scheduler_request_trend(&full);
+        render_scheduler_kick(&full);
+        assert(full.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+        render_scheduler_complete_phase(&full);
+        assert(full.trend_resume_at_columns);
+        assert(full.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
+
+        render_scheduler_request_regions(&full, RENDER_DIRTY_READING);
+        assert(render_scheduler_yield_trend(&full));
+        assert(full.phase == RENDER_PHASE_UPDATE_READING);
+        render_scheduler_complete_phase(&full);
+        /* THE FIX UNDER TEST: columns continue; axes are NOT re-entered. */
+        assert(full.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
+        assert(full.trend_resume_at_columns);
+        render_scheduler_complete_phase(&full);
+        assert(full.phase == RENDER_PHASE_IDLE);
+        /* The pass boundary clears the frame-level resume point. */
+        assert(!full.trend_resume_at_columns);
+
+        /* A brand-new request therefore evaluates its axes again. */
+        render_scheduler_request_trend(&full);
+        render_scheduler_kick(&full);
+        assert(full.phase == RENDER_PHASE_UPDATE_TREND_AXES);
     }
     return 0;
 }
