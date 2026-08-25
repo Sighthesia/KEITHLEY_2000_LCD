@@ -194,6 +194,11 @@ static uint16_t s_perf_window_frames;
 static uint16_t s_perf_fps;
 static uint32_t s_perf_sample_count;
 static uint32_t s_perf_sample_missed;
+static uint32_t s_perf_fields_window;
+static uint32_t s_perf_reading_frames_window;
+static uint32_t s_perf_display_commits_window;
+static uint32_t s_perf_axis_rebuilds_window;
+static uint32_t s_perf_trend_columns_window;
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
 {
@@ -279,9 +284,24 @@ static void perf_record_frame(void)
         perf_send_u32(s_prof_dma_ms);
         hal_uart_send_text("/");
         perf_send_u32(s_prof_dma_n);
+        hal_uart_send_text(" input_hz=");
+        perf_send_u32(s_perf_fields_window);
+        hal_uart_send_text(" reading_frames=");
+        perf_send_u32(s_perf_reading_frames_window);
+        hal_uart_send_text(" display_commits=");
+        perf_send_u32(s_perf_display_commits_window);
+        hal_uart_send_text(" trend_axis_rebuilds=");
+        perf_send_u32(s_perf_axis_rebuilds_window);
+        hal_uart_send_text(" trend_column_updates=");
+        perf_send_u32(s_perf_trend_columns_window);
         hal_uart_send_text("\r\n");
         s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
         s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
+        s_perf_fields_window = 0u;
+        s_perf_reading_frames_window = 0u;
+        s_perf_display_commits_window = 0u;
+        s_perf_axis_rebuilds_window = 0u;
+        s_perf_trend_columns_window = 0u;
     }
 }
 static uint16_t s_render_column;
@@ -500,6 +520,7 @@ static void display_enable_after_initial_frame(void)
          * MISA page after CVSSA is changed during boot. */
         if (lt7680_gfx_present_page(s_render_page) != LT7680_OK)
             return;
+        s_perf_display_commits_window++;
         if (!initial_frame && !s_demo_commit_reported)
         {
             hal_uart_send_text("[DEMO] commit page=");
@@ -623,6 +644,7 @@ static void proto_on_event(const k2000_event_t *evt)
     switch (evt->type)
     {
     case K2000_EVT_FIELD:
+        s_perf_fields_window++;
         if (!s_demo_event_reported)
         {
             hal_uart_send_text("[DEMO] field-len=");
@@ -2194,6 +2216,8 @@ static void reading_scene_render(void)
                  * column updates absorb the drift meanwhile. */
                  s_trend_full_repaint = false;
              }
+             if (s_trend_full_repaint)
+                 s_perf_axis_rebuilds_window++;
              if (!s_trend_full_repaint &&
                  s_frame.trend_has_data &&
                  strcmp(s_page_trend_axis_unit[s_visible_page],
@@ -2214,7 +2238,10 @@ static void reading_scene_render(void)
             if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
+                {
                     s_text_generation++;
+                    s_perf_reading_frames_window++;
+                }
                 s_frame_text_generation = s_text_generation;
                 page_text_stale = due_regions != 0u;
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
@@ -2656,6 +2683,7 @@ static void reading_scene_render(void)
         {
             trend_draw_column(s_render_column,
                               !initial_phase && !s_trend_full_repaint);
+            s_perf_trend_columns_window++;
             s_render_column++;
         }
         if (s_render_column >= TREND_MAX_COLUMNS)
