@@ -114,6 +114,14 @@ static bool feed_lone_text_tag(uint8_t byte)
 void k2000_proto_feed(uint8_t byte)
 {
     if (byte == K2000_START) {
+        /* A frame start must not swallow an open field: hosts that stream
+         * readings without a closing tag (or terminate the field implicitly
+         * at the next frame) still delivered a complete value by now. Emit
+         * it before resetting; incomplete POS/BLINK/STATUS arguments are
+         * corrupt fragments and stay discarded. */
+        if (s_state == K2000_STATE_VALUE && s_evt.type == K2000_EVT_FIELD) {
+            emit(&s_evt);
+        }
         s_state = K2000_STATE_IDLE;
         memset(&s_evt, 0, sizeof(s_evt));
         s_evt_tag = 0;

@@ -2846,15 +2846,13 @@ static void reading_scene_render(void)
         {
             trend_draw_background();
             s_render_item = 1u;
-            /* One axis draw operation per bounded slice, like the column
-             * budget below: a pending region preempts here, and on resume
-             * the deterministic axis sequence replays from item 0 -- the
-             * region phases share s_render_item, and replay is idempotent
-             * because this pass has drawn no columns yet. A full rebuild
-             * spans 19 such slices (background + 2x(Y labels) + 2x(X
-             * labels)); without the handoff a reading would wait for all
-             * of them. */
-            (void)trend_yield_to_regions();
+            /* No yield inside AXES: a mid-sequence preempt resets the shared
+             * item cursor to 0, and with resume_at_columns still false the
+             * next turn replays from the background -- under sustained 10 Hz
+             * readings that restart loops forever (measured livelock) while
+             * redrawing the full chart background each time. The whole
+             * sequence is ~19 fast GE ops (tens of ms); that bounded wait IS
+             * the reading-priority contract for full rebuilds. */
             return;
         }
         /* Axis text owns x=0..95 only; the plot and resident grid start at 96.
@@ -2871,7 +2869,6 @@ static void reading_scene_render(void)
                                MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
                                MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
-            (void)trend_yield_to_regions();
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u)
@@ -2885,7 +2882,6 @@ static void reading_scene_render(void)
                               MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
-            (void)trend_yield_to_regions();
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
@@ -2902,7 +2898,6 @@ static void reading_scene_render(void)
                                    MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
                                    MAIN_DISPLAY_COLOR_GRID);
                 s_render_item++;
-                (void)trend_yield_to_regions();
                 return;
             }
             if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
@@ -2910,7 +2905,6 @@ static void reading_scene_render(void)
                               s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
-            (void)trend_yield_to_regions();
             return;
         }
         render_scheduler_complete_phase(&s_renderer);

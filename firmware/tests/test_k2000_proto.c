@@ -51,8 +51,35 @@ static const k2000_proto_cb_t s_cb = {on_event, 0};
 
 int main(void)
 {
-    /* Status TAG 0x08 (HOLD/TRIG/FAST/MED/SLOW) with value 0x80 (HOLD on). */
+    /* Frame start (0x0D) with an open unterminated field: the complete
+     * value must be emitted, not discarded. Hosts that stream readings
+     * without a closing tag rely on the next frame boundary to close. */
     k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x01u);
+    k2000_proto_feed((uint8_t)'1');
+    k2000_proto_feed((uint8_t)'2');
+    k2000_proto_feed(0x0Du); /* next frame: flushes "12", opens new frame */
+    assert(s_field_evts == 1);
+    assert(strcmp(s_field_value, "12") == 0);
+    /* New frame's field starts clean: tag 0x01 then value "3". */
+    k2000_proto_feed(0x01u);
+    k2000_proto_feed((uint8_t)'3');
+    k2000_proto_feed(0x0Du);
+    assert(s_field_evts == 2);
+    assert(strcmp(s_field_value, "3") == 0);
+
+    /* Incomplete POS argument at frame start stays discarded (corrupt
+     * fragment, not an emittable field). */
+    s_field_evts = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x04u); /* POS tag, no argument */
+    k2000_proto_feed(0x0Du);
+    assert(s_field_evts == 0);
+    assert(s_pos_val == -1);
+
+    /* Status TAG 0x08 (HOLD/TRIG/FAST/MED/SLOW) with value 0x80 (HOLD on). */
     k2000_proto_feed(0x0Du);
     k2000_proto_feed(0x08u);
     k2000_proto_feed(0x80u);

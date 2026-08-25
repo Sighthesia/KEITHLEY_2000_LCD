@@ -54,8 +54,10 @@ void render_scheduler_kick(render_scheduler_t *scheduler);
  * Region bits must be raised while the pass is active (review I-1): a
  * request that only fires while IDLE leaves every in-pass yield inert.
  * Wait bound for a pending status/reading region: at most one trend
- * slice, i.e. <=8 column draws or one axis background/grid/label
- * operation; between boundaries arriving snapshots wait coalesced. */
+ * slice -- <=8 column draws in COLUMNS, or one full AXES sequence
+ * (~19 fast GE ops) because yielding mid-AXES would restart it from
+ * item 0 on every preempt (livelock under sustained input); between
+ * boundaries arriving snapshots wait coalesced. */
 bool render_scheduler_yield_trend(render_scheduler_t *scheduler);
 void render_scheduler_complete_phase(render_scheduler_t *scheduler);
 bool render_scheduler_take_initial_complete(render_scheduler_t *scheduler);
