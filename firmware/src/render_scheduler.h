@@ -29,6 +29,17 @@ typedef struct {
 void render_scheduler_init(render_scheduler_t *scheduler);
 void render_scheduler_request_regions(render_scheduler_t *scheduler,
                                       uint8_t regions);
+/* Flags one low-priority trend pass. Trend never preempts STATUS/READING:
+ * the request only raises the flag, and the graph starts when the main
+ * loop kicks an idle scheduler or when a running region phase completes. */
 void render_scheduler_request_trend(render_scheduler_t *scheduler);
+/* Starts queued work from IDLE: regions first, then the trend flag. */
+void render_scheduler_kick(render_scheduler_t *scheduler);
+/* Bounded-slice handoff: callable between trend slices. When region work
+ * is pending, re-flags the unfinished trend and selects the higher-priority
+ * phase so the main loop regains control; returns true when preempted.
+ * The active slice is never restarted -- column progress lives in the
+ * renderer, and select_pending resumes the graph afterwards. */
+bool render_scheduler_yield_trend(render_scheduler_t *scheduler);
 void render_scheduler_complete_phase(render_scheduler_t *scheduler);
 bool render_scheduler_take_initial_complete(render_scheduler_t *scheduler);

@@ -123,9 +123,25 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 1U
 
-/* The sample clock and the display clock are deliberately independent. */
-#define DEMO_SAMPLE_PERIOD_MS 100u
+/* The sample clock and the display clock are deliberately independent.
+ * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
+ * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
+ * for input-path testing, e.g. K2000_DEMO_INPUT_HZ=500) must NOT raise the
+ * display rate: reading updates stay coalesced to the newest frame and
+ * display commits remain bounded by DISPLAY_FRAME_PERIOD_MS. */
+#define K2000_DEMO_INPUT_HZ 10u
+#if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
+#error "K2000_DEMO_INPUT_HZ must be 1..1000"
+#endif
+#define DEMO_SAMPLE_PERIOD_MS ((uint32_t)(1000u / K2000_DEMO_INPUT_HZ))
 #define DISPLAY_FRAME_PERIOD_MS 33u
+
+/* Input-path test build switch: set to 1 together with K2000_DEMO_INPUT_HZ=500
+ * to measure the input->reading pipeline without trend work competing for
+ * scheduler turns. Must stay 0 in default/acceptance builds. */
+#ifndef K2000_TREND_TEST_DISABLE
+#define K2000_TREND_TEST_DISABLE 0
+#endif
 
 /* Runtime composition writes ONLY the hidden render page; initialization
  * and the blanked first frame keep the verified dual-page writes so both
@@ -2362,7 +2378,10 @@ static void reading_scene_render(void)
               if (s_trend_full_repaint)
                   s_perf_axis_rebuilds_window++;
               }
-              trend_needed = trend_due || s_trend_full_repaint;
+              /* Input-path test builds drop trend requests entirely so the
+               * reading pipeline can be measured without graph turns. */
+              trend_needed = !K2000_TREND_TEST_DISABLE &&
+                             (trend_due || s_trend_full_repaint);
             if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
@@ -2371,22 +2390,26 @@ static void reading_scene_render(void)
                     s_perf_reading_frames_window++;
                 }
                 s_frame_text_generation = s_text_generation;
-                page_text_stale = due_regions != 0u;
-                if ((due_regions & RENDER_DIRTY_READING) != 0u)
-                    s_text_refresh_tick = now;
-                if (trend_due)
-                    s_trend_refresh_tick = now;
-                s_display_due_tick = now;
-                s_render_status_regions =
-                    (due_regions & RENDER_DIRTY_STATUS) != 0u;
-                if (page_text_stale)
-                    render_scheduler_request_regions(&s_renderer, due_regions);
-                if (trend_needed)
-                {
-                    render_scheduler_request_trend(&s_renderer);
-                    s_frame_has_trend_update = true;
-                }
-                s_ui_dirty_regions &= (uint8_t)~due_regions;
+                 page_text_stale = due_regions != 0u;
+                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
+                     s_text_refresh_tick = now;
+                 if (trend_due)
+                     s_trend_refresh_tick = now;
+                 s_display_due_tick = now;
+                 s_render_status_regions =
+                     (due_regions & RENDER_DIRTY_STATUS) != 0u;
+                 if (page_text_stale)
+                     render_scheduler_request_regions(&s_renderer, due_regions);
+                 if (trend_needed)
+                 {
+                     render_scheduler_request_trend(&s_renderer);
+                     s_frame_has_trend_update = true;
+                 }
+                 /* Trend requests only raise the low-priority flag; start
+                  * whichever work is queued now (regions first). Without
+                  * this a trend-only frame would wait for the next turn. */
+                 render_scheduler_kick(&s_renderer);
+                 s_ui_dirty_regions &= (uint8_t)~due_regions;
             }
         }
     }
@@ -2819,6 +2842,13 @@ static void reading_scene_render(void)
             s_perf_trend_columns_window++;
             s_render_column++;
         }
+        /* Bounded slice: hand control back to a reading/status update that
+         * arrived while the graph was running. The unfinished pass stays
+         * flagged and resumes after the region phases -- s_render_column is
+         * untouched, so no column is redrawn or skipped. */
+        if (s_render_column < TREND_MAX_COLUMNS &&
+            render_scheduler_yield_trend(&s_renderer))
+            return;
         if (s_render_column >= TREND_MAX_COLUMNS)
         {
             s_render_column = 0u;

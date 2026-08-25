@@ -37,8 +37,30 @@ void render_scheduler_request_regions(render_scheduler_t *scheduler,
 void render_scheduler_request_trend(render_scheduler_t *scheduler)
 {
     if (scheduler == 0) return;
+    /* Low priority: only raise the flag. Starting the graph here would let
+     * trend work occupy the pipeline ahead of STATUS/READING updates that
+     * arrive one turn later. */
     scheduler->trend_pending = true;
+}
+
+void render_scheduler_kick(render_scheduler_t *scheduler)
+{
+    if (scheduler == 0) return;
     if (scheduler->phase == RENDER_PHASE_IDLE) select_pending(scheduler);
+}
+
+bool render_scheduler_yield_trend(render_scheduler_t *scheduler)
+{
+    if (scheduler == 0) return false;
+    if (scheduler->phase != RENDER_PHASE_UPDATE_TREND_AXES &&
+        scheduler->phase != RENDER_PHASE_UPDATE_TREND_COLUMNS)
+        return false;
+    if (scheduler->pending_regions == 0u) return false;
+    /* Re-flag the unfinished pass; select_pending services the regions
+     * first and resumes the graph afterwards without restarting it. */
+    scheduler->trend_pending = true;
+    select_pending(scheduler);
+    return true;
 }
 
 void render_scheduler_complete_phase(render_scheduler_t *scheduler)
