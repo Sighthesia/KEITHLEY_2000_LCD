@@ -129,7 +129,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * for input-path testing, e.g. K2000_DEMO_INPUT_HZ=500) must NOT raise the
  * display rate: reading updates stay coalesced to the newest frame and
  * display commits remain bounded by DISPLAY_FRAME_PERIOD_MS. */
-#define K2000_DEMO_INPUT_HZ 10u
+#define K2000_DEMO_INPUT_HZ 500u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -324,6 +324,7 @@ static void perf_record_frame(void)
         perf_send_u32(s_prof_dma_ms);
         hal_uart_send_text("/");
         perf_send_u32(s_prof_dma_n);
+
         hal_uart_send_text(" input_hz=");
         perf_send_u32(s_perf_fields_window);
         hal_uart_send_text(" reading_frames=");
@@ -434,7 +435,11 @@ static const demo_unit_t s_demo_units[] = {
 };
 #define DEMO_UNIT_COUNT \
     ((uint8_t)(sizeof(s_demo_units) / sizeof(s_demo_units[0])))
-#define DEMO_SAMPLES_PER_UNIT 200u
+/* Unit rotation is time-based, not sample-count-based: 20 seconds of
+ * samples per unit regardless of input rate. At the default 10 Hz this
+ * equals the historical 200 samples; at a 500 Hz test rate it scales to
+ * 10000 so the trend buffer is not reset-thrashed by rapid rotation. */
+#define DEMO_SAMPLES_PER_UNIT (K2000_DEMO_INPUT_HZ * 20u)
 
 static uint32_t s_demo_last_tick;
 static uint32_t s_demo_status_tick;
@@ -2306,6 +2311,14 @@ static void trend_wire_pending_regions(void)
     }
     reading_refresh_text_snapshot();
     due = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
+    /* Same display-period coalescing as the idle path: preempting toward
+     * an intermediate value more often than the panel can present it only
+     * lengthens the current pass. */
+    if ((due & RENDER_DIRTY_READING) != 0u &&
+        (HAL_GetTick() - s_text_refresh_tick) < DISPLAY_FRAME_PERIOD_MS)
+    {
+        due &= (uint8_t)~RENDER_DIRTY_READING;
+    }
     status_due = (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
     s_ui_dirty_regions &=
         (uint8_t)~(RENDER_DIRTY_STATUS | RENDER_DIRTY_READING);
@@ -2324,6 +2337,7 @@ static void trend_wire_pending_regions(void)
         s_text_generation++;
         s_perf_reading_frames_window++;
         s_frame_text_generation = s_text_generation;
+        s_text_refresh_tick = HAL_GetTick();
     }
     if (due == 0u)
     {
@@ -2385,6 +2399,17 @@ static void reading_scene_render(void)
         bool status_dirty =
             (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
         due_regions = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
+        /* Reading render throttle: above ~30 readings/s the intermediate
+         * values can never be shown (commits are bounded by
+         * DISPLAY_FRAME_PERIOD_MS), yet each one costs a full digit diff +
+         * BTE blit pass that delays the commit that WOULD have shown the
+         * newest value. Keep the dirty bit set -- the next turn past the
+         * throttle window renders whatever the newest value is then. */
+        if ((due_regions & RENDER_DIRTY_READING) != 0u &&
+            (now - s_text_refresh_tick) < DISPLAY_FRAME_PERIOD_MS)
+        {
+            due_regions &= (uint8_t)~RENDER_DIRTY_READING;
+        }
         trend_due = (now - s_trend_refresh_tick) >= 500u;
         display_due = (uint32_t)(now - s_display_due_tick) >=
                       DISPLAY_FRAME_PERIOD_MS;
