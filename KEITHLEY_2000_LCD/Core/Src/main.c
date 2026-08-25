@@ -211,11 +211,12 @@ static bool s_page_trend_has_data[2];
 static float s_page_trend_minimum[2];
 static float s_page_trend_maximum[2];
 /* Explicit trend-axis state. The RESIDENT axis is what is currently
- * painted on both SDRAM pages (dual-page writes keep them identical), so
- * one identity serves both. The acceptance rules (new unit -> immediate
- * rebuild, uninitialized resident -> rebuild once, same-unit drift ->
- * keep resident, out-of-range data -> candidate, candidate persisted
- * TREND_AXIS_CANDIDATE_TIMEOUT_MS -> rebuild) are implemented by the
+ * painted on both SDRAM pages (runtime frames level the sibling with band
+ * copies at frame start, so one identity serves both). The acceptance
+ * rules (new unit -> immediate rebuild, uninitialized resident -> rebuild
+ * once, same-unit drift -> keep resident, out-of-range data -> candidate,
+ * candidate persisted TREND_AXIS_CANDIDATE_TIMEOUT_MS -> rebuild) are
+ * implemented by the
  * shared pure module trend_axis.c and covered by its host regression
  * tests; this site only owns page history, projection and publication. */
 static main_display_trend_axis_t s_trend_axis_resident;
@@ -569,9 +570,10 @@ static void display_enable_after_initial_frame(void)
         }
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
-        /* Dual-page rendering keeps both canvases identical; publish the
-         * per-page snapshots to BOTH so next-frame comparisons against
-         * either page match and never force a spurious full repaint. */
+        /* Runtime composes on one hidden page and levels the sibling with
+         * band copies at the next frame start; publish the per-page
+         * snapshots to BOTH so next-frame comparisons against either page
+         * match and never force a spurious full repaint. */
         s_page_text_generation[0] = s_frame_text_generation;
         s_page_text_generation[1] = s_frame_text_generation;
         if (s_frame_has_trend_update)
@@ -2255,6 +2257,97 @@ static bool status_view_changed(void)
     return top_changed || dirty_rows != 0u;
 }
 
+/* Re-derive every TEXT field of the shared snapshot from the live ui model
+ * while keeping the trend composition state of the running frame intact:
+ * an interrupted graph pass keeps consuming y_labels/bounds across the
+ * preempted region phases. x_labels are constants that format refills
+ * identically; y_labels are regenerated from the saved resident identity. */
+static void reading_refresh_text_snapshot(void)
+{
+    bool trend_has_data = s_frame.trend_has_data;
+    float trend_minimum = s_frame.trend_minimum;
+    float trend_maximum = s_frame.trend_maximum;
+    float axis_step = s_frame.trend_axis_step;
+    float axis_top = s_frame.trend_axis_top;
+    char axis_unit[sizeof(s_frame.trend_axis_unit)];
+
+    memcpy(axis_unit, s_frame.trend_axis_unit, sizeof(axis_unit));
+    main_display_format(&s_ui, &s_frame);
+    s_frame.trend_has_data = trend_has_data;
+    s_frame.trend_minimum = trend_minimum;
+    s_frame.trend_maximum = trend_maximum;
+    s_frame.trend_axis_step = axis_step;
+    s_frame.trend_axis_top = axis_top;
+    memcpy(s_frame.trend_axis_unit, axis_unit, sizeof(axis_unit));
+    if (trend_has_data && axis_step > 0.0f)
+        main_display_set_trend_axis(&s_frame, axis_step, axis_top,
+                                    axis_unit);
+}
+
+/* Review I-1: region dirties arriving DURING an active trend pass used to
+ * wait in s_ui_dirty_regions until the whole pass finished -- the
+ * slice-boundary yield never saw scheduler work, so readings waited out
+ * long graph rebuilds. Wire the bits into the scheduler here instead:
+ * request_regions only raises pending bits while a phase is active (the
+ * running bitmap job is never restarted), and the next trend slice
+ * boundary hands control to the higher-priority region phase. The shared
+ * text snapshot is refreshed first so the preempted STATUS/READING phases
+ * draw the newest accepted values, with the same content gate as the
+ * idle-path snapshot (status TAGs ride every sample). */
+static void trend_wire_pending_regions(void)
+{
+    uint8_t due;
+    bool status_due;
+
+    if ((s_ui_dirty_regions &
+         (RENDER_DIRTY_STATUS | RENDER_DIRTY_READING)) == 0u)
+    {
+        return;
+    }
+    reading_refresh_text_snapshot();
+    due = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
+    status_due = (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
+    s_ui_dirty_regions &=
+        (uint8_t)~(RENDER_DIRTY_STATUS | RENDER_DIRTY_READING);
+    if (status_due)
+    {
+        if (status_view_changed())
+        {
+            due |= RENDER_DIRTY_STATUS;
+            /* A later reading in this composition must repaint the info
+             * cells alongside the changed status rows. */
+            s_render_status_regions = true;
+        }
+    }
+    if ((due & RENDER_DIRTY_READING) != 0u)
+    {
+        s_text_generation++;
+        s_perf_reading_frames_window++;
+        s_frame_text_generation = s_text_generation;
+    }
+    if (due == 0u)
+    {
+        return;
+    }
+    render_scheduler_request_regions(&s_renderer, due);
+}
+
+/* Bounded-slice handoff to higher-priority region work (review I-2): on a
+ * successful yield the interrupted trend phase's item cursor is dropped --
+ * STATUS/READING initialize their own item sequences at 0, and an
+ * interrupted AXES pass replays deterministically from item 0 (safe: no
+ * column of that pass exists yet); COLUMNS carries progress in
+ * s_render_column, which the region phases never touch. */
+static bool trend_yield_to_regions(void)
+{
+    if (!render_scheduler_yield_trend(&s_renderer))
+    {
+        return false;
+    }
+    s_render_item = 0u;
+    return true;
+}
+
 static void reading_scene_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -2280,12 +2373,13 @@ static void reading_scene_render(void)
     }
     /* Publish immutable render snapshots only while idle. Queue a due trend
      * before text regions so a continuously dirty 10 Hz reading cannot starve
-     * the 5 Hz graph. While a trend pass runs, arriving region dirties
-     * preempt it at the next slice boundary (<=8 columns or one axis
-     * background/grid/label operation); between boundaries the newest
-     * snapshot simply waits -- it is coalesced, never dropped, and active
-     * trend work is never restarted (the scheduler resumes an interrupted
-     * pass at its saved phase state). */
+     * the 5 Hz graph. While a trend pass runs, trend_wire_pending_regions()
+     * raises arriving region dirties in the scheduler and refreshes the text
+     * snapshot, so the next slice boundary (<8 columns or one axis
+     * background/grid/label operation) preempts toward the newest values;
+     * between boundaries snapshots wait coalesced -- never dropped -- and the
+     * active pass is never restarted (an interrupted axes phase replays its
+     * deterministic sequence; columns resume at their own cursor). */
     if (s_renderer.phase == RENDER_PHASE_IDLE)
     {
         bool status_dirty =
@@ -2298,8 +2392,6 @@ static void reading_scene_render(void)
                             trend_due || s_perf_sample_count != 0u))
         {
             s_render_page = (uint8_t)(s_visible_page ^ 1u);
-            s_render_full_page =
-                (s_ready_page_mask & (uint8_t)(1u << s_render_page)) == 0u;
             main_display_format(&s_ui, &s_frame);
             perf_format_display(s_frame.gpib);
             /* Content-change gate: a STATUS flag alone (set by every
@@ -2345,7 +2437,14 @@ static void reading_scene_render(void)
                      s_frame.trend_maximum =
                          s_trend_axis_resident.top / scale;
                  }
-              s_trend_full_repaint = s_initial_page_pending ||
+               /* Telemetry semantics: trend_axis_rebuilds counts every
+                * snapshot that scheduled a FULL trend repaint pass, not
+                * only unit-change axis rebuilds -- the initial page fill
+                * and a per-page has-data mismatch are counted too, and one
+                * pass is counted once here (at decision time), regardless
+                * of how many scheduler slices it later spans. Same-unit
+                * drift within the resident axis must NOT increment. */
+               s_trend_full_repaint = s_initial_page_pending ||
                                     /* The non-visible page receives the current visible trend
                                      * band before incremental columns are drawn, so compare this
                                      * snapshot with the visible-page scale. Comparing its stale
@@ -2386,10 +2485,18 @@ static void reading_scene_render(void)
                  /* Trend requests only raise the low-priority flag; start
                   * whichever work is queued now (regions first). Without
                   * this a trend-only frame would wait for the next turn. */
-                 render_scheduler_kick(&s_renderer);
-                 s_ui_dirty_regions &= (uint8_t)~due_regions;
+                  render_scheduler_kick(&s_renderer);
+                  s_ui_dirty_regions &= (uint8_t)~due_regions;
             }
         }
+    }
+    else if (s_frame_rendering &&
+             (s_renderer.phase == RENDER_PHASE_UPDATE_TREND_AXES ||
+              s_renderer.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS))
+    {
+        /* Active graph pass: give newly arrived region work its priority
+         * slot at the next bounded slice boundary (review I-1). */
+        trend_wire_pending_regions();
     }
     initial_phase = s_renderer.phase <= RENDER_PHASE_INITIAL_TREND_COLUMNS;
     /* Record which band this frame is mutating. The flag survives until the
@@ -2747,7 +2854,7 @@ static void reading_scene_render(void)
              * spans 19 such slices (background + 2x(Y labels) + 2x(X
              * labels)); without the handoff a reading would wait for all
              * of them. */
-            (void)render_scheduler_yield_trend(&s_renderer);
+            (void)trend_yield_to_regions();
             return;
         }
         /* Axis text owns x=0..95 only; the plot and resident grid start at 96.
@@ -2764,7 +2871,7 @@ static void reading_scene_render(void)
                                MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
                                MAIN_DISPLAY_COLOR_GRID);
             s_render_item++;
-            (void)render_scheduler_yield_trend(&s_renderer);
+            (void)trend_yield_to_regions();
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u + 1u)
@@ -2778,7 +2885,7 @@ static void reading_scene_render(void)
                               MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
-            (void)render_scheduler_yield_trend(&s_renderer);
+            (void)trend_yield_to_regions();
             return;
         }
         if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
@@ -2795,7 +2902,7 @@ static void reading_scene_render(void)
                                    MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
                                    MAIN_DISPLAY_COLOR_GRID);
                 s_render_item++;
-                (void)render_scheduler_yield_trend(&s_renderer);
+                (void)trend_yield_to_regions();
                 return;
             }
             if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
@@ -2803,7 +2910,7 @@ static void reading_scene_render(void)
                               s_frame.x_labels[i], MAIN_DISPLAY_COLOR_CYAN))
                 return;
             s_render_item++;
-            (void)render_scheduler_yield_trend(&s_renderer);
+            (void)trend_yield_to_regions();
             return;
         }
         render_scheduler_complete_phase(&s_renderer);
@@ -2841,7 +2948,7 @@ static void reading_scene_render(void)
          * s_render_column is untouched across the slice boundary: no
          * column is redrawn, skipped, or erased. */
         if (s_render_column < TREND_MAX_COLUMNS &&
-            render_scheduler_yield_trend(&s_renderer))
+            trend_yield_to_regions())
             return;
         if (s_render_column >= TREND_MAX_COLUMNS)
         {

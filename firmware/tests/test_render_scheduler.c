@@ -145,6 +145,9 @@ int main(void)
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
 
+        /* A yield without pending region work must stay inert. */
+        assert(!render_scheduler_yield_trend(&slice));
+        assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
         /* Mid-graph reading arrival: yield hands control to the reading
          * band for one turn and re-flags the unfinished trend. This pass
          * already completed its axes phase, so the graph must resume
@@ -162,23 +165,78 @@ int main(void)
         assert(slice.phase == RENDER_PHASE_IDLE);
 
         /* Yield inside the axes phase resumes the axes phase itself (the
-         * pass has not completed it yet), then flows on into columns. */
+         * pass has not completed it yet), then flows on into columns.
+         * Regression (review I-2): the resume flag stays clear until the
+         * replayed axes phase completes, so main can rely on "resume
+         * flag => columns" to skip re-initializing region phases that
+         * were entered with the interrupted phase's item cursor. */
         render_scheduler_request_trend(&slice);
         render_scheduler_kick(&slice);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+        assert(!slice.trend_resume_at_columns);
         render_scheduler_request_regions(&slice,
                                          RENDER_DIRTY_STATUS |
                                          RENDER_DIRTY_READING);
         assert(render_scheduler_yield_trend(&slice));
         assert(slice.phase == RENDER_PHASE_UPDATE_STATUS);
+        assert(!slice.trend_resume_at_columns);
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_UPDATE_READING);
+        assert(!slice.trend_resume_at_columns);
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+        assert(!slice.trend_resume_at_columns);
         render_scheduler_complete_phase(&slice);
+        assert(slice.trend_resume_at_columns);
         assert(slice.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
         render_scheduler_complete_phase(&slice);
         assert(slice.phase == RENDER_PHASE_IDLE);
+    }
+
+    /* --- Review I-1 regression: region bits raised DURING an active pass
+     * must preempt at every slice boundary, however often they arrive.
+     * Production wired dirty regions only while IDLE, so the in-pass
+     * yield never saw work and readings waited out whole trend passes. */
+    {
+        render_scheduler_t live;
+        render_scheduler_init(&live);
+        render_scheduler_kick(&live);
+        while (live.phase != RENDER_PHASE_IDLE)
+            render_scheduler_complete_phase(&live);
+
+        render_scheduler_request_trend(&live);
+        render_scheduler_kick(&live);
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+
+        /* First mid-pass arrival: STATUS wins immediately at the boundary. */
+        render_scheduler_request_regions(&live, RENDER_DIRTY_STATUS);
+        assert(render_scheduler_yield_trend(&live));
+        assert(live.phase == RENDER_PHASE_UPDATE_STATUS);
+        render_scheduler_complete_phase(&live);
+        /* The unfinished pass is still flagged and resumes first. */
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+
+        /* Second arrival during the resumed axes: READING preempts too. */
+        render_scheduler_request_regions(&live, RENDER_DIRTY_READING);
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+        assert(render_scheduler_yield_trend(&live));
+        assert(live.phase == RENDER_PHASE_UPDATE_READING);
+        render_scheduler_complete_phase(&live);
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_AXES);
+
+        /* Third arrival during columns of the SAME pass: still serviced,
+         * and the resume point holds (no axes replay after completion). */
+        render_scheduler_complete_phase(&live);
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
+        assert(live.trend_resume_at_columns);
+        render_scheduler_request_regions(&live, RENDER_DIRTY_READING);
+        assert(render_scheduler_yield_trend(&live));
+        assert(live.phase == RENDER_PHASE_UPDATE_READING);
+        render_scheduler_complete_phase(&live);
+        assert(live.phase == RENDER_PHASE_UPDATE_TREND_COLUMNS);
+        assert(live.trend_resume_at_columns);
+        render_scheduler_complete_phase(&live);
+        assert(live.phase == RENDER_PHASE_IDLE);
     }
 
     /* --- Review C-1 regression: a runtime FULL trend rebuild (axis

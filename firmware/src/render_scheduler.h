@@ -43,12 +43,16 @@ void render_scheduler_kick(render_scheduler_t *scheduler);
 /* Bounded-slice handoff: callable between trend slices. When region work
  * is pending, re-flags the unfinished trend and selects the higher-priority
  * phase so the main loop regains control; returns true when preempted.
- * A pass whose axes phase already completed resumes directly at the
- * columns phase -- a runtime axis rebuild can never restart and erase
- * columns it already rendered. An axes phase interrupted mid-pass replays
- * its deterministic background/grid/label operations from the first item
- * after the region phases (the renderer shares one item cursor with the
- * region bands); safe because no column of that pass exists yet.
+ * Caller contract on true: reset the renderer's phase-local item cursor
+ * before entering the selected region phase -- STATUS/READING initialize
+ * their own item sequences at 0, and an interrupted axes phase replays
+ * deterministically from item 0 (safe because no column of that pass
+ * exists yet); a columns phase carries progress in its own column cursor,
+ * which region phases never touch. A pass whose axes phase already
+ * completed resumes directly at the columns phase -- a runtime axis
+ * rebuild can never restart and erase columns it already rendered.
+ * Region bits must be raised while the pass is active (review I-1): a
+ * request that only fires while IDLE leaves every in-pass yield inert.
  * Wait bound for a pending status/reading region: at most one trend
  * slice, i.e. <=8 column draws or one axis background/grid/label
  * operation; between boundaries arriving snapshots wait coalesced. */
