@@ -155,12 +155,10 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
 void main_display_get_trend_axis(const main_display_frame_t *frame,
                                  main_display_trend_axis_t *axis);
 /* trend_minimum/trend_maximum are always left as the scaled window DATA
- * bounds. When `resident` is valid and matches the buffer unit, the axis
- * identity (unit/step/top) is kept from it and the labels are regenerated
- * from that identity; otherwise a fresh 1/2/5 fit of the window is used. */
+ * bounds. The frame carries a fresh 1/2/5 auto fit of the window; axis
+ * stability (resident/candidate) is decided by trend_axis.c and the chosen
+ * identity is projected back onto the frame with main_display_set_trend_axis(). */
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
-                               const char *unit,
-                               const main_display_trend_axis_t *resident,
-                               main_display_frame_t *frame);
+                               const char *unit, main_display_frame_t *frame);
 void main_display_set_trend_axis(main_display_frame_t *frame, float step,
                                  float top, const char *unit);

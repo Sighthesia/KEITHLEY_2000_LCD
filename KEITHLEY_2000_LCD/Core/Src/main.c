@@ -38,6 +38,7 @@
 #include "rif_tile_cache.h"
 #include "scene.h"
 #include "ui_model.h"
+#include "trend_axis.h"
 #include "trend_buffer.h"
 /* USER CODE END Includes */
 
@@ -180,25 +181,12 @@ static float s_page_trend_minimum[2];
 static float s_page_trend_maximum[2];
 /* Explicit trend-axis state. The RESIDENT axis is what is currently
  * painted on both SDRAM pages (dual-page writes keep them identical), so
- * one identity serves both. A CANDIDATE records a proposed new axis for
- * the same unit whose data left the resident range; it must persist for
- * TREND_AXIS_CANDIDATE_TIMEOUT_MS before a rebuild is allowed, so a
- * sliding peak cannot thrash the grid+labels.
- *
- * Acceptance rules (evaluated once per display snapshot):
- *   new unit != resident unit        -> axis rebuild allowed immediately
- *   resident axis uninitialized      -> axis rebuild allowed once
- *   same unit and data inside axis   -> no axis rebuild
- *   same unit and data outside axis  -> mark axis candidate, no rebuild yet
- *   candidate persists >= timeout    -> axis rebuild allowed */
-#define TREND_AXIS_CANDIDATE_TIMEOUT_MS 10000u
-typedef struct {
-    bool valid;
-    char unit[8];
-    float step;
-    float top;
-    uint32_t first_seen_ms;
-} trend_axis_candidate_t;
+ * one identity serves both. The acceptance rules (new unit -> immediate
+ * rebuild, uninitialized resident -> rebuild once, same-unit drift ->
+ * keep resident, out-of-range data -> candidate, candidate persisted
+ * TREND_AXIS_CANDIDATE_TIMEOUT_MS -> rebuild) are implemented by the
+ * shared pure module trend_axis.c and covered by its host regression
+ * tests; this site only owns page history, projection and publication. */
 static main_display_trend_axis_t s_trend_axis_resident;
 static trend_axis_candidate_t s_trend_axis_candidate;
 static bool s_trend_full_repaint;
@@ -2074,17 +2062,6 @@ static uint16_t trend_x_label_x(uint16_t center, const char *label)
     return x;
 }
 
-/* True when the scaled window data bounds still fit inside the resident
- * axis span [top - 3*step .. top] (base units). Outside data only marks a
- * candidate; it never rebuilds on its own. */
-static bool trend_data_inside_axis(const main_display_frame_t *frame,
-                                   const main_display_trend_axis_t *resident,
-                                   float scale)
-{
-    float bottom = (resident->top - 3.0f * resident->step) / scale;
-    float top = resident->top / scale;
-    return frame->trend_minimum >= bottom && frame->trend_maximum <= top;
-}
 
 /* True when any rendered status/info text differs from what is on screen.
  * Status TAGs arrive with every sample, but a top-bar + info-cell repaint
@@ -2194,69 +2171,26 @@ static void reading_scene_render(void)
             (void)trend_buffer_project(&s_trend, now, s_trend_columns,
                                        TREND_MAX_COLUMNS);
              /* Auto-fit first: the frame carries the fresh 1/2/5 identity
-              * plus the raw window data bounds. The resident/candidate
-              * rules below then decide which axis this frame renders
-              * with. */
-             main_display_format_trend(&s_trend, now, s_frame.unit, NULL,
+              * plus the raw window data bounds. The shared trend-axis
+              * module then decides which axis this frame renders with. */
+             main_display_format_trend(&s_trend, now, s_frame.unit,
                                        &s_frame);
              {
-                 float scale = trend_buffer_display_scale(&s_trend);
-                 bool same_unit =
-                     s_frame.trend_has_data &&
-                     s_trend_axis_resident.valid &&
-                     strcmp(s_trend_axis_resident.unit,
-                            s_frame.trend_axis_unit) == 0;
-                 bool keep_resident = false;
-                 if (!same_unit)
-                 {
-                     /* New unit (or uninitialized resident): rebuild is
-                      * allowed immediately; any old candidate is moot. */
-                     s_trend_axis_candidate.valid = false;
-                 }
-                 else if (trend_data_inside_axis(&s_frame,
-                                                 &s_trend_axis_resident,
-                                                 scale))
-                 {
-                     s_trend_axis_candidate.valid = false;
-                     keep_resident = true;
-                 }
-                 else
-                 {
-                     /* Same unit, data outside the resident axis: mark a
-                      * candidate but do not rebuild yet. The candidate's
-                      * geometry tracks the latest auto fit; persistence is
-                      * measured from the FIRST out-of-range sighting. */
-                     if (!s_trend_axis_candidate.valid)
-                     {
-                         s_trend_axis_candidate.valid = true;
-                         s_trend_axis_candidate.first_seen_ms = now;
-                     }
-                     strncpy(s_trend_axis_candidate.unit,
-                             s_frame.trend_axis_unit,
-                             sizeof(s_trend_axis_candidate.unit) - 1u);
-                     s_trend_axis_candidate.unit[
-                         sizeof(s_trend_axis_candidate.unit) - 1u] = '\0';
-                     s_trend_axis_candidate.step = s_frame.trend_axis_step;
-                     s_trend_axis_candidate.top = s_frame.trend_axis_top;
-                     if ((uint32_t)(now -
-                                    s_trend_axis_candidate.first_seen_ms) >=
-                         TREND_AXIS_CANDIDATE_TIMEOUT_MS)
-                     {
-                         /* Persisted: promote by rebuilding with the fresh
-                          * auto identity already in the frame. The commit
-                          * below publishes it as the new resident axis. */
-                         s_trend_axis_candidate.valid = false;
-                     }
-                     else
-                         keep_resident = true;
-                 }
-                 if (keep_resident)
+                 /* Shared pure decision (trend_axis.c): resident/candidate
+                  * acceptance rules including the filling-window freeze.
+                  * Regression-tested against this exact call shape. */
+                 trend_axis_verdict_t verdict = trend_axis_update(
+                     &s_trend_axis_resident, &s_trend_axis_candidate,
+                     &s_frame, trend_buffer_display_scale(&s_trend),
+                     trend_buffer_window_full(&s_trend), now);
+                 if (verdict.keep_resident)
                  {
                      /* Project columns onto the RESIDENT axis: overwrite the
                       * frame's display bounds with its span. trend_draw_column()
                       * clamps fy0/fy1 to 0..MAIN_DISPLAY_PLOT_H-1 before the
                       * uint8_t cast, so out-of-range data saturates at the
                       * plot edges instead of forcing a rebuild. */
+                     float scale = trend_buffer_display_scale(&s_trend);
                      main_display_set_trend_axis(
                          &s_frame, s_trend_axis_resident.step,
                          s_trend_axis_resident.top,
@@ -2274,21 +2208,10 @@ static void reading_scene_render(void)
                                      * pre-copy cache would force a needless full trend rebuild. */
                                     s_page_trend_has_data[s_visible_page] !=
                                         s_frame.trend_has_data ||
-                                      (s_frame.trend_has_data && !keep_resident);
-              if (s_trend_full_repaint && (!s_frame.trend_has_data ||
-                  (!trend_buffer_window_full(&s_trend) && same_unit)))
-             {
-                 /* Empty or still-filling buffer (unit switch cleared it):
-                  * the range grows with every sample, so axis auto-scaling
-                  * would cross a 1/2/5 boundary every few seconds and each
-                  * crossing costs a full grid+label rebuild. Freeze the
-                  * resident axis until the window refills; incremental
-                  * column updates absorb the drift meanwhile. */
-                  s_trend_full_repaint = false;
-             }
-             if (s_trend_full_repaint)
-                 s_perf_axis_rebuilds_window++;
-             }
+                                      verdict.axis_rebuild;
+              if (s_trend_full_repaint)
+                  s_perf_axis_rebuilds_window++;
+              }
               trend_needed = trend_due || s_trend_full_repaint;
             if (begin_hidden_frame())
             {
@@ -2950,9 +2873,10 @@ int main(void)
                             /* Build the complete first frame on page 1 while page 0
                              * remains visible. The completed hidden page is presented
                              * by reading_scene_render(). */
-                            main_display_format(&s_ui, &s_frame);
-                            main_display_format_trend(&s_trend, HAL_GetTick(), s_frame.unit,
-                                                      NULL, &s_frame);
+                             main_display_format(&s_ui, &s_frame);
+                             main_display_format_trend(&s_trend, HAL_GetTick(),
+                                                       s_frame.unit,
+                                                       &s_frame);
                             (void)trend_buffer_project(&s_trend, HAL_GetTick(),
                                                        s_trend_columns, TREND_MAX_COLUMNS);
                             s_frame_rendering = true;

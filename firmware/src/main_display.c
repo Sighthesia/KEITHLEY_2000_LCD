@@ -101,6 +101,11 @@ static void format_fixed_axis(float value, const char *unit, float step,
     uint8_t decimals = 0u;
     float scale = 1.0f, rounded;
     uint32_t whole, fraction;
+    /* Overwrite semantics: main_display_set_trend_axis() regenerates labels
+     * on frames whose cells already hold the auto-fit text; appending would
+     * grow the label every keep-resident frame until the buffer saturates. */
+    if (out == 0 || out_size == 0u) return;
+    out[0] = '\0';
     while (step * scale < 1.0f && decimals < 6u) { scale *= 10.0f; decimals++; }
     rounded = value * scale;
     if (rounded < 0.0f) { append_text(out, out_size, "-"); rounded = -rounded; }
@@ -217,9 +222,7 @@ void main_display_get_trend_axis(const main_display_frame_t *frame,
 }
 
 void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
-                               const char *unit,
-                               const main_display_trend_axis_t *resident,
-                               main_display_frame_t *frame)
+                               const char *unit, main_display_frame_t *frame)
 {
     float minimum, maximum, step, top, scale;
     const char *axis_unit = unit;
@@ -251,15 +254,6 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     step = nice_step(maximum - minimum);
     top = (float)((int32_t)(maximum / step)) * step;
     if (top < maximum) top += step;
-    /* Resident rule: within one unit the display identity is sticky. The
-     * sliding window drifting inside the current 1/2/5 grid must not mint
-     * a new identity (that used to force a full grid+label rebuild every
-     * few seconds). Callers without resident state get the auto fit. */
-    if (resident != 0 && resident->valid && resident->step > 0.0f &&
-        strcmp(resident->unit, axis_unit) == 0) {
-        step = resident->step;
-        top = resident->top;
-    }
     frame->trend_axis_step = step;
     frame->trend_axis_top = top;
     copy_text(frame->trend_axis_unit, sizeof(frame->trend_axis_unit),

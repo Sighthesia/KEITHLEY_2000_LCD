@@ -6,7 +6,7 @@ OBJ = build/hal_stub.o build/lt7680_bus.o build/lt7680_gfx.o build/rif_reader.o 
       build/k2000_proto.o \
       build/main.o build/main_display.o build/panel_transform.o \
        build/reading_split.o build/render_scheduler.o build/scene.o build/status_bar.o \
-       build/syscalls.o build/trend_buffer.o build/uart_rx_queue.o build/ui_model.o
+       build/syscalls.o build/trend_axis.o build/trend_buffer.o build/uart_rx_queue.o build/ui_model.o
 BIN = build/firmware.elf
 
 all: $(BIN)

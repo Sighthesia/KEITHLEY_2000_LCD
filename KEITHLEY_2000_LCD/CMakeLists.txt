@@ -62,6 +62,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/rif_tile_cache.c
     Core/Src/scene.c
     Core/Src/status_bar.c
+    Core/Src/trend_axis.c
     Core/Src/trend_buffer.c
     Core/Src/uart_rx_queue.c
     Core/Src/ui_model.c
