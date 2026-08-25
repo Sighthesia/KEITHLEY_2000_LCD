@@ -135,6 +135,9 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #endif
 #define DEMO_SAMPLE_PERIOD_MS ((uint32_t)(1000u / K2000_DEMO_INPUT_HZ))
 #define DISPLAY_FRAME_PERIOD_MS 33u
+/* Readings repaint at most once per display period (30 Hz): the value
+ * stream may be 500 Hz, but intermediate digits can never be shown and
+ * each repaint costs ~20 glyph transfers. */
 
 /* Input-path test build switch: set to 1 together with K2000_DEMO_INPUT_HZ=500
  * to measure the input->reading pipeline without trend work competing for
@@ -1062,11 +1065,32 @@ typedef struct
     uint32_t kind;
     uint16_t code;
     rif_tile_t tile;
+    uint32_t sdram;
 } rif_dir_entry_t;
 
 #define RIF_DIR_CACHE_MAX 40u
+/* Glyph tiles streamed per-draw through the serial-flash SPI FIFO cost
+ * ~4.6 ms each; at a 500 Hz reading stream that stalled every commit.
+ * At boot the whole directory is staged once into spare SDRAM located
+ * INSIDE the page-1 slot above the scanned 320x960 image (offset
+ * 0xA0000 > 0x96000 used by the panel fetch, GE fills and band copies,
+ * all of which are bounded by the canvas geometry). Render-time glyphs
+ * are then engine-copied from SDRAM via the verified lt7680_gfx_blit. */
+#define RIF_SDRAM_CACHE_BASE 0x001A0000u
 static rif_dir_entry_t s_dir_cache[RIF_DIR_CACHE_MAX];
 static uint8_t s_dir_cache_count;
+static bool s_glyph_cache_ready;
+
+static const rif_dir_entry_t *rif_dir_find(uint32_t kind, uint16_t code)
+{
+    uint8_t i;
+    for (i = 0u; i < s_dir_cache_count; i++)
+    {
+        if (s_dir_cache[i].kind == kind && s_dir_cache[i].code == code)
+            return &s_dir_cache[i];
+    }
+    return 0;
+}
 
 static bool rif_dir_lookup(uint32_t kind, uint16_t code, rif_tile_t *tile)
 {
@@ -1223,8 +1247,33 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 (uint32_t)fb_y + FONT_DIGIT_WIDTH <= MAIN_DISPLAY_UI_WIDTH)
             {
                 uint32_t t0 = HAL_GetTick();
+                const rif_dir_entry_t *cached =
+                    s_glyph_cache_ready
+                        ? rif_dir_find(s_rif_draw_job.kind,
+                                       s_rif_draw_job.code)
+                        : 0;
                 st = LT7680_OK;
-                if (ui_runtime_single_page())
+                if (cached != 0)
+                {
+                    if (ui_runtime_single_page())
+                    {
+                        st = lt7680_gfx_blit(
+                            s_render_page, cached->sdram,
+                            (uint16_t)(cached->tile.stride / 2u),
+                            fb_x, fb_y,
+                            FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
+                    }
+                    else
+                    for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
+                    {
+                        st = lt7680_gfx_blit(
+                            (uint8_t)pg, cached->sdram,
+                            (uint16_t)(cached->tile.stride / 2u),
+                            fb_x, fb_y,
+                            FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
+                    }
+                }
+                else if (ui_runtime_single_page())
                 {
                     st = lt7680_flash_dma_tile_to_canvas(
                         s_rif_draw_job.tile.offset,
@@ -1885,10 +1934,6 @@ static void rif_init(void)
     }
     s_rif_dma_probe_passed = false;
     rif_dma_probe();
-    {
-        bool cache_pixel_ok = rif_cache_pixel_probe();
-        s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
-    }
     /* The BTE probe currently reports command completion only; until its
      * pixels are independently accepted, do not present its diagnostic page
      * during normal boot. */
@@ -1918,6 +1963,56 @@ static void rif_init(void)
             if (!rif_find_tile_kind(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile))
                 continue;
             rif_dir_remember(RIF_KIND_DIGIT_SYMBOL, sym, &cache_tile);
+        }
+        /* One-time bulk stage flash -> SDRAM. Fails soft: without the
+         * cache the draw path falls back to per-glyph flash DMA. */
+        {
+            uint8_t i;
+            uint32_t next = RIF_SDRAM_CACHE_BASE;
+
+            s_glyph_cache_ready = true;
+            for (i = 0u; i < s_dir_cache_count; i++)
+            {
+                rif_tile_t *t = &s_dir_cache[i].tile;
+                lt7680_status_t stg;
+                uint32_t dst = (i == 0u) ? 0x00200000u : next;
+
+                stg = lt7680_flash_dma_to_sdram(
+                    t->offset, dst, t->stride, t->height,
+                    (uint16_t)(t->stride / 2u));
+                if (stg != LT7680_OK)
+                {
+                    hal_uart_send_text("[DBG-st] i=");
+                    hal_uart_send_hex8(i);
+                    hal_uart_send_text(" dst=");
+                    hal_uart_send_hex8((uint8_t)(dst >> 16));
+                    hal_uart_send_hex8((uint8_t)(dst >> 8));
+                    hal_uart_send_hex8((uint8_t)dst);
+                    hal_uart_send_text(" st=");
+                    hal_uart_send_hex8((uint8_t)stg);
+                    hal_uart_send_text("\r\n");
+                    s_glyph_cache_ready = false;
+                    break;
+                }
+                if (i != 0u)
+                    s_dir_cache[i].sdram = next;
+                else
+                    s_dir_cache[i].sdram = dst;
+                next += ((uint32_t)t->stride * t->height + 3u) & ~3u;
+                s_dir_cache[i].sdram = next;
+                next += ((uint32_t)t->stride * t->height + 3u) & ~3u;
+            }
+            hal_uart_send_text("RIF sdram glyph cache=");
+            hal_uart_send_text(s_glyph_cache_ready ? "OK " : "FAIL ");
+            hal_uart_send_hex8(s_dir_cache_count);
+            hal_uart_send_text(" tiles\r\n");
+        }
+        /* Pixel probe LAST: its canvas-base/width switching was measured to
+         * wedge every subsequent flash-DMA (timeout on an address that had
+         * just staged fine), so the glyph cache must be populated first. */
+        {
+            bool cache_pixel_ok = rif_cache_pixel_probe();
+            s_rif_dma_probe_passed = s_rif_dma_probe_passed && cache_pixel_ok;
         }
         /* Validate on-screen geometry against what the active renderer
          * expects. A mismatched image (e.g. packed without --transpose)
