@@ -143,25 +143,17 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #define K2000_TREND_TEST_DISABLE 0
 #endif
 
-/* Runtime composition writes ONLY the hidden render page; initialization
- * and the blanked first frame keep the verified dual-page writes so both
- * canvases start identical. The switch exists for A/B hardware validation
- * of Task 3 and must be removed (hard-wired to 1) before final commit. */
-#ifndef LT7680_RUNTIME_HIDDEN_ONLY
-#define LT7680_RUNTIME_HIDDEN_ONLY 1
-#endif
+/* Runtime composition writes ONLY the hidden render page (validated on
+ * hardware, Task 3); initialization and the blanked first frame keep the
+ * verified dual-page writes so both canvases start identical. */
 
 /* Dirty bands of one composition, in UI space. They drive the frame-begin
  * page synchronization: only bands a previous frame touched can differ
  * between the two SDRAM pages, so only those are BTE-copied -- never a
- * whole-canvas clone. LT7680_SYNC_REGIONS stages the hardware validation
- * one band at a time and is removed together with the switch above. */
+ * whole-canvas clone. */
 #define FRAME_REGION_STATUS  0x01u
 #define FRAME_REGION_READING 0x02u
 #define FRAME_REGION_TREND   0x04u
-#ifndef LT7680_SYNC_REGIONS
-#define LT7680_SYNC_REGIONS 0x07u
-#endif
 
 /* USER CODE END PD */
 
@@ -675,8 +667,7 @@ static bool hidden_page_sync_regions(void)
     {
         lt7680_rect_t rect;
 
-        if ((s_frame_regions & bands[i].region &
-             (uint8_t)LT7680_SYNC_REGIONS) == 0u)
+        if ((s_frame_regions & bands[i].region) == 0u)
             continue;
         panel_transform_ui_rect_to_fb(0u, bands[i].y, MAIN_DISPLAY_UI_WIDTH,
                                       bands[i].h, &rect.x, &rect.y,
@@ -691,21 +682,15 @@ static bool hidden_page_sync_regions(void)
     return true;
 }
 
-#if LT7680_RUNTIME_HIDDEN_ONLY
 /* True when normal runtime composition may write the render page only.
  * The blanked first frame builds with dual-page writes so both canvases
  * start pixel-identical; every later frame composes on one page and lets
- * hidden_page_sync_regions() level the sibling at the next frame start.
- * LT7680_SYNC_REGIONS keeps the staged hardware validation safe: a band
- * excluded from synchronization stays on dual-page writes, so the pages
- * can never diverge inside it. */
+ * hidden_page_sync_regions() level the sibling at the next frame start. */
 static bool ui_runtime_single_page(void)
 {
     return s_frame_rendering && !s_render_full_page &&
-           (frame_region_for_phase(s_renderer.phase) &
-            (uint8_t)LT7680_SYNC_REGIONS) != 0u;
+           frame_region_for_phase(s_renderer.phase) != 0u;
 }
-#endif
 
 /* Page invariant (Task 3, hidden-page rendering):
  *   - At begin_hidden_frame() the composition target s_render_page carries
@@ -749,13 +734,8 @@ static bool begin_hidden_frame(void)
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK)
             return false;
-#if LT7680_RUNTIME_HIDDEN_ONLY
         if (!hidden_page_sync_regions())
             return false;
-#else
-        /* Dual-page writes keep both canvases identical; no band replay. */
-        s_frame_regions = 0u;
-#endif
         s_render_full_page = false;
         s_waiting_visible = false;
         s_perf_frame_start_tick = HAL_GetTick();
@@ -870,7 +850,6 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     uint32_t t0 = HAL_GetTick();
     panel_transform_ui_rect_to_fb(x, y, w, h, &rect.x, &rect.y,
                                   &rect.w, &rect.h);
-#if LT7680_RUNTIME_HIDDEN_ONLY
     if (ui_runtime_single_page())
     {
         st = lt7680_gfx_select_canvas_page(s_render_page);
@@ -878,7 +857,6 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
             st = lt7680_gfx_fill_rect(&rect, color);
     }
     else
-#endif
     {
         uint8_t p;
         for (p = 0u; p < 2u && st == LT7680_OK; p++)
@@ -900,7 +878,6 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
     lt7680_status_t st = LT7680_OK;
     panel_transform_ui_to_fb(x0, y0, &fx0, &fy0);
     panel_transform_ui_to_fb(x1, y1, &fx1, &fy1);
-#if LT7680_RUNTIME_HIDDEN_ONLY
     if (ui_runtime_single_page())
     {
         st = lt7680_gfx_select_canvas_page(s_render_page);
@@ -909,7 +886,6 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
                                       (int16_t)fx1, (int16_t)fy1, color);
     }
     else
-#endif
     {
         uint8_t p;
         for (p = 0u; p < 2u && st == LT7680_OK; p++)
@@ -1241,7 +1217,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
             {
                 uint32_t t0 = HAL_GetTick();
                 st = LT7680_OK;
-#if LT7680_RUNTIME_HIDDEN_ONLY
                 if (ui_runtime_single_page())
                 {
                     st = lt7680_flash_dma_tile_to_canvas(
@@ -1251,7 +1226,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                         FONT_DIGIT_HEIGHT, FONT_DIGIT_WIDTH);
                 }
                 else
-#endif
                 for (uint8_t pg = 0u; pg < 2u && st == LT7680_OK; pg++)
                 {
                     st = lt7680_flash_dma_tile_to_canvas(

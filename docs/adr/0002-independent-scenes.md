@@ -4,7 +4,7 @@
 
 ## Status
 
-Accepted (revised 2026-08-14 by the industrial trend UI decision)
+Accepted (revised 2026-08-14 by the industrial trend UI decision; rate contract added 2026-08-25 by the display-refresh plan)
 
 ## Considered Options
 
@@ -17,3 +17,20 @@ Accepted (revised 2026-08-14 by the industrial trend UI decision)
 - 场景 0 固定包含状态、功能、读数、参数和趋势五个区域。
 - `trend_buffer` 仍是纯数据层，不随场景销毁，也不依赖 HAL 或显示控制器。
 - 不增加本地场景导航；键盘透传语义保持不变。
+
+## 输入/显示刷新率契约（2026-08-25）
+
+四个速率是**相互独立的量**，必须分别报告，禁止互相换算或混称：
+
+| 字段（PERF 行） | 含义 | 默认值 / 预算 |
+|---|---|---|
+| `input_hz` | 协议解析器每秒接受的字段事件数（`K2000_EVT_FIELD`） | Demo 默认 10 Hz；`K2000_DEMO_INPUT_HZ=500` 仅用于输入通路测试构建 |
+| `reading_frames` | 渲染器每秒接受并开始合成的读数快照数 | 合并到最新帧；中间数值不入队 |
+| `display_commits` | 每秒成功完成的隐藏页→可见页原子提交数（TFT 有效刷新率） | 稳态 ≥ 25/s，由协作渲染器与面板传输预算限定 |
+| `trend_axis_rebuilds` | 趋势轴身份重建次数 | 同单位内数据漂移必须为 0 |
+
+- **`500 Read/s` 是输入/测量速率标签，不是 TFT 刷新率。** 显式 500Hz 测试模式只把 `input_hz` 提到 ≥450/s；读数渲染合并为最新帧，页面提交仍受 `DISPLAY_FRAME_PERIOD_MS=33ms` 与 LT7680 双页传输预算约束。任何文档、状态文案或验收结论不得把 500 读/秒表述为 500Hz 显示刷新。
+- 趋势轴身份（unit/step/top）独立于滑动窗口数据边界：单位不变时数据漂移不产生轴重建（10 秒越界候选超时后才允许一次）。
+- 运行期合成只写隐藏页（初始化与首帧除外），按脏带 BTE 回放同步兄弟页，翻页原子提交；不得恢复每原语双页写穿透或整页拷贝作为常规路径。
+- 遗留字段：PERF 行中连字符命名的 `bte-hit=`/`bte-miss=` 是 BTE 字形缓存的命中/回退计数（`bte_miss` 的历史拼写），保留以兼容既有抓取脚本；`missed=` 为采样错过计数。稳态固件必须保持 `bte-miss=0`、`missed=0`。
+- 稳定 PERF 字段（`input_hz`、`reading_frames`、`display_commits`、`trend_axis_rebuilds`、`trend_column_updates`、`max-ms`）是长期支持的遥测接口；临时 `[DEBUG-*]` 日志只允许存在于调试分支，进入最终提交前必须删除。
