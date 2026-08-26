@@ -703,6 +703,23 @@ static bool hidden_page_sync_regions(void)
         if (lt7680_gfx_copy_rect(s_visible_page, s_render_page, &rect) !=
             LT7680_OK)
             return false;
+        /* The copied pixels carry the VISIBLE page's trend state, so the
+         * render page's rasterized-column cache must be cloned too --
+         * otherwise the column diff compares fresh pixels against this
+         * page's stale bookkeeping, skipping redraws and leaving ghost
+         * segments of an older curve beside the current one. */
+        if (bands[i].region == FRAME_REGION_TREND)
+        {
+            memcpy(s_drawn_trend_y0[s_render_page],
+                   s_drawn_trend_y0[s_visible_page],
+                   sizeof(s_drawn_trend_y0[0]));
+            memcpy(s_drawn_trend_y1[s_render_page],
+                   s_drawn_trend_y1[s_visible_page],
+                   sizeof(s_drawn_trend_y1[0]));
+            memcpy(s_drawn_trend_occupied[s_render_page],
+                   s_drawn_trend_occupied[s_visible_page],
+                   sizeof(s_drawn_trend_occupied[0]));
+        }
         s_frame_regions &= (uint8_t)~bands[i].region;
     }
     return true;
