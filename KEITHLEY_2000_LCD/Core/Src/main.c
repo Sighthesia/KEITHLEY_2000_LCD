@@ -2431,16 +2431,21 @@ static void trend_wire_pending_regions(void)
         return;
     }
     reading_refresh_text_snapshot();
-    /* Reading renders are served ONLY from idle slots: each costs a full
-     * digit-diff pass (~30 ms even with the SDRAM glyph cache), so serving
-     * them mid-pass both stretches the active graph pass AND competes with
-     * the next idle slot -- measured to halve the commit rate. The dirty
-     * bit stays set; the newest value is rendered in the next idle slot.
-     * Status changes stay preemptive (rare, tiny). */
-    due = 0u;
+    /* Reading renders share ONE throttle clock with the idle path, so the
+     * combined rate never exceeds DISPLAY_FRAME_PERIOD_MS regardless of
+     * where they run. Mid-pass service matters: an axis rescale remaps all
+     * 240 columns as one unpreemptible-ish burst, and without this the
+     * digits freeze for its full duration (user-visible stall). */
+    due = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
+    if ((due & RENDER_DIRTY_READING) != 0u &&
+        (HAL_GetTick() - s_text_refresh_tick) < DISPLAY_FRAME_PERIOD_MS)
+    {
+        due &= (uint8_t)~RENDER_DIRTY_READING;
+    }
     status_due = (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
     s_ui_dirty_regions &= (uint8_t)~RENDER_DIRTY_STATUS;
-    /* RENDER_DIRTY_READING intentionally kept: idle path renders it. */
+    if ((due & RENDER_DIRTY_READING) != 0u)
+        s_ui_dirty_regions &= (uint8_t)~RENDER_DIRTY_READING;
     if (status_due)
     {
         if (status_view_changed())
@@ -2452,6 +2457,13 @@ static void trend_wire_pending_regions(void)
         }
     }
 
+    if ((due & RENDER_DIRTY_READING) != 0u)
+    {
+        s_text_generation++;
+        s_perf_reading_frames_window++;
+        s_frame_text_generation = s_text_generation;
+        s_text_refresh_tick = HAL_GetTick();
+    }
     if (due == 0u)
     {
         return;
