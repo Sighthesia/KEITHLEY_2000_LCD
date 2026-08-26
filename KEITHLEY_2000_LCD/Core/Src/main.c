@@ -246,6 +246,13 @@ static uint16_t s_perf_window_frames;
 static uint16_t s_perf_fps;
 static uint32_t s_perf_sample_count;
 static uint32_t s_perf_sample_missed;
+/* Main-loop watchdog: records the worst iteration gap plus the renderer
+ * phase at that moment. A [STALL] line prints once per event so a hang
+ * leaves its location in the serial log even if UART later dies. */
+static uint32_t s_loop_last_tick;
+static uint32_t s_loop_max_gap_ms;
+static uint8_t s_loop_stall_phase;
+static uint8_t s_loop_stall_printed;
 static uint32_t s_perf_fields_window;
 static uint32_t s_perf_reading_frames_window;
 static uint32_t s_perf_display_commits_window;
@@ -336,6 +343,9 @@ static void perf_record_frame(void)
         perf_send_u32(s_prof_dma_ms);
         hal_uart_send_text("/");
         perf_send_u32(s_prof_dma_n);
+        hal_uart_send_text(" gap=");
+        perf_send_u32(s_loop_max_gap_ms);
+        s_loop_max_gap_ms = 0u;
 
         hal_uart_send_text(" input_hz=");
         perf_send_u32(s_perf_fields_window);
@@ -563,6 +573,53 @@ static void k2000_demo_feed(void)
     }
 }
 #endif /* K2000_DEMO_FEED */
+
+/* Hard-hang black box. The F1 IWDG cannot interrupt, so a hang produces a
+ * reset -- but SRAM survives it. Every healthy loop iteration parks the
+ * current renderer context in BKP registers; after an IWDG reset the boot
+ * path prints them, turning an unrecoverable freeze into a report. */
+#define WDT_IWDG_BASE        0x40003000u
+#define WDT_IWDG_KR          (*(volatile uint32_t *)(WDT_IWDG_BASE + 0x00u))
+#define WDT_IWDG_PR          (*(volatile uint32_t *)(WDT_IWDG_BASE + 0x04u))
+#define WDT_IWDG_RLR         (*(volatile uint32_t *)(WDT_IWDG_BASE + 0x06u))
+#define WDT_BKP_DR1          (*(volatile uint16_t *)0x40006C04u)
+#define WDT_BKP_DR2          (*(volatile uint16_t *)0x40006C06u)
+#define WDT_BKP_DR3          (*(volatile uint16_t *)0x40006C08u)
+#define WDT_RCC_CSR          (*(volatile uint32_t *)0x40021050u)
+#define WDT_RCC_CSR_IWDGRSTF (1u << 29u)
+
+static void wdt_start(void)
+{
+    WDT_IWDG_KR = 0x5555u;
+    WDT_IWDG_PR = 4u;              /* LSI/64 */
+    WDT_IWDG_RLR = 2500u;          /* ~4 s at 40 kHz LSI */
+    WDT_IWDG_KR = 0xCCCCu;         /* start */
+}
+
+static void wdt_kick(void)
+{
+    /* Park the live renderer context BEFORE refreshing, so whatever the
+     * loop was doing when it wedged is what the post-reset report shows. */
+    WDT_BKP_DR1 = 0xCAFEu;
+    WDT_BKP_DR2 = (uint16_t)(((uint8_t)s_renderer.phase) |
+                         ((uint8_t)s_render_item << 8));
+    WDT_BKP_DR3 = (uint16_t)s_render_column;
+    WDT_IWDG_KR = 0xAAAAu;
+}
+
+static void wdt_report_boot(void)
+{
+    if ((WDT_RCC_CSR & WDT_RCC_CSR_IWDGRSTF) == 0u)
+        return;
+    hal_uart_send_text("[WDT] hang! phase=");
+    hal_uart_send_hex8((uint8_t)(WDT_BKP_DR2 & 0xFFu));
+    hal_uart_send_text(" item=");
+    hal_uart_send_hex8((uint8_t)(WDT_BKP_DR2 >> 8));
+    hal_uart_send_text(" col=");
+    hal_uart_send_hex8((uint8_t)WDT_BKP_DR3);
+    hal_uart_send_text("\r\n");
+    WDT_RCC_CSR |= (1u << 24u);    /* RMVF: clear reset flags */
+}
 
 static void display_enable_after_initial_frame(void)
 {
@@ -3378,6 +3435,8 @@ int main(void)
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
+                            wdt_report_boot();
+                            wdt_start();
                         }
                     }
                 }
@@ -3419,6 +3478,32 @@ int main(void)
             }
         }
 
+        {
+            uint32_t now_loop = HAL_GetTick();
+            uint32_t gap = now_loop - s_loop_last_tick;
+
+            if (gap > s_loop_max_gap_ms)
+                s_loop_max_gap_ms = gap;
+            if (gap > 200u && !s_loop_stall_printed)
+            {
+                hal_uart_send_text("[STALL] gap=");
+                perf_send_u32(gap);
+                hal_uart_send_text(" phase=");
+                hal_uart_send_hex8((uint8_t)s_renderer.phase);
+                hal_uart_send_text(" item=");
+                hal_uart_send_hex8(s_render_item);
+                hal_uart_send_text(" col=");
+                hal_uart_send_hex8((uint8_t)s_render_column);
+                hal_uart_send_text("\r\n");
+                s_loop_stall_printed = 1u;
+                s_loop_stall_phase = (uint8_t)s_renderer.phase;
+            }
+            if (gap <= 200u)
+                wdt_kick();
+            if (gap <= 50u)
+                s_loop_stall_printed = 0u;
+            s_loop_last_tick = now_loop;
+        }
         update_blink();
         scene_mgr_render();
         /* USER CODE END WHILE */
