@@ -3532,6 +3532,33 @@ int main(void)
             }
             if (gap <= 200u)
                 wdt_kick();
+            /* APB2 clock-enable guard: one register holds SPI1, USART1,
+             * AFIO and all sample GPIOs. A corrupted enable-write during
+             * a heavy BTE burst (power-sag window) kills every peripheral
+             * at once -- observed as simultaneous UART/SPI/GPIO death.
+             * Detect, report, restore. */
+            {
+                const uint32_t need =
+                    0x1u      /* AFIOEN */
+                  | 0x4u      /* IOPAEN */
+                  | 0x8u      /* IOPBEN */
+                  | 0x10u     /* IOPCEN */
+                  | 0x1000u   /* SPI1EN */
+                  | 0x4000u;  /* USART1EN */
+                volatile uint32_t *apb2enr =
+                    (volatile uint32_t *)0x40021010u;
+                if ((*apb2enr & need) != need)
+                {
+                    *apb2enr |= need;
+                    static uint32_t last_clk_report;
+                    uint32_t now_c = HAL_GetTick();
+                    if ((now_c - last_clk_report) >= 5000u)
+                    {
+                        last_clk_report = now_c;
+                        hal_uart_send_text("[CLK] lost, restored\r\n");
+                    }
+                }
+            }
             {
                 static bool painted;
                 if (!painted)
