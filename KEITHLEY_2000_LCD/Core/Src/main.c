@@ -3520,6 +3520,8 @@ int main(void)
             {
                 hal_uart_send_text("[STALL] gap=");
                 perf_send_u32(gap);
+                hal_uart_send_text(" tick=");
+                perf_send_u32(now_loop);
                 hal_uart_send_text(" phase=");
                 hal_uart_send_hex8((uint8_t)s_renderer.phase);
                 hal_uart_send_text(" item=");
@@ -3649,7 +3651,17 @@ void SystemClock_Config(void)
 void Error_Handler(void)
 {
     /* USER CODE BEGIN Error_Handler_Debug */
-    /* User can add his own implementation to report the HAL error return state */
+    /* A silent __disable_irq()+loop here is indistinguishable from any
+     * other freeze. Report the CALLER's return address: whoever detected
+     * the HAL failure is the source of the runtime shutdown. */
+    unsigned long err_lr = 0u;
+    __asm volatile ("mov %0, lr" : "=r"(err_lr));
+    hal_uart_send_text("[ERR] lr=");
+    hal_uart_send_hex8((uint8_t)(err_lr >> 24));
+    hal_uart_send_hex8((uint8_t)(err_lr >> 16));
+    hal_uart_send_hex8((uint8_t)(err_lr >> 8));
+    hal_uart_send_hex8((uint8_t)err_lr);
+    hal_uart_send_text("\r\n");
     __disable_irq();
     while (1)
     {
