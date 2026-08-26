@@ -3545,8 +3545,11 @@ int main(void)
                   | 0x10u     /* IOPCEN */
                   | 0x1000u   /* SPI1EN */
                   | 0x4000u;  /* USART1EN */
+                /* RCC_APB2ENR is base+0x18. An earlier revision poked
+                 * base+0x10 -- APB1RSTR! -- strobing reset pulses into
+                 * half of APB1 on every heartbeat. */
                 volatile uint32_t *apb2enr =
-                    (volatile uint32_t *)0x40021010u;
+                    (volatile uint32_t *)0x40021018u;
                 if ((*apb2enr & need) != need)
                 {
                     /* Verify-after-write with bounded retries: the enable
