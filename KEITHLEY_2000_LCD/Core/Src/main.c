@@ -1970,62 +1970,26 @@ static void rif_init(void)
             uint8_t i;
             uint32_t next = RIF_SDRAM_CACHE_BASE;
 
-            /* The flash-DMA engine was only ever verified end-to-end on
-             * small blocks (probe height 20 rows); whole-tile transfers
-             * (56 rows) never complete and hit the idle-wait timeout.
-             *
-             * Bisect matrix result: the API floors sdram_base at
-             * 0x200000 (canvas slots live below), and the flash-DMA
-             * engine hangs on row widths above ~64px (probe geometry
-             * 64px passes where the 104px whole-row transfer times out
-             * at an address that had just staged fine). Stage each tile
-             * as vertical strips (<=52px) x row slices (<=16 rows) into
-             * the probe's scratch region; strip byte offsets shift both
-             * source and destination so the SDRAM image equals the
-             * packed tile the BTE blit expects. */
-            const uint16_t strip_px = 52u;
-            const uint16_t slice_rows = 16u;
-
+            /* Stage with the VENDOR GLYPH DMA path -- the same verified
+             * lt7680_flash_dma_tile_to_canvas() used at runtime -- pointed
+             * at a tiny scratch canvas per tile. One whole-tile transfer,
+             * no manual strip/slice stitching: the flash-DMA-to-canvas
+             * engine rejects wide rows and its strip addressing could not
+             * be reconciled with the packed layout, while this path draws
+             * 104x56 tiles correctly every frame already. */
             s_glyph_cache_ready = true;
             for (i = 0u; i < s_dir_cache_count; i++)
             {
                 rif_tile_t *t = &s_dir_cache[i].tile;
-                uint16_t tile_w_bytes = (uint16_t)(t->width * 2u);
-                uint16_t x_done = 0u;
 
-                while (x_done < tile_w_bytes && s_glyph_cache_ready)
+                if (lt7680_flash_dma_tile_to_canvas(
+                        t->offset, next,
+                        (uint16_t)(t->stride / 2u),
+                        0u, 0u, t->width, t->height) != LT7680_OK)
                 {
-                    uint16_t rem_bytes =
-                        (uint16_t)(tile_w_bytes - x_done);
-                    uint16_t w_bytes = (uint16_t)(
-                        rem_bytes > strip_px * 2u ? strip_px * 2u
-                                                  : rem_bytes);
-                    uint16_t rows_done = 0u;
-
-                    while (rows_done < t->height && s_glyph_cache_ready)
-                    {
-                        uint16_t rem_rows =
-                            (uint16_t)(t->height - rows_done);
-                        uint16_t rows = (uint16_t)(
-                            rem_rows > slice_rows ? slice_rows : rem_rows);
-
-                        if (lt7680_flash_dma_to_sdram(
-                                t->offset +
-                                    (uint32_t)rows_done * t->stride +
-                                    x_done,
-                                next + (uint32_t)rows_done * t->stride +
-                                    x_done,
-                                w_bytes, rows,
-                                (uint16_t)(t->stride / 2u)) != LT7680_OK)
-                        {
-                            s_glyph_cache_ready = false;
-                        }
-                        rows_done = (uint16_t)(rows_done + rows);
-                    }
-                    x_done = (uint16_t)(x_done + w_bytes);
-                }
-                if (!s_glyph_cache_ready)
+                    s_glyph_cache_ready = false;
                     break;
+                }
                 s_dir_cache[i].sdram = next;
                 next += ((uint32_t)t->stride * t->height + 3u) & ~3u;
             }
