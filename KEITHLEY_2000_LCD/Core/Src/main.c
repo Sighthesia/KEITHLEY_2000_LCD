@@ -1076,7 +1076,7 @@ typedef struct
  * 0xA0000 > 0x96000 used by the panel fetch, GE fills and band copies,
  * all of which are bounded by the canvas geometry). Render-time glyphs
  * are then engine-copied from SDRAM via the verified lt7680_gfx_blit. */
-#define RIF_SDRAM_CACHE_BASE 0x001A0000u
+#define RIF_SDRAM_CACHE_BASE 0x00200000u
 static rif_dir_entry_t s_dir_cache[RIF_DIR_CACHE_MAX];
 static uint8_t s_dir_cache_count;
 static bool s_glyph_cache_ready;
@@ -1970,35 +1970,62 @@ static void rif_init(void)
             uint8_t i;
             uint32_t next = RIF_SDRAM_CACHE_BASE;
 
+            /* The flash-DMA engine was only ever verified end-to-end on
+             * small blocks (probe height 20 rows); whole-tile transfers
+             * (56 rows) never complete and hit the idle-wait timeout.
+             *
+             * Bisect matrix result: the API floors sdram_base at
+             * 0x200000 (canvas slots live below), and the flash-DMA
+             * engine hangs on row widths above ~64px (probe geometry
+             * 64px passes where the 104px whole-row transfer times out
+             * at an address that had just staged fine). Stage each tile
+             * as vertical strips (<=52px) x row slices (<=16 rows) into
+             * the probe's scratch region; strip byte offsets shift both
+             * source and destination so the SDRAM image equals the
+             * packed tile the BTE blit expects. */
+            const uint16_t strip_px = 52u;
+            const uint16_t slice_rows = 16u;
+
             s_glyph_cache_ready = true;
             for (i = 0u; i < s_dir_cache_count; i++)
             {
                 rif_tile_t *t = &s_dir_cache[i].tile;
-                lt7680_status_t stg;
-                uint32_t dst = (i == 0u) ? 0x00200000u : next;
+                uint16_t tile_w_bytes = (uint16_t)(t->width * 2u);
+                uint16_t x_done = 0u;
 
-                stg = lt7680_flash_dma_to_sdram(
-                    t->offset, dst, t->stride, t->height,
-                    (uint16_t)(t->stride / 2u));
-                if (stg != LT7680_OK)
+                while (x_done < tile_w_bytes && s_glyph_cache_ready)
                 {
-                    hal_uart_send_text("[DBG-st] i=");
-                    hal_uart_send_hex8(i);
-                    hal_uart_send_text(" dst=");
-                    hal_uart_send_hex8((uint8_t)(dst >> 16));
-                    hal_uart_send_hex8((uint8_t)(dst >> 8));
-                    hal_uart_send_hex8((uint8_t)dst);
-                    hal_uart_send_text(" st=");
-                    hal_uart_send_hex8((uint8_t)stg);
-                    hal_uart_send_text("\r\n");
-                    s_glyph_cache_ready = false;
-                    break;
+                    uint16_t rem_bytes =
+                        (uint16_t)(tile_w_bytes - x_done);
+                    uint16_t w_bytes = (uint16_t)(
+                        rem_bytes > strip_px * 2u ? strip_px * 2u
+                                                  : rem_bytes);
+                    uint16_t rows_done = 0u;
+
+                    while (rows_done < t->height && s_glyph_cache_ready)
+                    {
+                        uint16_t rem_rows =
+                            (uint16_t)(t->height - rows_done);
+                        uint16_t rows = (uint16_t)(
+                            rem_rows > slice_rows ? slice_rows : rem_rows);
+
+                        if (lt7680_flash_dma_to_sdram(
+                                t->offset +
+                                    (uint32_t)rows_done * t->stride +
+                                    x_done,
+                                next + (uint32_t)rows_done * t->stride +
+                                    x_done,
+                                w_bytes, rows,
+                                (uint16_t)(t->stride / 2u)) != LT7680_OK)
+                        {
+                            s_glyph_cache_ready = false;
+                        }
+                        rows_done = (uint16_t)(rows_done + rows);
+                    }
+                    x_done = (uint16_t)(x_done + w_bytes);
                 }
-                if (i != 0u)
-                    s_dir_cache[i].sdram = next;
-                else
-                    s_dir_cache[i].sdram = dst;
-                next += ((uint32_t)t->stride * t->height + 3u) & ~3u;
+                if (!s_glyph_cache_ready)
+                    break;
                 s_dir_cache[i].sdram = next;
                 next += ((uint32_t)t->stride * t->height + 3u) & ~3u;
             }
@@ -2405,18 +2432,16 @@ static void trend_wire_pending_regions(void)
         return;
     }
     reading_refresh_text_snapshot();
-    due = (uint8_t)(s_ui_dirty_regions & RENDER_DIRTY_READING);
-    /* Same display-period coalescing as the idle path: preempting toward
-     * an intermediate value more often than the panel can present it only
-     * lengthens the current pass. */
-    if ((due & RENDER_DIRTY_READING) != 0u &&
-        (HAL_GetTick() - s_text_refresh_tick) < DISPLAY_FRAME_PERIOD_MS)
-    {
-        due &= (uint8_t)~RENDER_DIRTY_READING;
-    }
+    /* Reading renders are served ONLY from idle slots: each costs a full
+     * digit-diff pass (~30 ms even with the SDRAM glyph cache), so serving
+     * them mid-pass both stretches the active graph pass AND competes with
+     * the next idle slot -- measured to halve the commit rate. The dirty
+     * bit stays set; the newest value is rendered in the next idle slot.
+     * Status changes stay preemptive (rare, tiny). */
+    due = 0u;
     status_due = (s_ui_dirty_regions & RENDER_DIRTY_STATUS) != 0u;
-    s_ui_dirty_regions &=
-        (uint8_t)~(RENDER_DIRTY_STATUS | RENDER_DIRTY_READING);
+    s_ui_dirty_regions &= (uint8_t)~RENDER_DIRTY_STATUS;
+    /* RENDER_DIRTY_READING intentionally kept: idle path renders it. */
     if (status_due)
     {
         if (status_view_changed())
@@ -2427,13 +2452,7 @@ static void trend_wire_pending_regions(void)
             s_render_status_regions = true;
         }
     }
-    if ((due & RENDER_DIRTY_READING) != 0u)
-    {
-        s_text_generation++;
-        s_perf_reading_frames_window++;
-        s_frame_text_generation = s_text_generation;
-        s_text_refresh_tick = HAL_GetTick();
-    }
+
     if (due == 0u)
     {
         return;
