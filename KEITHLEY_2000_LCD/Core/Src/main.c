@@ -591,8 +591,9 @@ static void k2000_demo_feed(void)
 #define WDT_DBGMCU_APB1FZ (*(volatile uint32_t *)0x40007008u)
 #define WDT_DBG_IWDG_STOP (1u << 11u)
 
-static void wdt_start(void)
-{
+__attribute__((unused)) static void wdt_start(void)
+{ /* Kept for re-arming once the IWDG-vs-runtime interaction is solved;
+   * see the call-site note at the INIT-OK path. */
     /* Freeze the watchdog whenever the core is halted (debug/flash): the
      * IWDG keeps counting across resets AND through debug halts by
      * default, which poisoned every flash/reset session once it was
@@ -621,6 +622,15 @@ static void wdt_kick(void)
 
 static void wdt_report_boot(void)
 {
+    hal_uart_send_text("[RST] csr=");
+    {
+        uint32_t csr = WDT_RCC_CSR;
+        hal_uart_send_hex8((uint8_t)(csr >> 24));
+        hal_uart_send_hex8((uint8_t)(csr >> 16));
+        hal_uart_send_hex8((uint8_t)(csr >> 8));
+        hal_uart_send_hex8((uint8_t)csr);
+    }
+    hal_uart_send_text("\r\n");
     if ((WDT_RCC_CSR & WDT_RCC_CSR_IWDGRSTF) == 0u)
         return;
     hal_uart_send_text("[WDT] hang! phase=");
@@ -3448,7 +3458,13 @@ int main(void)
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
                             wdt_report_boot();
-                            wdt_start();
+                            /* IWDG stays OFF: bisection proved its mere
+                             * activation kills the runtime (<1 s after
+                             * INIT, looping forever), while an identical
+                             * build without it runs indefinitely. Root
+                             * cause inside the IWDG/LSI interaction is
+                             * unresolved; the [STALL]/[FAULT]/[RST]
+                             * black boxes remain available without it. */
                         }
                     }
                 }
