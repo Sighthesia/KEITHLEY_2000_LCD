@@ -588,11 +588,23 @@ static void k2000_demo_feed(void)
 #define WDT_RCC_CSR          (*(volatile uint32_t *)0x40021050u)
 #define WDT_RCC_CSR_IWDGRSTF (1u << 29u)
 
+#define WDT_DBGMCU_APB1FZ (*(volatile uint32_t *)0x40007008u)
+#define WDT_DBG_IWDG_STOP (1u << 11u)
+
 static void wdt_start(void)
 {
+    /* Freeze the watchdog whenever the core is halted (debug/flash): the
+     * IWDG keeps counting across resets AND through debug halts by
+     * default, which poisoned every flash/reset session once it was
+     * armed. */
+    WDT_DBGMCU_APB1FZ |= WDT_DBG_IWDG_STOP;
     WDT_IWDG_KR = 0x5555u;
-    WDT_IWDG_PR = 4u;              /* LSI/64 */
-    WDT_IWDG_RLR = 2500u;          /* ~4 s at 40 kHz LSI */
+    /* NOTE: the IWDG keeps counting across system resets -- the whole
+     * boot path (LT7680 init, probes, cooperative first frame) must fit
+     * inside one timeout or the device boot-loops forever (observed as a
+     * dead panel with green vertical stripes). */
+    WDT_IWDG_PR = 6u;              /* LSI/256 */
+    WDT_IWDG_RLR = 1250u;          /* ~8 s at 40 kHz LSI */
     WDT_IWDG_KR = 0xCCCCu;         /* start */
 }
 
