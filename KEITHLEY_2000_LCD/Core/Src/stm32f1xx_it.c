@@ -217,7 +217,18 @@ void PendSV_Handler(void)
 void SysTick_Handler(void)
 {
   /* USER CODE BEGIN SysTick_IRQn 0 */
-
+  /* PC sampler: runs at 1 kHz from an interrupt that is independent of
+   * the main loop, so it keeps recording even when the loop hangs inside
+   * a dead wait. SWD reads s_irq_pc / s_irq_pc_ring to pinpoint exactly
+   * where execution was frozen. */
+  {
+    extern volatile uint32_t s_irq_pc;
+    extern volatile uint32_t s_irq_pc_ring[16];
+    extern volatile uint8_t  s_irq_pc_idx;
+    s_irq_pc = *((volatile uint32_t *)0xE000101Cu); /* DWT PCSR */
+    s_irq_pc_ring[s_irq_pc_idx & 0x0Fu] = *((volatile uint32_t *)0xE000101Cu);
+    s_irq_pc_idx++;
+  }
   /* USER CODE END SysTick_IRQn 0 */
   HAL_IncTick();
   /* USER CODE BEGIN SysTick_IRQn 1 */

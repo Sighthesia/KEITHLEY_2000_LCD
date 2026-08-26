@@ -250,6 +250,12 @@ static uint32_t s_perf_sample_missed;
  * phase at that moment. A [STALL] line prints once per event so a hang
  * leaves its location in the serial log even if UART later dies. */
 static uint32_t s_loop_last_tick;
+/* DWT PC sampler state, written from SysTick at 1 kHz. Reading these via
+ * SWD during a freeze shows exactly where execution is stuck, including
+ * inside dead waits that no main-loop instrumentation can observe. */
+volatile uint32_t s_irq_pc;
+volatile uint32_t s_irq_pc_ring[16];
+volatile uint8_t  s_irq_pc_idx;
 /* Stack canary: paint the deepest 64 bytes of the 1 KB stack once at
  * boot; the heartbeat checks the pattern. Overflow eats it bottom-up. */
 #define WDT_STACK_LOW   ((volatile uint32_t *)0x20004C00u)
@@ -3461,6 +3467,10 @@ int main(void)
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
+                            /* Arm DWT cycle counter + TRCENA so the
+                             * SysTick PC sampler has live data. */
+                            *((volatile uint32_t *)0xE000EDFCu) |= (1u << 24u);
+                            *((volatile uint32_t *)0xE0001000u) |= (1u << 0u);
                             wdt_report_boot();
                             /* IWDG stays OFF: bisection proved its mere
                              * activation kills the runtime (<1 s after
