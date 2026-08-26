@@ -210,6 +210,11 @@ static trend_column_t s_trend_columns[TREND_MAX_COLUMNS];
 static uint8_t s_drawn_trend_y0[2][TREND_MAX_COLUMNS];
 static uint8_t s_drawn_trend_y1[2][TREND_MAX_COLUMNS];
 static uint8_t s_drawn_trend_occupied[2][(TREND_MAX_COLUMNS + 7u) / 8u];
+/* Set when an erase punched through a gridline; the owning page's grid
+ * is redrawn ONCE at pass end instead of per-column (a sloped trace
+ * changes nearly every column, and per-column restoration multiplied
+ * the GE traffic into multi-hundred-ms passes). */
+static bool s_trend_grid_dirty[2];
 static bool s_page_trend_has_data[2];
 static float s_page_trend_minimum[2];
 static float s_page_trend_maximum[2];
@@ -719,6 +724,8 @@ static bool hidden_page_sync_regions(void)
             memcpy(s_drawn_trend_occupied[s_render_page],
                    s_drawn_trend_occupied[s_visible_page],
                    sizeof(s_drawn_trend_occupied[0]));
+            s_trend_grid_dirty[s_render_page] =
+                s_trend_grid_dirty[s_visible_page];
         }
         s_frame_regions &= (uint8_t)~bands[i].region;
     }
@@ -2283,25 +2290,16 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
         (void)ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
                            (uint16_t)(old_y1 - old_y0 + 1u),
                            MAIN_DISPLAY_COLOR_BG);
-        trend_restore_grid(x0, x1, old_y0, old_y1);
+        s_trend_grid_dirty[s_render_page] = true;
     }
     if (occupied)
     {
-        if (x > MAIN_DISPLAY_PLOT_X)
-            (void)ui_draw_line((uint16_t)(x - 1u),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0),
-                               (uint16_t)(x - 1u),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
-                               MAIN_DISPLAY_COLOR_GREEN_DIM);
+        /* Center column only. The two DIM glow columns tripled the GE
+         * line traffic; on a sloped trace nearly every column repaints,
+         * and that pushed heavy phases into multi-hundred-ms passes. */
         (void)ui_draw_line(x, (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0), x,
                            (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
                            MAIN_DISPLAY_COLOR_GREEN);
-        if (x < MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
-            (void)ui_draw_line((uint16_t)(x + 1u),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0),
-                               (uint16_t)(x + 1u),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
-                               MAIN_DISPLAY_COLOR_GREEN_DIM);
     }
     trend_set_drawn(column, occupied, y0, y1);
 }
@@ -3118,6 +3116,16 @@ static void reading_scene_render(void)
         if (s_render_column >= TREND_MAX_COLUMNS)
         {
             s_render_column = 0u;
+            if (s_trend_grid_dirty[s_render_page])
+            {
+                s_trend_grid_dirty[s_render_page] = false;
+                trend_restore_grid(
+                    MAIN_DISPLAY_PLOT_X,
+                    (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
+                    MAIN_DISPLAY_PLOT_Y,
+                    (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H));
+                return;
+            }
             if (!s_frame.trend_has_data && !s_waiting_visible)
             {
                 if (!ui_draw_text(390u, 232u, "WAITING FOR DATA",
