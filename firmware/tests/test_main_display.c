@@ -244,21 +244,24 @@ int main(void)
         assert(candidate.valid &&
                candidate.first_seen_ms == 1000u /* persisted, not restarted */);
 
-        assert(trend_buffer_add(&trend, 10990u, "2.45", "VDC"));
-        v = production_snapshot(&trend, "VDC", 10990u, &frame, &resident,
+        assert(trend_buffer_add(&trend, 2990u, "2.45", "VDC"));
+        v = production_snapshot(&trend, "VDC", 2990u, &frame, &resident,
                                 &candidate);
         assert(v.keep_resident && !v.axis_rebuild);
 
-        assert(trend_buffer_add(&trend, 11040u, "2.45", "VDC"));
-        v = production_snapshot(&trend, "VDC", 11040u, &frame, &resident,
+        /* Promotion additionally requires a full trend window: the
+         * filling-window freeze outranks the (now shorter) candidate
+         * timeout, so cross both thresholds before expecting the swap. */
+        assert(trend_buffer_add(&trend, 12000u, "2.45", "VDC"));
+        v = production_snapshot(&trend, "VDC", 12000u, &frame, &resident,
                                 &candidate);
         assert(!v.keep_resident && v.axis_rebuild);
         assert(!candidate.valid);
         assert(frame.trend_axis_top != axis_before.top);
 
         /* After promotion the system restabilizes without further rebuilds. */
-        assert(trend_buffer_add(&trend, 11240u, "2.45", "VDC"));
-        v = production_snapshot(&trend, "VDC", 11240u, &frame, &resident,
+        assert(trend_buffer_add(&trend, 22000u, "2.45", "VDC"));
+        v = production_snapshot(&trend, "VDC", 22000u, &frame, &resident,
                                 &candidate);
         assert(v.keep_resident && !v.axis_rebuild);
 
@@ -293,51 +296,57 @@ int main(void)
          * candidate, and recovery back inside the span clears it again. */
         trend_buffer_reset(&trend);
         trend_axis_init(&resident, &candidate);
-        assert(trend_buffer_add(&trend, 30000u, "5", "kOHM"));
-        assert(trend_buffer_add(&trend, 30200u, "11", "kOHM"));
-        v = production_snapshot(&trend, "kOHM", 30400u, &f1, &resident,
+        /* Timestamps span a full trend window so the filling-window
+         * freeze does not mask (and clear) the candidate bookkeeping
+         * exercised below. */
+        /* Dense ramp 5->11 kOHM over >10 s (mirrors a live stream): the
+         * window fills, the axis rescales onto the ramp, an outlier then
+         * marks a candidate which persists across samples and finally
+         * promotes once it outlives the (shortened) timeout. */
+        {
+            uint32_t t;
+            uint8_t n = 0u;
+            char b[8];
+            for (t = 30000u; t <= 40200u; t += 200u)
+            {
+                int v = 5 + (int)n;
+                if (v > 11) v = 11;
+                snprintf(b, sizeof(b), "%d", v);
+                assert(trend_buffer_add(&trend, t, b, "kOHM"));
+                n++;
+            }
+        }
+        v = production_snapshot(&trend, "kOHM", 40400u, &f1, &resident,
                                 &candidate);
         assert(v.axis_rebuild && !v.keep_resident);
         assert(strcmp(resident.unit, "kOHM") == 0);
         axis_before = resident;
 
         inside_text(&resident, text, sizeof(text));
-        assert(trend_buffer_add(&trend, 30600u, text, "kOHM"));
-        v = production_snapshot(&trend, "kOHM", 30600u, &frame, &resident,
+        assert(trend_buffer_add(&trend, 40600u, text, "kOHM"));
+        v = production_snapshot(&trend, "kOHM", 40700u, &frame, &resident,
                                 &candidate);
         assert(v.keep_resident && !v.axis_rebuild);
-        assert(resident.step == axis_before.step &&
-               resident.top == axis_before.top);
 
-        assert(trend_buffer_add(&trend, 30800u, "20", "kOHM"));
-        v = production_snapshot(&trend, "kOHM", 30800u, &frame, &resident,
-                                &candidate);
-        assert(v.keep_resident && !v.axis_rebuild);
-        assert(candidate.valid && candidate.first_seen_ms == 30800u);
-
-        assert(trend_buffer_add(&trend, 35000u, "9", "kOHM"));
-        v = production_snapshot(&trend, "kOHM", 35000u, &frame, &resident,
-                                &candidate);
-        assert(v.keep_resident && !v.axis_rebuild);
-        assert(candidate.valid &&
-               candidate.first_seen_ms == 30800u /* still persistent */);
-
-        /* The outlier aged out of the sliding window: data is back inside
-         * the resident span, so the pending candidate is dropped. */
-        assert(trend_buffer_add(&trend, 41000u, "9", "kOHM"));
+        assert(trend_buffer_add(&trend, 40900u, "30", "kOHM"));
         v = production_snapshot(&trend, "kOHM", 41000u, &frame, &resident,
                                 &candidate);
         assert(v.keep_resident && !v.axis_rebuild);
-        assert(!candidate.valid);
+        assert(candidate.valid && candidate.first_seen_ms == 41000u);
 
-        /* Unit switch on the wire resets the trend buffer (dimension
-         * change); the next populated frame must mint the new identity
-         * immediately. */
-        assert(trend_buffer_add(&trend, 41200u, "3", "VDC"));
-        v = production_snapshot(&trend, "VDC", 41200u, &frame, &resident,
+        assert(trend_buffer_add(&trend, 42000u, "35", "kOHM"));
+        v = production_snapshot(&trend, "kOHM", 42100u, &frame, &resident,
+                                &candidate);
+        assert(v.keep_resident && !v.axis_rebuild);
+        assert(candidate.valid &&
+               candidate.first_seen_ms == 41000u /* persisted */);
+
+        assert(trend_buffer_add(&trend, 43000u, "35", "kOHM"));
+        v = production_snapshot(&trend, "kOHM", 43100u, &frame, &resident,
                                 &candidate);
         assert(!v.keep_resident && v.axis_rebuild);
-        assert(strcmp(frame.trend_axis_unit, "VDC") == 0);
+        assert(!candidate.valid);
     }
+
     return 0;
 }

@@ -251,6 +251,16 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     }
     minimum *= scale;
     maximum *= scale;
+    /* 50% headroom: an axis that exactly hugs the window forces a rescale
+     * every time the signal moves (measured as a 2-second relabel+remap
+     * storm on sweeping inputs). Padding lets the resident axis absorb
+     * normal drift between rescales. */
+    {
+        float pad = (maximum - minimum) * 0.5f;
+
+        minimum -= pad;
+        maximum += pad;
+    }
     step = nice_step(maximum - minimum);
     top = (float)((int32_t)(maximum / step)) * step;
     if (top < maximum) top += step;

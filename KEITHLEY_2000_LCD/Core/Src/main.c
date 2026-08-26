@@ -230,6 +230,10 @@ static float s_page_trend_maximum[2];
 static main_display_trend_axis_t s_trend_axis_resident;
 static trend_axis_candidate_t s_trend_axis_candidate;
 static bool s_trend_full_repaint;
+/* Same-unit overflow rescale: only Y labels change meaning -- plot
+ * surface, gridlines and X labels are pixel-identical. Skip the whole
+ * chart-panel background fill (~300 ms of GE fills) and just relabel. */
+static bool s_trend_relabel_only;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
 static uint32_t s_trend_refresh_tick;
@@ -2578,6 +2582,13 @@ static void reading_scene_render(void)
                 * pass is counted once here (at decision time), regardless
                 * of how many scheduler slices it later spans. Same-unit
                 * drift within the resident axis must NOT increment. */
+              s_trend_relabel_only =
+                  !s_initial_page_pending &&
+                  s_page_trend_has_data[s_visible_page] ==
+                      s_frame.trend_has_data &&
+                  s_frame.trend_has_data &&
+                  strcmp(s_trend_axis_resident.unit,
+                         s_frame.trend_axis_unit) == 0;
                s_trend_full_repaint = s_initial_page_pending ||
                                     /* The non-visible page receives the current visible trend
                                      * band before incremental columns are drawn, so compare this
@@ -3013,7 +3024,16 @@ static void reading_scene_render(void)
         }
         if (s_render_item == 0u)
         {
-            trend_draw_background();
+            /* Rescale-in-place: wipe only the Y-label gutter. Plot
+             * surface, grid geometry and X labels are pixel-identical;
+             * only the Y label text changes meaning. */
+            if (!s_trend_relabel_only)
+                trend_draw_background();
+            else
+                (void)ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y,
+                                   MAIN_DISPLAY_PLOT_X,
+                                   MAIN_DISPLAY_TREND_H,
+                                   MAIN_DISPLAY_COLOR_BAR);
             s_render_item = 1u;
             /* No yield inside AXES: a mid-sequence preempt resets the shared
              * item cursor to 0, and with resume_at_columns still false the
@@ -3053,7 +3073,8 @@ static void reading_scene_render(void)
             s_render_item++;
             return;
         }
-        if (s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
+        if (!s_trend_relabel_only &&
+            s_render_item < MAIN_DISPLAY_Y_LABEL_COUNT * 2u +
                                 MAIN_DISPLAY_X_LABEL_COUNT * 2u + 1u)
         {
             uint8_t n = (uint8_t)(s_render_item -
@@ -3077,6 +3098,7 @@ static void reading_scene_render(void)
             return;
         }
         render_scheduler_complete_phase(&s_renderer);
+        s_trend_relabel_only = false;
         s_render_item = 0u;
         return;
     }
@@ -3098,8 +3120,7 @@ static void reading_scene_render(void)
         }
         while (s_render_column < TREND_MAX_COLUMNS && budget-- > 0u)
         {
-            trend_draw_column(s_render_column,
-                              !initial_phase && !s_trend_full_repaint);
+            trend_draw_column(s_render_column, !initial_phase);
             s_perf_trend_columns_window++;
             s_render_column++;
         }

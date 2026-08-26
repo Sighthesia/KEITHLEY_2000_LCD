@@ -19,7 +19,7 @@
  * boundary every few seconds. Incremental column updates absorb that drift
  * until the window is full. */
 
-#define TREND_AXIS_CANDIDATE_TIMEOUT_MS 10000u
+#define TREND_AXIS_CANDIDATE_TIMEOUT_MS 2000u
 
 /* Proposed replacement axis for the resident unit whose data left the
  * resident range; promoted only after TREND_AXIS_CANDIDATE_TIMEOUT_MS. */
