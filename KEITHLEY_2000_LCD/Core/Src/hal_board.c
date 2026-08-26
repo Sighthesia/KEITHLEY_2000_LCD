@@ -221,7 +221,14 @@ static void init_spi1(void)
 
 static void uart_put_byte(uint8_t b)
 {
+    /* Bounded wait: if the USART dies (clock/pin glitch), dropping the
+     * byte must NOT hang the whole product -- every diagnostic print
+     * funnels through here, and an unbounded wait turned any lower-level
+     * fault into an unrecoverable silent freeze. */
+    uint32_t spin = 0u;
     while ((USART1->SR & USART_SR_TXE) == 0u) {
+        if (++spin > 500000u)
+            return;
     }
     USART1->DR = b;
 }

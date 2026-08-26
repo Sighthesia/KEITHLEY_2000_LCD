@@ -250,6 +250,10 @@ static uint32_t s_perf_sample_missed;
  * phase at that moment. A [STALL] line prints once per event so a hang
  * leaves its location in the serial log even if UART later dies. */
 static uint32_t s_loop_last_tick;
+/* Stack canary: paint the deepest 64 bytes of the 1 KB stack once at
+ * boot; the heartbeat checks the pattern. Overflow eats it bottom-up. */
+#define WDT_STACK_LOW   ((volatile uint32_t *)0x20004C00u)
+#define WDT_STACK_CANARY 0xC1A5C1A5u
 static uint32_t s_loop_max_gap_ms;
 static uint8_t s_loop_stall_phase;
 static uint8_t s_loop_stall_printed;
@@ -3528,6 +3532,23 @@ int main(void)
             }
             if (gap <= 200u)
                 wdt_kick();
+            {
+                static bool painted;
+                if (!painted)
+                {
+                    volatile uint32_t *p;
+                    for (p = WDT_STACK_LOW; p < WDT_STACK_LOW + 16u; p++)
+                        *p = WDT_STACK_CANARY;
+                    painted = true;
+                }
+                else if (WDT_STACK_LOW[0] != WDT_STACK_CANARY ||
+                         WDT_STACK_LOW[15] != WDT_STACK_CANARY)
+                {
+                    hal_uart_send_text("[STK] overflow! gap=");
+                    perf_send_u32(gap);
+                    hal_uart_send_text("\r\n");
+                }
+            }
             if (gap <= 50u)
                 s_loop_stall_printed = 0u;
             s_loop_last_tick = now_loop;
