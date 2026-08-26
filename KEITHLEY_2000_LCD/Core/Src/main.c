@@ -659,6 +659,13 @@ static uint8_t frame_region_for_phase(render_phase_t phase)
  * band with full-canvas strides, never a whole-canvas clone. A band bit is
  * cleared only after its copy succeeds, so a bus error retries exactly the
  * remaining work on the next attempt. */
+/* UI-x extent actually dirtied inside the reading band this frame. The
+ * band's framebuffer image is 168px wide but 960px long; copying only the
+ * value/info span instead of the full length roughly halves the per-flip
+ * BTE sync cost at 30Hz. Full width until the first stable diff frame. */
+static uint16_t s_reading_sync_x0;
+static uint16_t s_reading_sync_x1;
+
 static bool hidden_page_sync_regions(void)
 {
     static const struct
@@ -679,7 +686,16 @@ static bool hidden_page_sync_regions(void)
 
         if ((s_frame_regions & bands[i].region) == 0u)
             continue;
-        panel_transform_ui_rect_to_fb(0u, bands[i].y, MAIN_DISPLAY_UI_WIDTH,
+        uint16_t band_x0 = 0u;
+        uint16_t band_w = MAIN_DISPLAY_UI_WIDTH;
+
+        if (bands[i].region == FRAME_REGION_READING &&
+            s_reading_sync_x1 > s_reading_sync_x0)
+        {
+            band_x0 = s_reading_sync_x0;
+            band_w = (uint16_t)(s_reading_sync_x1 - s_reading_sync_x0);
+        }
+        panel_transform_ui_rect_to_fb(band_x0, bands[i].y, band_w,
                                       bands[i].h, &rect.x, &rect.y,
                                       &rect.w, &rect.h);
         if (rect.w == 0u || rect.h == 0u)
@@ -2666,6 +2682,10 @@ static void reading_scene_render(void)
         uint8_t first_info;
         if (s_render_item == 0u)
         {
+            /* Reading-band sync extent starts empty each frame and grows
+             * to cover exactly what this frame will touch. */
+            s_reading_sync_x0 = (uint16_t)MAIN_DISPLAY_UI_WIDTH;
+            s_reading_sync_x1 = 0u;
 #if RIF_BTE_RENDERER
             /* Plan the frame's digit cells and keep every cell whose glyph
              * identity is unchanged; only changed/vanished cells touch the
@@ -2788,6 +2808,26 @@ static void reading_scene_render(void)
                             }
                         }
                     }
+                    {
+                        uint16_t x_end = new_extent > old_extent
+                                             ? new_extent
+                                             : old_extent;
+
+                        if (s_frame.unit_suffix[0] != '\0')
+                        {
+                            uint16_t se =
+                                (uint16_t)(s_frame.end_x +
+                                           (uint16_t)s_frame.unit_len *
+                                               FONT_DIGIT_WIDTH +
+                                           FONT_HALF_WIDTH * 2u);
+                            if (se > x_end)
+                                x_end = se;
+                        }
+                        if (s_frame.start_x < s_reading_sync_x0)
+                            s_reading_sync_x0 = s_frame.start_x;
+                        if (x_end > s_reading_sync_x1)
+                            s_reading_sync_x1 = x_end;
+                    }
                     s_cell_count = 0u;
                     for (i = 0u; i < planned_count; i++)
                         s_cells[s_cell_count++] = planned[i];
@@ -2799,12 +2839,16 @@ static void reading_scene_render(void)
                     for (uint8_t i = 0u; i < planned_count; i++)
                         s_cells[s_cell_count++] = planned[i];
                     s_reading_diff = false;
+                    s_reading_sync_x0 = 0u;
+                    s_reading_sync_x1 = (uint16_t)MAIN_DISPLAY_UI_WIDTH;
                     (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
                                        MAIN_DISPLAY_READING_H,
                                        MAIN_DISPLAY_COLOR_BG);
                 }
             }
 #else
+            s_reading_sync_x0 = 0u;
+            s_reading_sync_x1 = (uint16_t)MAIN_DISPLAY_UI_WIDTH;
             (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
                                MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG);
 #endif
@@ -2818,6 +2862,8 @@ static void reading_scene_render(void)
                 DRAW_ITEM(ui_draw_text(MAIN_DISPLAY_READING_X, 84u,
                                        "WAITING FOR DATA",
                                        MAIN_DISPLAY_COLOR_MUTED));
+                s_reading_sync_x0 = 0u;
+                s_reading_sync_x1 = (uint16_t)MAIN_DISPLAY_UI_WIDTH;
                 return;
             }
             first_info = 2u;
@@ -2888,6 +2934,11 @@ static void reading_scene_render(void)
         {
             if (!reading_draw_info((uint8_t)(s_render_item - first_info)))
                 return;
+            /* Info cells live in the band's far end -- widen the sync. */
+            if (MAIN_DISPLAY_INFO_X < s_reading_sync_x0)
+                s_reading_sync_x0 = MAIN_DISPLAY_INFO_X;
+            if (MAIN_DISPLAY_INFO_RIGHT > s_reading_sync_x1)
+                s_reading_sync_x1 = MAIN_DISPLAY_INFO_RIGHT;
             s_render_item++;
             return;
         }
