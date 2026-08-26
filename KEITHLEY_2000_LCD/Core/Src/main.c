@@ -3549,7 +3549,16 @@ int main(void)
                     (volatile uint32_t *)0x40021010u;
                 if ((*apb2enr & need) != need)
                 {
-                    *apb2enr |= need;
+                    /* Verify-after-write with bounded retries: the enable
+                     * write sits right before heavy BTE/SDRAM bursts whose
+                     * current sag corrupts it (observed 0x501D landing as
+                     * 0x4005 -- exactly the IOPC|SPI1 bits dropped), so a
+                     * blind single write never sticks. */
+                    uint8_t tries = 0u;
+                    do {
+                        *apb2enr |= need;
+                        for (volatile uint32_t q = 0u; q < 200u; q++) {}
+                    } while ((*apb2enr & need) != need && ++tries < 16u);
                     static uint32_t last_clk_report;
                     uint32_t now_c = HAL_GetTick();
                     if ((now_c - last_clk_report) >= 5000u)

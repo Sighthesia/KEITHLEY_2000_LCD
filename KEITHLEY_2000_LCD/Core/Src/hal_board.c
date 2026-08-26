@@ -64,10 +64,31 @@ static void hal_delay_ms(uint32_t ms)
 static uint8_t hal_spi_xfer(uint8_t byte)
 {
 #if LT7680_SPI_HW
+    /* Bounded waits + OVR recovery: a single glitch that sets overrun
+     * used to wedge every subsequent transfer forever (RXNE never set),
+     * freezing the whole product mid-render. Now a wedged transfer
+     * degrades to a dummy byte and the higher-level status/timeout
+     * checks recover the link. */
+    uint32_t spin = 0u;
+
+    if (SPI1->SR & SPI_SR_OVR) {
+        volatile uint32_t purge = SPI1->DR;
+        purge = SPI1->SR;
+        (void)purge;
+    }
     while ((SPI1->SR & SPI_SR_TXE) == 0u) {
+        if (++spin > 200000u)
+            return 0xFFu;
     }
     SPI1->DR = byte;
+    spin = 0u;
     while ((SPI1->SR & SPI_SR_RXNE) == 0u) {
+        if (++spin > 200000u) {
+            volatile uint32_t purge = SPI1->DR;
+            purge = SPI1->SR;
+            (void)purge;
+            return 0xFFu;
+        }
     }
     return (uint8_t)SPI1->DR;
 #else
