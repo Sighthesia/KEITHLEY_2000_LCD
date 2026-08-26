@@ -23,6 +23,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "hal_board.h"
+
+void fault_report_c(const unsigned long *stack, unsigned long exc_lr);
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -85,12 +87,38 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
+  __asm volatile (
+      "tst lr, #4        \n"
+      "ite eq            \n"
+      "mrseq r0, msp     \n"
+      "mrsne r0, psp     \n"
+      "mov r1, lr        \n"
+      "b fault_report_c  \n");
+  while (1) { }
   /* USER CODE END HardFault_IRQn 0 */
-  while (1)
-  {
-    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
-    /* USER CODE END W1_HardFault_IRQn 0 */
-  }
+}
+void fault_report_c(const unsigned long *stack, unsigned long exc_lr)
+{
+  /* Fault black box: a derailment that executes data as code faults
+   * within a few instructions. The stacked frame preserves the faulting
+   * PC and the CALLER's LR -- the true origin of the wild branch. */
+  hal_uart_send_text("[FAULT] pc=");
+  hal_uart_send_hex8((uint8_t)(stack[6] >> 24));
+  hal_uart_send_hex8((uint8_t)(stack[6] >> 16));
+  hal_uart_send_hex8((uint8_t)(stack[6] >> 8));
+  hal_uart_send_hex8((uint8_t)stack[6]);
+  hal_uart_send_text(" lr=");
+  hal_uart_send_hex8((uint8_t)(stack[5] >> 24));
+  hal_uart_send_hex8((uint8_t)(stack[5] >> 16));
+  hal_uart_send_hex8((uint8_t)(stack[5] >> 8));
+  hal_uart_send_hex8((uint8_t)stack[5]);
+  hal_uart_send_text(" exc=");
+  hal_uart_send_hex8((uint8_t)(exc_lr >> 24));
+  hal_uart_send_hex8((uint8_t)(exc_lr >> 16));
+  hal_uart_send_hex8((uint8_t)(exc_lr >> 8));
+  hal_uart_send_hex8((uint8_t)exc_lr);
+  hal_uart_send_text("\r\n");
+  while (1) { }
 }
 
 /**
