@@ -214,26 +214,29 @@ void PendSV_Handler(void)
 /**
   * @brief This function handles System tick timer.
   */
+static void __attribute__((used, noinline)) systick_handler_c(
+    const uint32_t *stack)
+{
+  extern volatile uint32_t s_irq_pc;
+  extern volatile uint32_t s_irq_pc_ring[16];
+  extern volatile uint8_t s_irq_pc_idx;
+  uint32_t interrupted_pc = stack[6];
+
+  /* The DWT PC sample inside this ISR only observes the ISR itself. The
+   * exception frame preserves the preempted instruction, including a main-loop
+   * dead wait, which is the address SWD must report after a freeze. */
+  s_irq_pc = interrupted_pc;
+  s_irq_pc_ring[s_irq_pc_idx & 0x0Fu] = interrupted_pc;
+  s_irq_pc_idx++;
+  HAL_IncTick();
+}
+
+void SysTick_Handler(void) __attribute__((naked));
 void SysTick_Handler(void)
 {
-  /* USER CODE BEGIN SysTick_IRQn 0 */
-  /* PC sampler: runs at 1 kHz from an interrupt that is independent of
-   * the main loop, so it keeps recording even when the loop hangs inside
-   * a dead wait. SWD reads s_irq_pc / s_irq_pc_ring to pinpoint exactly
-   * where execution was frozen. */
-  {
-    extern volatile uint32_t s_irq_pc;
-    extern volatile uint32_t s_irq_pc_ring[16];
-    extern volatile uint8_t  s_irq_pc_idx;
-    s_irq_pc = *((volatile uint32_t *)0xE000101Cu); /* DWT PCSR */
-    s_irq_pc_ring[s_irq_pc_idx & 0x0Fu] = *((volatile uint32_t *)0xE000101Cu);
-    s_irq_pc_idx++;
-  }
-  /* USER CODE END SysTick_IRQn 0 */
-  HAL_IncTick();
-  /* USER CODE BEGIN SysTick_IRQn 1 */
-
-  /* USER CODE END SysTick_IRQn 1 */
+  __asm volatile (
+      "mrs r0, msp        \n"
+      "b systick_handler_c \n");
 }
 
 /******************************************************************************/
