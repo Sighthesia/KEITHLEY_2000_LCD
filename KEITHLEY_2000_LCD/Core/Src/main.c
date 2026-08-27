@@ -144,8 +144,14 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #endif
 #if K2000_READING_ONLY_BASELINE
 #define READING_ONLY_LEGACY __attribute__((unused))
+#define READING_ONLY_DIRECT_DMA 1u
+#define READING_ONLY_PAGE_FLIP 1u
+#define READING_ONLY_CLEAR_BAND 0u
 #else
 #define READING_ONLY_LEGACY
+#define READING_ONLY_DIRECT_DMA 0u
+#define READING_ONLY_PAGE_FLIP 1u
+#define READING_ONLY_CLEAR_BAND 1u
 #endif
 /* Readings repaint at most once per display period (30 Hz): the value
  * stream may be 500 Hz, but intermediate digits can never be shown and
@@ -295,6 +301,16 @@ static bool s_reading_only_dirty;
 static reading_only_stage_t s_reading_only_stage;
 static uint32_t s_reading_only_generation;
 static uint32_t s_reading_only_frame_generation;
+static char s_reading_only_page_unit[2][UI_MODEL_MAX_UNIT];
+static char s_reading_only_page_suffix[2][4];
+static uint16_t s_reading_only_page_unit_x[2];
+static uint16_t s_reading_only_page_unit_w[2];
+static uint16_t s_reading_only_page_suffix_x[2];
+static uint16_t s_reading_only_page_suffix_color[2];
+static char s_reading_only_page_value[2][UI_MODEL_MAX_FIELD];
+static uint16_t s_reading_only_page_value_x[2];
+static uint16_t s_reading_only_page_value_color[2];
+static uint8_t s_reading_only_value_index;
 #endif
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
@@ -1421,7 +1437,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                        s_rif_draw_job.code)
                         : 0;
                 st = LT7680_OK;
-                if (cached != 0)
+                if (cached != 0 && !READING_ONLY_DIRECT_DMA)
                 {
                     if (ui_runtime_single_page())
                     {
@@ -2624,7 +2640,12 @@ static void reading_only_render(void)
             (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
             return;
 
-        s_render_page = 0u;
+        /* A/B: the direct-DMA diagnostic holds the selected page to determine
+         * whether the variable black region is stale content exposed at a page
+         * flip. The normal baseline continues to alternate hidden pages. */
+        s_render_page = READING_ONLY_PAGE_FLIP
+                            ? (uint8_t)(s_visible_page ^ 1u)
+                            : s_visible_page;
         s_renderer.phase = RENDER_PHASE_UPDATE_READING;
         s_frame_rendering = true;
         s_render_full_page = false;
@@ -2639,6 +2660,7 @@ static void reading_only_render(void)
 #endif
         main_display_format(&s_ui, &s_frame);
         s_reading_only_frame_generation = s_reading_only_generation;
+        s_reading_only_value_index = 0u;
         s_perf_frame_start_tick = now;
         s_display_due_tick = now;
         s_reading_only_stage = READING_ONLY_CLEAR;
@@ -2649,10 +2671,31 @@ static void reading_only_render(void)
     switch (s_reading_only_stage)
     {
     case READING_ONLY_CLEAR:
+    {
+        bool page_unit_changed;
+        bool page_suffix_changed;
+
+        page_unit_changed = strcmp(s_reading_only_page_unit[s_render_page],
+                                   s_frame.unit) != 0;
+        page_suffix_changed = strcmp(s_reading_only_page_suffix[s_render_page],
+                                     s_frame.unit_suffix) != 0;
         if (lt7680_gfx_select_canvas_page(s_render_page) != LT7680_OK ||
-            ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
-                         MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
-                LT7680_OK)
+            (READING_ONLY_CLEAR_BAND &&
+             ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
+                          MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
+                 LT7680_OK) ||
+            (page_unit_changed &&
+             s_reading_only_page_unit_w[s_render_page] != 0u &&
+             ui_fill_rect(s_reading_only_page_unit_x[s_render_page],
+                          MAIN_DISPLAY_READING_VALUE_Y,
+                          s_reading_only_page_unit_w[s_render_page],
+                          FONT_DIGIT_HEIGHT,
+                          MAIN_DISPLAY_COLOR_BG) != LT7680_OK) ||
+            (page_suffix_changed &&
+             s_reading_only_page_suffix[s_render_page][0] != '\0' &&
+             ui_fill_rect(s_reading_only_page_suffix_x[s_render_page],
+                          MAIN_DISPLAY_DCAC_Y, FONT_HALF_WIDTH * 2u,
+                          FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG) != LT7680_OK))
         {
             s_frame_rendering = false;
             s_reading_only_stage = READING_ONLY_IDLE;
@@ -2661,10 +2704,43 @@ static void reading_only_render(void)
         s_reading_only_stage = READING_ONLY_VALUE;
         return;
     case READING_ONLY_VALUE:
-        if (!s_frame.no_data &&
-            !ui_draw_digits(s_frame.start_x, s_frame.reading_y, s_frame.value,
-                            s_frame.value_color))
+    {
+        uint8_t value_len = s_frame.no_data ? 0u : s_frame.value_len;
+        if (s_reading_only_value_index < value_len)
+        {
+            uint8_t index = s_reading_only_value_index;
+            char glyph[2] = {s_frame.value[index], '\0'};
+            bool same = s_reading_only_page_value_x[s_render_page] ==
+                            s_frame.start_x &&
+                        s_reading_only_page_value_color[s_render_page] ==
+                            s_frame.value_color &&
+                        s_reading_only_page_value[s_render_page][index] ==
+                            glyph[0];
+            if (!same && !ui_draw_digits(
+                              (uint16_t)(s_frame.start_x +
+                                         (uint16_t)index * FONT_DIGIT_WIDTH),
+                              s_frame.reading_y, glyph, s_frame.value_color))
+                return;
+            s_reading_only_page_value[s_render_page][index] = glyph[0];
+            s_reading_only_value_index++;
             return;
+        }
+        if (s_reading_only_page_value[s_render_page][value_len] != '\0')
+        {
+            uint8_t i;
+            for (i = value_len;
+                 s_reading_only_page_value[s_render_page][i] != '\0'; i++)
+                (void)ui_fill_rect(
+                    (uint16_t)(s_reading_only_page_value_x[s_render_page] +
+                               (uint16_t)i * FONT_DIGIT_WIDTH),
+                    MAIN_DISPLAY_READING_VALUE_Y, FONT_DIGIT_WIDTH,
+                    FONT_DIGIT_HEIGHT, MAIN_DISPLAY_COLOR_BG);
+            s_reading_only_page_value[s_render_page][value_len] = '\0';
+        }
+        s_reading_only_page_value_x[s_render_page] = s_frame.start_x;
+        s_reading_only_page_value_color[s_render_page] = s_frame.value_color;
+        s_reading_only_page_value[s_render_page][value_len] = '\0';
+    }
         s_reading_only_stage = READING_ONLY_UNIT;
         return;
     case READING_ONLY_UNIT:
@@ -2675,20 +2751,43 @@ static void reading_only_render(void)
         s_reading_only_stage = READING_ONLY_SUFFIX;
         return;
     case READING_ONLY_SUFFIX:
+    {
+        uint16_t suffix_x = (uint16_t)(s_frame.end_x +
+                                       (uint16_t)s_frame.unit_len *
+                                           FONT_DIGIT_WIDTH);
+        bool suffix_same = s_frame.unit_suffix[0] == '\0'
+                               ? s_reading_only_page_suffix[s_render_page][0] == '\0'
+                               : strcmp(s_reading_only_page_suffix[s_render_page],
+                                        s_frame.unit_suffix) == 0 &&
+                                 s_reading_only_page_suffix_x[s_render_page] ==
+                                     suffix_x &&
+                                 s_reading_only_page_suffix_color[s_render_page] ==
+                                     s_frame.value_color;
         if (!s_frame.no_data && s_frame.unit_suffix[0] != '\0' &&
-            /* The normal UI uses a half-height CPU bitmap for DC/AC. That
-             * path emits more than one hundred GE fills per frame and alone
-             * exceeds the 33 ms budget. The baseline draws the suffix with
-             * the cached RIF tiles too, trading compact typography for one
-             * bounded BTE transfer per character. */
-            !ui_draw_digits((uint16_t)(s_frame.end_x +
-                                        (uint16_t)s_frame.unit_len *
-                                            FONT_DIGIT_WIDTH),
-                            s_frame.reading_y, s_frame.unit_suffix,
-                            s_frame.value_color))
+            !suffix_same &&
+            !ui_draw_half(suffix_x, MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
+                          s_frame.value_color))
             return;
+        s_reading_only_page_unit_x[s_render_page] = s_frame.end_x;
+        s_reading_only_page_unit_w[s_render_page] = (uint16_t)(
+            (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH +
+            (s_frame.unit_suffix[0] != '\0' ? FONT_HALF_WIDTH * 2u : 0u));
+        strncpy(s_reading_only_page_unit[s_render_page], s_frame.unit,
+                sizeof(s_reading_only_page_unit[0]) - 1u);
+        s_reading_only_page_unit[s_render_page]
+            [sizeof(s_reading_only_page_unit[0]) - 1u] = '\0';
+        strncpy(s_reading_only_page_suffix[s_render_page],
+                s_frame.unit_suffix,
+                sizeof(s_reading_only_page_suffix[0]) - 1u);
+        s_reading_only_page_suffix[s_render_page]
+            [sizeof(s_reading_only_page_suffix[0]) - 1u] = '\0';
+        s_reading_only_page_suffix_x[s_render_page] =
+            suffix_x;
+        s_reading_only_page_suffix_color[s_render_page] =
+            s_frame.value_color;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
+    }
     case READING_ONLY_PRESENT:
         if (lt7680_gfx_present_page(s_render_page) != LT7680_OK ||
             lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
@@ -2698,6 +2797,7 @@ static void reading_only_render(void)
             return;
         }
         s_display_enabled = true;
+        s_visible_page = s_render_page;
         s_reading_only_dirty =
             s_reading_only_generation != s_reading_only_frame_generation;
         s_frame_rendering = false;
@@ -2710,6 +2810,7 @@ static void reading_only_render(void)
         s_frame_rendering = false;
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
+    }
     }
 }
 #endif
