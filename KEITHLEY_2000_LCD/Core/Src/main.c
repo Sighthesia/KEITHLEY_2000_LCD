@@ -1099,7 +1099,10 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     s_prof_fill_n++;
 #if K2000_READING_ONLY_BASELINE
     if (st != LT7680_OK)
+    {
+        s_reading_only_last_error = st;
         s_reading_only_io_error = true;
+    }
 #endif
     return st;
 }
@@ -1276,6 +1279,10 @@ static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
 static void rif_draw_fail(lt7680_status_t st)
 {
     s_rif_draw_job.active = false;
+#if K2000_READING_ONLY_BASELINE
+    s_reading_only_last_error = st != LT7680_OK ? st : LT7680_ERR_BUS;
+    s_reading_only_io_error = true;
+#endif
     s_rif_ready = false;
 #if RIF_BTE_RENDERER
     s_cell_count = 0u; /* canvas identity no longer matches the cell table */
