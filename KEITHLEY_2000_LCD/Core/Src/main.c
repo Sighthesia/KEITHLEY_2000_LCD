@@ -301,6 +301,9 @@ static bool s_reading_only_dirty;
 static reading_only_stage_t s_reading_only_stage;
 static uint32_t s_reading_only_generation;
 static uint32_t s_reading_only_frame_generation;
+static uint32_t s_reading_only_render_errors;
+static lt7680_status_t s_reading_only_last_error;
+static bool s_reading_only_io_error;
 static char s_reading_only_page_unit[2][UI_MODEL_MAX_UNIT];
 static char s_reading_only_page_suffix[2][4];
 static uint16_t s_reading_only_page_unit_x[2];
@@ -411,6 +414,10 @@ static void perf_record_frame(void)
         perf_send_u32(s_perf_axis_rebuilds_window);
         hal_uart_send_text(" trend_column_updates=");
         perf_send_u32(s_perf_trend_columns_window);
+        hal_uart_send_text(" reading_errors=");
+        perf_send_u32(s_reading_only_render_errors);
+        hal_uart_send_text(" last_error=");
+        perf_send_u32((uint32_t)s_reading_only_last_error);
         hal_uart_send_text("\r\n");
         s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
         s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
@@ -473,6 +480,34 @@ static rif_image_t s_rif_image;
 static rif_draw_job_t s_rif_draw_job;
 static bool s_rif_ready;
 static bool s_rif_dma_probe_passed;
+
+#if K2000_READING_ONLY_BASELINE
+static void reading_only_abort_frame(lt7680_status_t error)
+{
+    s_reading_only_render_errors++;
+    s_reading_only_last_error = error;
+    s_reading_only_dirty = true;
+    s_reading_only_stage = READING_ONLY_IDLE;
+    s_display_due_tick = HAL_GetTick();
+    s_frame_rendering = false;
+    s_renderer.phase = RENDER_PHASE_IDLE;
+    /* A failed operation may have left only part of a glyph on the target
+     * page. Invalidate all page-local coverage so the retry redraws every
+     * glyph instead of trusting a partial frame. */
+    memset(s_reading_only_page_unit, 0, sizeof(s_reading_only_page_unit));
+    memset(s_reading_only_page_suffix, 0, sizeof(s_reading_only_page_suffix));
+    memset(s_reading_only_page_value, 0, sizeof(s_reading_only_page_value));
+    memset(s_reading_only_page_unit_w, 0,
+           sizeof(s_reading_only_page_unit_w));
+    memset(s_reading_only_page_suffix_x, 0,
+           sizeof(s_reading_only_page_suffix_x));
+    memset(s_reading_only_page_value_x, 0,
+           sizeof(s_reading_only_page_value_x));
+    memset(&s_bitmap_job, 0, sizeof(s_bitmap_job));
+    memset(&s_rif_draw_job, 0, sizeof(s_rif_draw_job));
+    s_reading_only_io_error = false;
+}
+#endif
 
 #if K2000_DEMO_FEED
 /* One entry per demo "range". lo_mant/hi_mant are the ramp low/high mantissas
@@ -1062,6 +1097,10 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     }
     s_prof_fill_ms += HAL_GetTick() - t0;
     s_prof_fill_n++;
+#if K2000_READING_ONLY_BASELINE
+    if (st != LT7680_OK)
+        s_reading_only_io_error = true;
+#endif
     return st;
 }
 
@@ -1178,10 +1217,15 @@ static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
                 while (s_bitmap_job.col < width &&
                        (bits[s_bitmap_job.col >> 3] & (uint8_t)(0x80u >> (s_bitmap_job.col & 7u))) != 0u)
                     s_bitmap_job.col++;
-                (void)ui_fill_rect((uint16_t)(s_bitmap_job.cx + start),
-                                   (uint16_t)(s_bitmap_job.y + s_bitmap_job.row),
-                                   (uint16_t)(s_bitmap_job.col - start), 1u,
-                                   s_bitmap_job.color);
+                if (ui_fill_rect(
+                        (uint16_t)(s_bitmap_job.cx + start),
+                        (uint16_t)(s_bitmap_job.y + s_bitmap_job.row),
+                        (uint16_t)(s_bitmap_job.col - start), 1u,
+                        s_bitmap_job.color) != LT7680_OK)
+                {
+                    s_bitmap_job.active = false;
+                    return false;
+                }
                 budget--;
                 if (budget == 0u)
                     return false;
@@ -1478,6 +1522,8 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                 s_prof_dma_n++;
                 if (st != LT7680_OK)
                 {
+                    s_reading_only_last_error = st;
+                    s_reading_only_io_error = true;
                     /* Never fall through to the run-length renderer here:
                      * U5 tiles are pre-transposed and its UI-space drawing
                      * would smear them across the reading band. Retry the
@@ -2661,6 +2707,7 @@ static void reading_only_render(void)
         main_display_format(&s_ui, &s_frame);
         s_reading_only_frame_generation = s_reading_only_generation;
         s_reading_only_value_index = 0u;
+        s_reading_only_io_error = false;
         s_perf_frame_start_tick = now;
         s_display_due_tick = now;
         s_reading_only_stage = READING_ONLY_CLEAR;
@@ -2674,31 +2721,43 @@ static void reading_only_render(void)
     {
         bool page_unit_changed;
         bool page_suffix_changed;
+        lt7680_status_t st;
 
         page_unit_changed = strcmp(s_reading_only_page_unit[s_render_page],
                                    s_frame.unit) != 0;
         page_suffix_changed = strcmp(s_reading_only_page_suffix[s_render_page],
                                      s_frame.unit_suffix) != 0;
-        if (lt7680_gfx_select_canvas_page(s_render_page) != LT7680_OK ||
-            (READING_ONLY_CLEAR_BAND &&
-             ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
-                          MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
-                 LT7680_OK) ||
-            (page_unit_changed &&
-             s_reading_only_page_unit_w[s_render_page] != 0u &&
-             ui_fill_rect(s_reading_only_page_unit_x[s_render_page],
-                          MAIN_DISPLAY_READING_VALUE_Y,
-                          s_reading_only_page_unit_w[s_render_page],
-                          FONT_DIGIT_HEIGHT,
-                          MAIN_DISPLAY_COLOR_BG) != LT7680_OK) ||
-            (page_suffix_changed &&
-             s_reading_only_page_suffix[s_render_page][0] != '\0' &&
-             ui_fill_rect(s_reading_only_page_suffix_x[s_render_page],
-                          MAIN_DISPLAY_DCAC_Y, FONT_HALF_WIDTH * 2u,
-                          FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG) != LT7680_OK))
+        st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st != LT7680_OK ||
+            (st == LT7680_OK &&
+             ((READING_ONLY_CLEAR_BAND &&
+               ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
+                            MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
+                   LT7680_OK) ||
+              (page_unit_changed &&
+               s_reading_only_page_unit_w[s_render_page] != 0u &&
+               ui_fill_rect(s_reading_only_page_unit_x[s_render_page],
+                            MAIN_DISPLAY_READING_VALUE_Y,
+                            s_reading_only_page_unit_w[s_render_page],
+                            FONT_DIGIT_HEIGHT,
+                            MAIN_DISPLAY_COLOR_BG) != LT7680_OK) ||
+              (page_suffix_changed &&
+               s_reading_only_page_suffix[s_render_page][0] != '\0' &&
+               ui_fill_rect(s_reading_only_page_suffix_x[s_render_page],
+                            MAIN_DISPLAY_DCAC_Y, FONT_HALF_WIDTH * 2u,
+                            FONT_HALF_HEIGHT, MAIN_DISPLAY_COLOR_BG) !=
+                   LT7680_OK))))
         {
-            s_frame_rendering = false;
-            s_reading_only_stage = READING_ONLY_IDLE;
+            if (st == LT7680_OK)
+                st = s_reading_only_last_error;
+            if (st == LT7680_OK)
+                st = LT7680_ERR_BUS;
+            reading_only_abort_frame(st);
+            return;
+        }
+        if (s_reading_only_io_error)
+        {
+            reading_only_abort_frame(s_reading_only_last_error);
             return;
         }
         s_reading_only_stage = READING_ONLY_VALUE;
@@ -2720,7 +2779,11 @@ static void reading_only_render(void)
                               (uint16_t)(s_frame.start_x +
                                          (uint16_t)index * FONT_DIGIT_WIDTH),
                               s_frame.reading_y, glyph, s_frame.value_color))
+            {
+                if (s_reading_only_io_error)
+                    reading_only_abort_frame(s_reading_only_last_error);
                 return;
+            }
             s_reading_only_page_value[s_render_page][index] = glyph[0];
             s_reading_only_value_index++;
             return;
@@ -2730,11 +2793,15 @@ static void reading_only_render(void)
             uint8_t i;
             for (i = value_len;
                  s_reading_only_page_value[s_render_page][i] != '\0'; i++)
-                (void)ui_fill_rect(
+                if (ui_fill_rect(
                     (uint16_t)(s_reading_only_page_value_x[s_render_page] +
                                (uint16_t)i * FONT_DIGIT_WIDTH),
                     MAIN_DISPLAY_READING_VALUE_Y, FONT_DIGIT_WIDTH,
-                    FONT_DIGIT_HEIGHT, MAIN_DISPLAY_COLOR_BG);
+                    FONT_DIGIT_HEIGHT, MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
+                {
+                    reading_only_abort_frame(s_reading_only_last_error);
+                    return;
+                }
             s_reading_only_page_value[s_render_page][value_len] = '\0';
         }
         s_reading_only_page_value_x[s_render_page] = s_frame.start_x;
@@ -2747,7 +2814,11 @@ static void reading_only_render(void)
         if (!s_frame.no_data &&
             !ui_draw_digits(s_frame.end_x, s_frame.reading_y, s_frame.unit,
                             s_frame.value_color))
+        {
+            if (s_reading_only_io_error)
+                reading_only_abort_frame(s_reading_only_last_error);
             return;
+        }
         s_reading_only_stage = READING_ONLY_SUFFIX;
         return;
     case READING_ONLY_SUFFIX:
@@ -2767,7 +2838,11 @@ static void reading_only_render(void)
             !suffix_same &&
             !ui_draw_half(suffix_x, MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
                           s_frame.value_color))
+        {
+            if (s_reading_only_io_error)
+                reading_only_abort_frame(s_reading_only_last_error);
             return;
+        }
         s_reading_only_page_unit_x[s_render_page] = s_frame.end_x;
         s_reading_only_page_unit_w[s_render_page] = (uint16_t)(
             (uint16_t)s_frame.unit_len * FONT_DIGIT_WIDTH +
@@ -2789,11 +2864,13 @@ static void reading_only_render(void)
         return;
     }
     case READING_ONLY_PRESENT:
-        if (lt7680_gfx_present_page(s_render_page) != LT7680_OK ||
-            lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
+    {
+        lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
+        if (st == LT7680_OK)
+            st = lt7680_write_reg(0x12u, 0x48u);
+        if (st != LT7680_OK)
         {
-            s_frame_rendering = false;
-            s_reading_only_stage = READING_ONLY_IDLE;
+            reading_only_abort_frame(st);
             return;
         }
         s_display_enabled = true;
@@ -2806,6 +2883,7 @@ static void reading_only_render(void)
         perf_record_frame();
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
+    }
     default:
         s_frame_rendering = false;
         s_reading_only_stage = READING_ONLY_IDLE;
