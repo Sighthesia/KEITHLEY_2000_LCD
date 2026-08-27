@@ -135,6 +135,18 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #endif
 #define DEMO_SAMPLE_PERIOD_MS ((uint32_t)(1000u / K2000_DEMO_INPUT_HZ))
 #define DISPLAY_FRAME_PERIOD_MS 33u
+
+/* Diagnostic performance baseline: keep only the authoritative reading path.
+ * This deliberately bypasses the former trend/status/page-sync composition so
+ * 500 Hz input can be evaluated against one bounded 30 Hz presentation path. */
+#ifndef K2000_READING_ONLY_BASELINE
+#define K2000_READING_ONLY_BASELINE 1u
+#endif
+#if K2000_READING_ONLY_BASELINE
+#define READING_ONLY_LEGACY __attribute__((unused))
+#else
+#define READING_ONLY_LEGACY
+#endif
 /* Readings repaint at most once per display period (30 Hz): the value
  * stream may be 500 Hz, but intermediate digits can never be shown and
  * each repaint costs ~20 glyph transfers. */
@@ -228,15 +240,15 @@ static float s_page_trend_maximum[2];
  * shared pure module trend_axis.c and covered by its host regression
  * tests; this site only owns page history, projection and publication. */
 static main_display_trend_axis_t s_trend_axis_resident;
-static trend_axis_candidate_t s_trend_axis_candidate;
+static trend_axis_candidate_t READING_ONLY_LEGACY s_trend_axis_candidate;
 static bool s_trend_full_repaint;
 /* Same-unit overflow rescale: only Y labels change meaning -- plot
  * surface, gridlines and X labels are pixel-identical. Skip the whole
  * chart-panel background fill (~300 ms of GE fills) and just relabel. */
-static bool s_trend_relabel_only;
+static bool READING_ONLY_LEGACY s_trend_relabel_only;
 static main_display_frame_t s_frame;
 static uint32_t s_text_refresh_tick;
-static uint32_t s_trend_refresh_tick;
+static uint32_t READING_ONLY_LEGACY s_trend_refresh_tick;
 static uint32_t s_display_due_tick;
 static uint32_t s_perf_frame_start_tick;
 static uint32_t s_perf_last_frame_ms;
@@ -269,6 +281,22 @@ static uint32_t s_perf_display_commits_window;
 static uint32_t s_perf_axis_rebuilds_window;
 static uint32_t s_perf_trend_columns_window;
 
+#if K2000_READING_ONLY_BASELINE
+typedef enum {
+    READING_ONLY_IDLE = 0,
+    READING_ONLY_CLEAR,
+    READING_ONLY_VALUE,
+    READING_ONLY_UNIT,
+    READING_ONLY_SUFFIX,
+    READING_ONLY_PRESENT,
+} reading_only_stage_t;
+
+static bool s_reading_only_dirty;
+static reading_only_stage_t s_reading_only_stage;
+static uint32_t s_reading_only_generation;
+static uint32_t s_reading_only_frame_generation;
+#endif
+
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
 {
     out[digits] = '\0';
@@ -294,7 +322,7 @@ static void perf_send_u32(uint32_t value)
         hal_uart_send(&((uint8_t *)text)[i - 1u], 1u);
 }
 
-static void perf_format_display(char *out)
+static void READING_ONLY_LEGACY perf_format_display(char *out)
 {
     char fps[6];
     char frame_ms[6];
@@ -537,7 +565,10 @@ static void demo_feed_unit(const char *unit)
 static void k2000_demo_feed(void)
 {
     uint32_t now = HAL_GetTick();
-    uint8_t budget = 8u;
+    /* A 30 Hz display frame can occupy nearly 20 ms, which spans ten 500 Hz
+     * input ticks. Keep enough catch-up budget to preserve the requested demo
+     * rate instead of reporting a synthetic missed sample every frame. */
+    uint8_t budget = 16u;
 
     if (!s_display_enabled)
         return;
@@ -653,7 +684,7 @@ static void wdt_report_boot(void)
     WDT_RCC_CSR |= (1u << 24u);    /* RMVF: clear reset flags */
 }
 
-static void display_enable_after_initial_frame(void)
+static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
 {
     bool initial_complete = render_scheduler_take_initial_complete(&s_renderer);
     bool initial_frame = s_initial_page_pending;
@@ -845,7 +876,7 @@ static bool ui_runtime_single_page(void)
  *   - present_page() atomically makes s_render_page visible, after which
  *     s_visible_page == s_render_page and the sibling page catches up via
  *     the next frame's band copies. */
-static bool begin_hidden_frame(void)
+static bool READING_ONLY_LEGACY begin_hidden_frame(void)
 {
     lt7680_status_t st;
     bool initial_frame = s_initial_page_pending;
@@ -931,6 +962,10 @@ static void proto_on_event(const k2000_event_t *evt)
             special = 0u;
         }
         ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
+#if K2000_READING_ONLY_BASELINE
+        s_reading_only_generation++;
+        s_reading_only_dirty = true;
+#endif
         if (special == 0u)
         {
             (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
@@ -2183,7 +2218,7 @@ static void rif_init(void)
     hal_uart_send_text("RIF external digits ready\r\n");
 }
 
-static bool ui_draw_half(uint16_t x, uint16_t y, const char *text,
+static bool READING_ONLY_LEGACY ui_draw_half(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
     return ui_draw_bitmap_slice(x, y, text, color, 2u);
@@ -2203,7 +2238,7 @@ static bool ui_draw_half(uint16_t x, uint16_t y, const char *text,
  * row n/4 and action n%4 (fill name, fill value, name text, value text).
  * Returns false while a resumable bitmap draw still has work pending, so the
  * caller retries the same step. */
-static bool reading_draw_info(uint8_t n)
+static bool READING_ONLY_LEGACY reading_draw_info(uint8_t n)
 {
     static const char *const info_names[4] = {"Zin", "Range", "Rate",
                                               "Status"};
@@ -2303,7 +2338,7 @@ static void trend_set_drawn(uint16_t column, bool occupied,
     s_drawn_trend_y1[s_render_page][column] = y1;
 }
 
-static void trend_restore_grid(uint16_t x0, uint16_t x1,
+static void READING_ONLY_LEGACY trend_restore_grid(uint16_t x0, uint16_t x1,
                                uint16_t y0, uint16_t y1)
 {
     uint8_t i;
@@ -2323,7 +2358,7 @@ static void trend_restore_grid(uint16_t x0, uint16_t x1,
     }
 }
 
-static uint16_t trend_y_label_y(uint8_t index)
+static uint16_t READING_ONLY_LEGACY trend_y_label_y(uint8_t index)
 {
     uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                  index * MAIN_DISPLAY_PLOT_H / 3u);
@@ -2335,7 +2370,7 @@ static uint16_t trend_y_label_y(uint8_t index)
     return label_y < MAIN_DISPLAY_TREND_Y ? MAIN_DISPLAY_TREND_Y : label_y;
 }
 
-static void trend_draw_column(uint16_t column, bool erase_previous)
+static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_previous)
 {
     trend_column_t *c = &s_trend_columns[column];
     uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
@@ -2397,7 +2432,7 @@ static void trend_draw_column(uint16_t column, bool erase_previous)
     trend_set_drawn(column, occupied, y0, y1);
 }
 
-static void trend_draw_background(void)
+static void READING_ONLY_LEGACY trend_draw_background(void)
 {
     (void)ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CHART_PANEL_H,
@@ -2410,7 +2445,7 @@ static void trend_draw_background(void)
                        MAIN_DISPLAY_COLOR_BAR_ALT);
 }
 
-static uint16_t trend_x_label_x(uint16_t center, const char *label)
+static uint16_t READING_ONLY_LEGACY trend_x_label_x(uint16_t center, const char *label)
 {
     size_t width = strlen(label) * FONT_TEXT_WIDTH;
     uint16_t x = center > width / 2u ? (uint16_t)(center - width / 2u)
@@ -2509,7 +2544,7 @@ static void reading_refresh_text_snapshot(void)
  * text snapshot is refreshed first so the preempted STATUS/READING phases
  * draw the newest accepted values, with the same content gate as the
  * idle-path snapshot (status TAGs ride every sample). */
-static void trend_wire_pending_regions(void)
+static void READING_ONLY_LEGACY trend_wire_pending_regions(void)
 {
     uint8_t due;
     bool status_due;
@@ -2566,7 +2601,7 @@ static void trend_wire_pending_regions(void)
  * interrupted AXES pass replays deterministically from item 0 (safe: no
  * column of that pass exists yet); COLUMNS carries progress in
  * s_render_column, which the region phases never touch. */
-static bool trend_yield_to_regions(void)
+static bool READING_ONLY_LEGACY trend_yield_to_regions(void)
 {
     if (!render_scheduler_yield_trend(&s_renderer))
     {
@@ -2576,8 +2611,115 @@ static bool trend_yield_to_regions(void)
     return true;
 }
 
+#if K2000_READING_ONLY_BASELINE
+static void reading_only_render(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!s_display_ready)
+        return;
+    if (s_reading_only_stage == READING_ONLY_IDLE)
+    {
+        if (!s_reading_only_dirty ||
+            (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
+            return;
+
+        s_render_page = 0u;
+        s_renderer.phase = RENDER_PHASE_UPDATE_READING;
+        s_frame_rendering = true;
+        s_render_full_page = false;
+#if RIF_BTE_RENDERER
+        s_reading_diff = false;
+        s_cell_count = 0u;
+        s_prev_reading_color = 0xFFFFu;
+        s_prev_reading_nodata = 0xFFu;
+        s_prev_suffix[0] = '\0';
+        s_prev_suffix_x = 0u;
+        s_prev_suffix_color = 0u;
+#endif
+        main_display_format(&s_ui, &s_frame);
+        s_reading_only_frame_generation = s_reading_only_generation;
+        s_perf_frame_start_tick = now;
+        s_display_due_tick = now;
+        s_reading_only_stage = READING_ONLY_CLEAR;
+        s_perf_reading_frames_window++;
+        return;
+    }
+
+    switch (s_reading_only_stage)
+    {
+    case READING_ONLY_CLEAR:
+        if (lt7680_gfx_select_canvas_page(s_render_page) != LT7680_OK ||
+            ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
+                         MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
+                LT7680_OK)
+        {
+            s_frame_rendering = false;
+            s_reading_only_stage = READING_ONLY_IDLE;
+            return;
+        }
+        s_reading_only_stage = READING_ONLY_VALUE;
+        return;
+    case READING_ONLY_VALUE:
+        if (!s_frame.no_data &&
+            !ui_draw_digits(s_frame.start_x, s_frame.reading_y, s_frame.value,
+                            s_frame.value_color))
+            return;
+        s_reading_only_stage = READING_ONLY_UNIT;
+        return;
+    case READING_ONLY_UNIT:
+        if (!s_frame.no_data &&
+            !ui_draw_digits(s_frame.end_x, s_frame.reading_y, s_frame.unit,
+                            s_frame.value_color))
+            return;
+        s_reading_only_stage = READING_ONLY_SUFFIX;
+        return;
+    case READING_ONLY_SUFFIX:
+        if (!s_frame.no_data && s_frame.unit_suffix[0] != '\0' &&
+            /* The normal UI uses a half-height CPU bitmap for DC/AC. That
+             * path emits more than one hundred GE fills per frame and alone
+             * exceeds the 33 ms budget. The baseline draws the suffix with
+             * the cached RIF tiles too, trading compact typography for one
+             * bounded BTE transfer per character. */
+            !ui_draw_digits((uint16_t)(s_frame.end_x +
+                                        (uint16_t)s_frame.unit_len *
+                                            FONT_DIGIT_WIDTH),
+                            s_frame.reading_y, s_frame.unit_suffix,
+                            s_frame.value_color))
+            return;
+        s_reading_only_stage = READING_ONLY_PRESENT;
+        return;
+    case READING_ONLY_PRESENT:
+        if (lt7680_gfx_present_page(s_render_page) != LT7680_OK ||
+            lt7680_write_reg(0x12u, 0x48u) != LT7680_OK)
+        {
+            s_frame_rendering = false;
+            s_reading_only_stage = READING_ONLY_IDLE;
+            return;
+        }
+        s_display_enabled = true;
+        s_reading_only_dirty =
+            s_reading_only_generation != s_reading_only_frame_generation;
+        s_frame_rendering = false;
+        s_renderer.phase = RENDER_PHASE_IDLE;
+        s_perf_display_commits_window++;
+        perf_record_frame();
+        s_reading_only_stage = READING_ONLY_IDLE;
+        return;
+    default:
+        s_frame_rendering = false;
+        s_reading_only_stage = READING_ONLY_IDLE;
+        return;
+    }
+}
+#endif
+
 static void reading_scene_render(void)
 {
+#if K2000_READING_ONLY_BASELINE
+    reading_only_render();
+    return;
+#else
     uint32_t now = HAL_GetTick();
     bool initial_phase;
     uint8_t due_regions;
@@ -3268,6 +3410,7 @@ static void reading_scene_render(void)
         break;
     }
     display_enable_after_initial_frame();
+#endif
 }
 
 static const scene_t s_reading_scene = {
@@ -3358,7 +3501,7 @@ int main(void)
         k2000_proto_init(&proto_cb);
         panel_transform_init(MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_UI_HEIGHT,
                              panel.width, panel.height);
-        hal_uart_send_text("\r\nK2000 TFT build14 hidden-page v1");
+        hal_uart_send_text("\r\nK2000 TFT reading-only 500Hz baseline");
 #if K2000_DEMO_FEED
         hal_uart_send_text(" DEMO-FEED v16\r\n");
 #else
@@ -3460,11 +3603,24 @@ int main(void)
                                                        &s_frame);
                             (void)trend_buffer_project(&s_trend, HAL_GetTick(),
                                                        s_trend_columns, TREND_MAX_COLUMNS);
-                            s_frame_rendering = true;
-                            s_frame_has_trend_update = true;
-                            s_ui_dirty_regions = 0u;
-                            s_initial_page_pending = true;
-                            hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
+                             s_frame_rendering = true;
+                             s_frame_has_trend_update = true;
+                             s_ui_dirty_regions = 0u;
+                             s_initial_page_pending = true;
+#if K2000_READING_ONLY_BASELINE
+                             /* The baseline has no cooperative first-frame
+                              * pipeline. Start the demo after exposing the
+                              * known-black page; its first sample owns the
+                              * first visible reading frame. */
+                             s_initial_page_pending = false;
+                             s_frame_rendering = false;
+                             s_frame_has_trend_update = false;
+                             s_renderer.phase = RENDER_PHASE_IDLE;
+                             s_display_enabled = true;
+                             s_demo_last_tick = HAL_GetTick();
+                             s_demo_status_tick = HAL_GetTick();
+#endif
+                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
                             /* Arm DWT cycle counter + TRCENA so the
