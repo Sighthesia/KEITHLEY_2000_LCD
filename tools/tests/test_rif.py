@@ -87,14 +87,14 @@ class TestCParse(unittest.TestCase):
         font = load_font(DIGIT_SRC_DIR, "font_digits")
         self.assertIsNotNone(font)
         dim, chars, glyphs, symbols = font
-        self.assertEqual(dim[0], 56)
-        self.assertEqual(dim[1], 104)
-        self.assertEqual(dim[2], 7)
+        self.assertEqual(dim[0], 68)
+        self.assertEqual(dim[1], 128)
+        self.assertEqual(dim[2], 9)
         self.assertEqual(len(chars), 35)
         self.assertEqual(len(glyphs), 35)
         self.assertEqual(len(symbols), 3)
-        self.assertTrue(all(len(g) == 728 for g in glyphs))
-        self.assertTrue(all(len(s[1]) == 728 for s in symbols))
+        self.assertTrue(all(len(g) == 1152 for g in glyphs))
+        self.assertTrue(all(len(s[1]) == 1152 for s in symbols))
         self.assertEqual(chars, "0123456789.+-Ee%mukKMWVOhDAC?RFLHzs")
         self.assertEqual([s[0] for s in symbols], ["MICRO", "DEGREE", "OHM"])
 
@@ -125,9 +125,9 @@ class TestRender(unittest.TestCase):
         # Use the first digit glyph as a real sample.
         _dim, _chars, glyphs, _symbols = load_font(DIGIT_SRC_DIR, "font_digits")
         fg, bg = 0x07E6, 0x0000
-        tile = render_tile(glyphs[0], 56, 104, 7, fg, bg)
-        self.assertEqual(len(tile), 56 * 104 * 2)
-        back = tile_to_1bpp(tile, 56, 104, 112, fg, bg)
+        tile = render_tile(glyphs[0], 68, 128, 9, fg, bg)
+        self.assertEqual(len(tile), 68 * 128 * 2)
+        back = tile_to_1bpp(tile, 68, 128, 136, fg, bg)
         self.assertEqual(back, glyphs[0])
 
     def test_unexpected_pixel_rejected(self):
@@ -190,7 +190,7 @@ class TestImage(unittest.TestCase):
         for ent in self.entries:
             by_kind.setdefault(ent["kind"], []).append(ent)
         for ent in by_kind[KIND_DIGIT_CHAR]:
-            self.assertEqual(ent["size"], 56 * 104 * 2)
+            self.assertEqual(ent["size"], 68 * 128 * 2)
         for ent in by_kind[KIND_HALF_CHAR]:
             self.assertEqual(ent["size"], 32 * 56 * 2)
         for ent in by_kind[KIND_TEXT_CHAR] + by_kind[KIND_TEXT_SYM]:

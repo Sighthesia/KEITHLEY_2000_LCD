@@ -1432,11 +1432,6 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
         s_rif_draw_job.tile.height == FONT_DIGIT_WIDTH &&
         s_rif_draw_job.tile.stride == FONT_DIGIT_HEIGHT * 2u)
-    if (color == MAIN_DISPLAY_COLOR_GREEN &&
-        s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
-        s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
-        s_rif_draw_job.tile.height == FONT_DIGIT_WIDTH &&
-        s_rif_draw_job.tile.stride == FONT_DIGIT_HEIGHT * 2u)
     {
         uint16_t fb_x;
         uint16_t fb_y;

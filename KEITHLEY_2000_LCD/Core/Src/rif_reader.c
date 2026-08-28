@@ -92,6 +92,10 @@ rif_status_t rif_reader_find_glyph(const rif_image_t *image,
           ((entry->width == entry->height * 2u &&
             entry->stride == entry->width * 2u) ||
            (entry->height == entry->width * 2u) ||
+           (entry->kind == RIF_KIND_DIGIT_CHAR && entry->width == 128u &&
+            entry->height == 68u && entry->stride == 256u) ||
+           (entry->kind == RIF_KIND_DIGIT_SYMBOL && entry->width == 128u &&
+            entry->height == 68u && entry->stride == 256u) ||
            ((entry->kind == RIF_KIND_TEXT_CHAR ||
              entry->kind == RIF_KIND_TEXT_SYMBOL) &&
             entry->width == 24u && entry->height == 12u &&

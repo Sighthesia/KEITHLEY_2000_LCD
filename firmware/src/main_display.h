@@ -13,7 +13,7 @@
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
 /* The deleted function/parameters/graph-header rows free the full y24..192
- * band for the reading. The value and unit are drawn at digit size
+ * band for the reading. The value and unit use the 68x128 large-digit cell
  * left-aligned; the half-height DC/AC suffix shares the digit font's
  * typographic baseline, so its ink bottom lands exactly on the reading's ink
  * bottom (cell-bottom alignment would drop it by the two fonts' different
@@ -28,7 +28,7 @@
 
 #define MAIN_DISPLAY_READING_X 12u
 #define MAIN_DISPLAY_INFO_RIGHT 940u
-#define MAIN_DISPLAY_INFO_X 720u
+#define MAIN_DISPLAY_INFO_X 760u
 #define MAIN_DISPLAY_INFO_W \
     (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_X)
 #define MAIN_DISPLAY_INFO_NAME_W 72u
@@ -36,10 +36,9 @@
     (MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_INFO_NAME_W)
 #define MAIN_DISPLAY_INFO_ROW_H 32u
 #define MAIN_DISPLAY_READING_VALUE_W \
-    (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_READING_X)
+    (MAIN_DISPLAY_INFO_X - MAIN_DISPLAY_READING_X - FONT_DIGIT_WIDTH)
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_READING_VALUE_W / FONT_DIGIT_WIDTH)
-/* Bottom-align the digits with the info panel's bottom edge so the
- * reading and the 4-row cell block share one visual baseline. */
+/* Bottom-align the 128-pixel tiles to the reading-band bottom. */
 #define MAIN_DISPLAY_READING_VALUE_Y \
     (MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_READING_H - FONT_DIGIT_HEIGHT)
 #define MAIN_DISPLAY_DCAC_Y \

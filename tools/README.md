@@ -50,16 +50,18 @@ Base address default `0x000000`; absolute flash address = base + file offset.
 | Flash addr (base 0x000000) | File offset | Size | Content |
 | --- | --- | --- | --- |
 | `0x000000` | `0x000000` | `0x40` | Header: magic `K2RF`, version 1.0, image size, CRC32 fields, directory pointer, intended flash base, fill byte |
-| `0x000040` | `0x000040` | `0x1080` | Directory: 138 entries x 48 B (38 digit glyphs, 3 half glyphs, 99 text glyphs, diagnostic, 1 reserved) |
+| `0x000040` | `0x000040` | `0x1A80` | Directory: 142 entries x 48 B (38 digit glyphs, 3 half glyphs, 99 text glyphs, diagnostic, 1 reserved) |
 | `0x000880` | `0x000880` | `0x780` | Padding (fill byte) |
-| `0x001000` | `0x001000` | `0x6F000` | `font_digits` chars `0123456789.+-Ee%mukKMWVOhDAC?RFLHzs`: 35 tiles x 11,648 B (56x104 RGB565) |
+| `0x001000` | `0x001000` | `0xA8000` | `font_digits` chars `0123456789.+-Ee%mukKMWVOhDAC?RFLHzs`: 35 tiles x 16,384 B (68x128 RGB565) |
 | `0x08D000` | `0x08D000` | `0xC000` | `font_digits` symbols MICRO / DEGREE / OHM: 3 tiles x 16 KiB |
 | `0x074000` | `0x074000` | `0x3000` | `font_half` chars `DCA`: 3 tiles x 3,584 B (32x56 RGB565) |
 | `0x09C000` | `0x09C000` | `0x2000` | Diagnostic 64x64 RGB565 color tile (8 vertical bands) |
-| `0x077000` | `0x077000` | `0x63000` | `font_text`: 95 ASCII + 4 symbols, 12x24 RGB565 tiles pre-transposed for framebuffer DMA |
-| `0x0DA000` | `0x0DA000` | `0x2000` | Diagnostic 64x64 RGB565 color tile |
-| `0x0DC000` | `0x0DC000` | `0x10000` | Reserved: `ui_assets` |
-| `0x0EC000` | - | - | End of image (966,656 bytes = 0xEC000) |
+| `0x0A9000` | `0x0A9000` | `0x3000` | `font_digits` symbols MICRO / DEGREE / OHM: 3 tiles x 16,384 B |
+| `0x0C0000` | `0x0C0000` | `0x3000` | `font_half` chars `DCA`: 3 tiles x 3,584 B (32x56 RGB565) |
+| `0x0C3000` | `0x0C3000` | `0x63000` | `font_text`: 95 ASCII + 4 symbols, 12x24 RGB565 tiles pre-transposed for framebuffer DMA |
+| `0x126000` | `0x126000` | `0x2000` | Diagnostic 64x64 RGB565 color tile |
+| `0x128000` | `0x128000` | `0x10000` | Reserved: `ui_assets` |
+| `0x138000` | - | - | End of image (1,277,952 bytes = 0x138000) |
 
 Sectors written: `0x000000..0x0BDFFF` (190 x 4 KiB sectors at the default
 base). Everything outside this range is untouched.
