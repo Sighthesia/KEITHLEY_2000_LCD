@@ -9,10 +9,10 @@ STM32 firmware cannot write it directly. This toolchain only generates and
 validates the *content*; programming the device is a separate step (LT7680
 serial-flash programming interface or an external chip programmer).
 
-First payload: the generated big-digit font (`font_digits`) and half-height
-suffix font (`font_half`) pre-rendered as **RGB565 glyph tiles**, plus a
-diagnostic color tile and reserved regions for a future text font and UI
-assets.
+Payloads include the generated big-digit font (`font_digits`), half-height
+suffix font (`font_half`), and complete 12x24 small text font (`font_text`),
+all pre-rendered as **RGB565 glyph tiles**, plus a diagnostic color tile and a
+reserved region for future UI assets.
 
 ## Design rules
 
@@ -50,15 +50,16 @@ Base address default `0x000000`; absolute flash address = base + file offset.
 | Flash addr (base 0x000000) | File offset | Size | Content |
 | --- | --- | --- | --- |
 | `0x000000` | `0x000000` | `0x40` | Header: magic `K2RF`, version 1.0, image size, CRC32 fields, directory pointer, intended flash base, fill byte |
-| `0x000040` | `0x000040` | `0x840` | Directory: 44 entries x 48 B (38 digit glyphs, 3 half glyphs, diagnostic, 2 reserved) |
+| `0x000040` | `0x000040` | `0x1080` | Directory: 138 entries x 48 B (38 digit glyphs, 3 half glyphs, 99 text glyphs, diagnostic, 1 reserved) |
 | `0x000880` | `0x000880` | `0x780` | Padding (fill byte) |
-| `0x001000` | `0x001000` | `0x8C000` | `font_digits` chars `0123456789.+-Ee%mukKMWVOhDAC?RFLHzs`: 35 tiles x 16 KiB (64x128 RGB565) |
+| `0x001000` | `0x001000` | `0x6F000` | `font_digits` chars `0123456789.+-Ee%mukKMWVOhDAC?RFLHzs`: 35 tiles x 11,648 B (56x104 RGB565) |
 | `0x08D000` | `0x08D000` | `0xC000` | `font_digits` symbols MICRO / DEGREE / OHM: 3 tiles x 16 KiB |
-| `0x099000` | `0x099000` | `0x3000` | `font_half` chars `DCA`: 3 tiles x 4 KiB (32x64 RGB565) |
+| `0x074000` | `0x074000` | `0x3000` | `font_half` chars `DCA`: 3 tiles x 3,584 B (32x56 RGB565) |
 | `0x09C000` | `0x09C000` | `0x2000` | Diagnostic 64x64 RGB565 color tile (8 vertical bands) |
-| `0x09E000` | `0x09E000` | `0x10000` | Reserved: `font_text` (future 12x24 text font) |
-| `0x0AE000` | `0x0AE000` | `0x10000` | Reserved: `ui_assets` (future UI assets) |
-| `0x0BE000` | - | - | End of image (778,240 bytes = 0xBE000) |
+| `0x077000` | `0x077000` | `0x63000` | `font_text`: 95 ASCII + 4 symbols, 12x24 RGB565 tiles pre-transposed for framebuffer DMA |
+| `0x0DA000` | `0x0DA000` | `0x2000` | Diagnostic 64x64 RGB565 color tile |
+| `0x0DC000` | `0x0DC000` | `0x10000` | Reserved: `ui_assets` |
+| `0x0EC000` | - | - | End of image (966,656 bytes = 0xEC000) |
 
 Sectors written: `0x000000..0x0BDFFF` (190 x 4 KiB sectors at the default
 base). Everything outside this range is untouched.

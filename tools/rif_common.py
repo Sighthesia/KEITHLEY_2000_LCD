@@ -52,6 +52,8 @@ FLASH_SIZE = 8 * 1024 * 1024  # W25Q64JV capacity (64 Mbit)
 KIND_DIGIT_CHAR = b"DGTC"    # font_digits ASCII character glyph
 KIND_DIGIT_SYM = b"DGTS"     # font_digits unit symbol glyph (MICRO/DEGREE/OHM)
 KIND_HALF_CHAR = b"HLFC"     # font_half ASCII character glyph (D/C/A)
+KIND_TEXT_CHAR = b"TXTC"     # font_text ASCII character glyph
+KIND_TEXT_SYM = b"TXTS"      # font_text DMM symbol glyph
 KIND_DIAG = b"DIAG"          # diagnostic RGB565 color tile
 KIND_RESERVED = b"RSVD"      # reserved region (filled with the fill byte)
 
@@ -88,10 +90,12 @@ EXPECTED_COUNTS = {
     KIND_DIGIT_CHAR: (1, 35),
     KIND_DIGIT_SYM: (0, 3),
     KIND_HALF_CHAR: (0, 3),
+    KIND_TEXT_CHAR: (0, 95),
+    KIND_TEXT_SYM: (0, 4),
     KIND_DIAG: (1, 1),
-    KIND_RESERVED: (2, 2),
+    KIND_RESERVED: (1, 1),
 }
-EXPECTED_RSVD_NAMES = ["font_text", "ui_assets"]
+EXPECTED_RSVD_NAMES = ["ui_assets"]
 
 
 def crc32(data):
@@ -138,6 +142,8 @@ def read_header_dim(prefix, header_path):
     def macro(name):
         m = re.search(r"#define %s_%s (\d+)u" % (prefix, name), src)
         if not m:
+            if name == "BASELINE":
+                return 0
             raise ValueError("missing %s_%s in %s" % (prefix, name, header_path))
         return int(m.group(1))
 
@@ -159,7 +165,15 @@ def parse_font_c(path, var):
     if not arrays:
         raise ValueError("no bitmap array found in %s" % path)
     chars_m = re.search(r's_%s_chars\[\] = "([^"]*)"' % var, src)
-    chars = chars_m.group(1) if chars_m else ""
+    if chars_m:
+        chars = chars_m.group(1)
+    elif name_from_var := var:
+        if var == "text":
+            chars = "".join(chr(i) for i in range(32, 127))
+        elif var == "half":
+            chars = "DCA"
+        else:
+            chars = ""
 
     char_glyphs = [bytes(g) for g in _glyph_bytes(arrays[0])]
     if len(chars) != len(char_glyphs):
@@ -263,6 +277,28 @@ def tile_to_1bpp(payload, width, height, stride, fg565, bg565):
         if width & 7:
             out.append(acc)
     return bytes(out)
+
+
+def untranspose_tile(payload, width, height):
+    """Convert a framebuffer-oriented tile back to UI row-major order."""
+    out = bytearray(len(payload))
+    for uy in range(width):
+        for ux in range(height):
+            src = (ux * width + uy) * 2
+            dst = (uy * height + ux) * 2
+            out[dst:dst + 2] = payload[src:src + 2]
+    return bytes(out)
+
+
+def verify_glyph_payload(payload, ent, dim, source):
+    """Validate a packed tile against its source bitmap, including transpose."""
+    width, height, _bpr = dim[:3]
+    if ent["width"] == height and ent["height"] == width:
+        payload = untranspose_tile(payload, ent["width"], ent["height"])
+        stride = width * 2
+    else:
+        stride = ent["stride"]
+    return tile_to_1bpp(payload, width, height, stride, ent["fg"], ent["bg"]) == source
 
 
 def make_diag_tile(fg565, bg565):
@@ -479,7 +515,8 @@ def verify_image(data, expect=None):
     for i, ent in enumerate(entries):
         counts[ent["kind"]] = counts.get(ent["kind"], 0) + 1
         if ent["kind"] not in (KIND_DIGIT_CHAR, KIND_DIGIT_SYM,
-                               KIND_HALF_CHAR, KIND_DIAG, KIND_RESERVED):
+                               KIND_HALF_CHAR, KIND_TEXT_CHAR,
+                               KIND_TEXT_SYM, KIND_DIAG, KIND_RESERVED):
             fail("entry %d: unknown kind %r" % (i, ent["kind"]))
         if ent["offset"] % ALIGN != 0:
             fail("entry %d (%s %s): offset 0x%08X not 4 KiB aligned"
@@ -572,9 +609,7 @@ def _verify_expectations(data, header, entries, expect):
             payload = data[ent["offset"]:ent["offset"] + ent["size"]]
             src = glyphs[ent["id"]]
             try:
-                back = tile_to_1bpp(payload, dim[0], dim[1], ent["stride"],
-                                    ent["fg"], ent["bg"])
-                if back != src:
+                if not verify_glyph_payload(payload, ent, dim, src):
                     problems.append("digit char %d round-trip mismatch"
                                     % ent["id"])
             except ValueError as exc:
@@ -594,9 +629,7 @@ def _verify_expectations(data, header, entries, expect):
             payload = data[ent["offset"]:ent["offset"] + ent["size"]]
             src = symbols[ent["id"]][1]
             try:
-                back = tile_to_1bpp(payload, dim[0], dim[1], ent["stride"],
-                                    ent["fg"], ent["bg"])
-                if back != src:
+                if not verify_glyph_payload(payload, ent, dim, src):
                     problems.append("digit symbol %d round-trip mismatch"
                                     % ent["id"])
             except ValueError as exc:
@@ -622,13 +655,40 @@ def _verify_expectations(data, header, entries, expect):
             payload = data[ent["offset"]:ent["offset"] + ent["size"]]
             src = glyphs[ent["id"]]
             try:
-                back = tile_to_1bpp(payload, dim[0], dim[1], ent["stride"],
-                                    ent["fg"], ent["bg"])
-                if back != src:
+                if not verify_glyph_payload(payload, ent, dim, src):
                     problems.append("half char %d round-trip mismatch"
                                     % ent["id"])
             except ValueError as exc:
                 problems.append("half char %d: %s" % (ent["id"], exc))
+
+    if expect.get("text"):
+        dim, chars, glyphs, symbols = expect["text"]
+        for kind, source, label in ((KIND_TEXT_CHAR, chars, "text char"),
+                                    (KIND_TEXT_SYM, symbols, "text symbol")):
+            group = by_kind.get(kind, [])
+            if len(group) != len(source):
+                problems.append("%s count: image %d != source %d" %
+                                (label, len(group), len(source)))
+            for ent in group:
+                if ent["id"] >= len(source):
+                    problems.append("%s id %d out of range" %
+                                    (label, ent["id"]))
+                    continue
+                expected_code = (ord(source[ent["id"]]) if kind == KIND_TEXT_CHAR
+                                 else ent["id"])
+                if ent["code"] != expected_code:
+                    problems.append("%s %d code mismatch" % (label, ent["id"]))
+                if ent["size"] != dim[0] * dim[1] * 2:
+                    problems.append("%s %d size mismatch" % (label, ent["id"]))
+                payload = data[ent["offset"]:ent["offset"] + ent["size"]]
+                src = glyphs[ent["id"]] if kind == KIND_TEXT_CHAR \
+                    else source[ent["id"]][1]
+                try:
+                    if not verify_glyph_payload(payload, ent, dim, src):
+                        problems.append("%s %d round-trip mismatch" %
+                                        (label, ent["id"]))
+                except ValueError as exc:
+                    problems.append("%s %d: %s" % (label, ent["id"], exc))
 
     if expect.get("diag"):
         dg_entries = by_kind.get(KIND_DIAG, [])
@@ -664,5 +724,8 @@ def collect_expectations(src_dir, digit_src_dir=None):
     half = load_font(src_dir, "font_half")
     if half:
         expect["half"] = half
+    text = load_font(src_dir, "font_text")
+    if text:
+        expect["text"] = text
     expect["diag"] = True
     return expect or None

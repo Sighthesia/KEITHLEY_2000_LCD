@@ -24,7 +24,8 @@ sys.path.insert(0, TOOLS_DIR)
 import rif_common
 from rif_common import (ALIGN, DEFAULT_FILL, DIAG_BANDS, DIAG_HEIGHT,
                         DIAG_WIDTH, ENTRY_SIZE, HEADER_SIZE, KIND_DIAG,
-                        KIND_DIGIT_CHAR, KIND_DIGIT_SYM, KIND_HALF_CHAR,
+                         KIND_DIGIT_CHAR, KIND_DIGIT_SYM, KIND_HALF_CHAR,
+                         KIND_TEXT_CHAR, KIND_TEXT_SYM,
                         KIND_RESERVED, MAGIC, VERSION_MAJOR, VERSION_MINOR,
                         build_entry, build_header, crc32, load_font,
                         make_diag_tile, parse_directory, parse_header,
@@ -48,6 +49,7 @@ def build_sample_image(**kw):
     mod = _load_packer()
     digit = load_font(DIGIT_SRC_DIR, "font_digits")
     half = load_font(SRC_DIR, "font_half")
+    text = load_font(SRC_DIR, "font_text")
     fg = kw.pop("fg", rgb888_to_rgb565(0x00, 0xFF, 0x33))
     bg = kw.pop("bg", 0)
     fill = kw.pop("fill", DEFAULT_FILL)
@@ -55,10 +57,11 @@ def build_sample_image(**kw):
     if kw:
         raise TypeError("unexpected kwarg %r" % kw)
 
-    dir_size = mod.count_entries(digit, half) * ENTRY_SIZE
+    dir_size = mod.count_entries(digit, half, text) * ENTRY_SIZE
     payload_start = rif_common.align_up(HEADER_SIZE + dir_size, ALIGN)
     entries, chunks, payload_bytes = mod.build_payloads(
-        digit, half, fg, bg, fill, payload_start)
+        digit, half, fg, bg, fill, payload_start, text=text,
+        transpose=True)
     image_size = payload_start + payload_bytes
     image = bytearray(image_size)
     image[0:HEADER_SIZE] = bytes([fill]) * HEADER_SIZE
@@ -84,14 +87,14 @@ class TestCParse(unittest.TestCase):
         font = load_font(DIGIT_SRC_DIR, "font_digits")
         self.assertIsNotNone(font)
         dim, chars, glyphs, symbols = font
-        self.assertEqual(dim[0], 64)          # width
-        self.assertEqual(dim[1], 128)         # height
-        self.assertEqual(dim[2], 8)           # bytes per row
+        self.assertEqual(dim[0], 56)
+        self.assertEqual(dim[1], 104)
+        self.assertEqual(dim[2], 7)
         self.assertEqual(len(chars), 35)
         self.assertEqual(len(glyphs), 35)
         self.assertEqual(len(symbols), 3)
-        self.assertTrue(all(len(g) == 1024 for g in glyphs))
-        self.assertTrue(all(len(s[1]) == 1024 for s in symbols))
+        self.assertTrue(all(len(g) == 728 for g in glyphs))
+        self.assertTrue(all(len(s[1]) == 728 for s in symbols))
         self.assertEqual(chars, "0123456789.+-Ee%mukKMWVOhDAC?RFLHzs")
         self.assertEqual([s[0] for s in symbols], ["MICRO", "DEGREE", "OHM"])
 
@@ -99,10 +102,10 @@ class TestCParse(unittest.TestCase):
         font = load_font(SRC_DIR, "font_half")
         self.assertIsNotNone(font)
         dim, chars, glyphs, _symbols = font
-        self.assertEqual((dim[0], dim[1], dim[2]), (32, 64, 4))
+        self.assertEqual((dim[0], dim[1], dim[2]), (32, 56, 4))
         self.assertEqual(chars, "DCA")
         self.assertEqual(len(glyphs), 3)
-        self.assertTrue(all(len(g) == 256 for g in glyphs))
+        self.assertTrue(all(len(g) == 224 for g in glyphs))
 
     def test_missing_font_returns_none(self):
         self.assertIsNone(load_font(SRC_DIR, "font_nope"))
@@ -122,9 +125,9 @@ class TestRender(unittest.TestCase):
         # Use the first digit glyph as a real sample.
         _dim, _chars, glyphs, _symbols = load_font(DIGIT_SRC_DIR, "font_digits")
         fg, bg = 0x07E6, 0x0000
-        tile = render_tile(glyphs[0], 64, 128, 8, fg, bg)
-        self.assertEqual(len(tile), 64 * 128 * 2)
-        back = tile_to_1bpp(tile, 64, 128, 128, fg, bg)
+        tile = render_tile(glyphs[0], 56, 104, 7, fg, bg)
+        self.assertEqual(len(tile), 56 * 104 * 2)
+        back = tile_to_1bpp(tile, 56, 104, 112, fg, bg)
         self.assertEqual(back, glyphs[0])
 
     def test_unexpected_pixel_rejected(self):
@@ -177,17 +180,21 @@ class TestImage(unittest.TestCase):
         self.assertEqual(counts[KIND_DIGIT_CHAR], 35)
         self.assertEqual(counts[KIND_DIGIT_SYM], 3)
         self.assertEqual(counts[KIND_HALF_CHAR], 3)
+        self.assertEqual(counts[KIND_TEXT_CHAR], 95)
+        self.assertEqual(counts[KIND_TEXT_SYM], 4)
         self.assertEqual(counts[KIND_DIAG], 1)
-        self.assertEqual(counts[KIND_RESERVED], 2)
+        self.assertEqual(counts[KIND_RESERVED], 1)
 
     def test_expected_payload_sizes(self):
         by_kind = {}
         for ent in self.entries:
             by_kind.setdefault(ent["kind"], []).append(ent)
         for ent in by_kind[KIND_DIGIT_CHAR]:
-            self.assertEqual(ent["size"], 64 * 128 * 2)
+            self.assertEqual(ent["size"], 56 * 104 * 2)
         for ent in by_kind[KIND_HALF_CHAR]:
-            self.assertEqual(ent["size"], 32 * 64 * 2)
+            self.assertEqual(ent["size"], 32 * 56 * 2)
+        for ent in by_kind[KIND_TEXT_CHAR] + by_kind[KIND_TEXT_SYM]:
+            self.assertEqual(ent["size"], 12 * 24 * 2)
         for ent in by_kind[KIND_DIAG]:
             self.assertEqual(ent["size"], DIAG_WIDTH * DIAG_HEIGHT * 2)
 
@@ -199,8 +206,7 @@ class TestImage(unittest.TestCase):
 
     def test_reserved_regions(self):
         rsvd = [e for e in self.entries if e["kind"] == KIND_RESERVED]
-        self.assertEqual([e["name"] for e in rsvd],
-                         ["font_text", "ui_assets"])
+        self.assertEqual([e["name"] for e in rsvd], ["ui_assets"])
         for ent in rsvd:
             self.assertEqual(ent["size"] % ALIGN, 0)
             payload = self.image[ent["offset"]:ent["offset"] + ent["size"]]

@@ -45,9 +45,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rif_common
 from rif_common import (ALIGN, DEFAULT_BG_RGB, DEFAULT_FG_RGB, DEFAULT_FILL,
                         DIAG_HEIGHT, DIAG_WIDTH, ENTRY_SIZE,
-                        FLAG_ORIGIN_TOP_LEFT, FLAG_PIXEL_FMT_RGB565_LE,
-                        FLASH_SIZE, HEADER_SIZE, KIND_DIAG, KIND_DIGIT_CHAR,
-                        KIND_DIGIT_SYM, KIND_HALF_CHAR, KIND_RESERVED,
+                         FLAG_ORIGIN_TOP_LEFT, FLAG_PIXEL_FMT_RGB565_LE,
+                         FLASH_SIZE, HEADER_SIZE, KIND_DIAG, KIND_DIGIT_CHAR,
+                         KIND_DIGIT_SYM, KIND_HALF_CHAR, KIND_TEXT_CHAR,
+                         KIND_TEXT_SYM, KIND_RESERVED,
                         VERSION_MAJOR, align_up, build_entry, build_header,
                         crc32, load_font, make_diag_tile, render_tile,
                         rgb888_to_rgb565, verify_image)
@@ -59,7 +60,6 @@ DEFAULT_DIGIT_SRC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 
 # Reserved regions: (name, byte size). Both are 4 KiB aligned.
 RSVD_REGIONS = [
-    ("font_text", 0x10000),   # future 12x24 text font, RGB565: ~56 KiB
     ("ui_assets", 0x10000),   # future UI icons / layout assets
 ]
 
@@ -85,15 +85,18 @@ def parse_byte(text):
     return v
 
 
-def count_entries(digit, half):
+def count_entries(digit, half, text=None):
     n = (len(digit[1]) + len(digit[3])) if digit else 0   # chars + symbols
     if half:
         n += len(half[1])
+    if text:
+        n += len(text[1]) + len(text[3])
     return n + 1 + len(RSVD_REGIONS)   # 1 diagnostic + reserved regions
 
 
 def build_payloads(digit, half, fg565, bg565, fill_byte,
-                   payload_start, transpose=False):
+                   payload_start, text=None,
+                   transpose=False):
     """Return (entries, chunks, total_payload_bytes). Chunk i starts at
     payload_start + cumulative 4 KiB-aligned offsets."""
     entries = []
@@ -155,6 +158,38 @@ def build_payloads(digit, half, fg565, bg565, fill_byte,
             add(KIND_HALF_CHAR, i, tile, width, height, ord(ch), fg565,
                 bg565, "half_chars")
 
+    if text is not None:
+        dim, chars, glyphs, symbols = text
+        width, height, bpr = dim[0], dim[1], dim[2]
+        for i, (ch, glyph) in enumerate(zip(chars, glyphs)):
+            tile = render_tile(glyph, width, height, bpr, fg565, bg565)
+            ew, eh = width, height
+            if transpose:
+                out = bytearray(len(tile))
+                for uy in range(height):
+                    for ux in range(width):
+                        src = (uy * width + ux) * 2
+                        dst = (ux * height + uy) * 2
+                        out[dst:dst + 2] = tile[src:src + 2]
+                tile = bytes(out)
+                ew, eh = height, width
+            add(KIND_TEXT_CHAR, i, tile, ew, eh, ord(ch), fg565, bg565,
+                "text_chars")
+        for i, (_name, glyph) in enumerate(symbols):
+            tile = render_tile(glyph, width, height, bpr, fg565, bg565)
+            ew, eh = width, height
+            if transpose:
+                out = bytearray(len(tile))
+                for uy in range(height):
+                    for ux in range(width):
+                        src = (uy * width + ux) * 2
+                        dst = (ux * height + uy) * 2
+                        out[dst:dst + 2] = tile[src:src + 2]
+                tile = bytes(out)
+                ew, eh = height, width
+            add(KIND_TEXT_SYM, i, tile, ew, eh, i, fg565, bg565,
+                "text_symbols")
+
     diag = make_diag_tile(fg565, bg565)
     add(KIND_DIAG, 0, diag, DIAG_WIDTH, DIAG_HEIGHT, 0, fg565, bg565,
         "diag_tile")
@@ -194,13 +229,14 @@ def main(argv=None):
     digit_src_dir = os.path.abspath(args.digit_src_dir)
     digit = load_font(digit_src_dir, "font_digits")
     half = load_font(src_dir, "font_half")
+    text = load_font(src_dir, "font_text")
 
     # Layout: header | directory | pad to 4 KiB | 4 KiB-aligned payload slots.
-    dir_size = count_entries(digit, half) * ENTRY_SIZE
+    dir_size = count_entries(digit, half, text) * ENTRY_SIZE
     payload_start = align_up(HEADER_SIZE + dir_size, ALIGN)
 
     entries, chunks, payload_bytes = build_payloads(
-        digit, half, args.fg, args.bg, args.fill, payload_start,
+        digit, half, args.fg, args.bg, args.fill, payload_start, text=text,
         transpose=args.transpose)
     image_size = payload_start + payload_bytes
     if args.base_offset + image_size > FLASH_SIZE:
@@ -262,6 +298,8 @@ def _print_map(path, image, entries, base, fg565, bg565):
     kind_names = {KIND_DIGIT_CHAR: "digit char",
                   KIND_DIGIT_SYM: "digit symbol",
                   KIND_HALF_CHAR: "half char",
+                  KIND_TEXT_CHAR: "text char",
+                  KIND_TEXT_SYM: "text symbol",
                   KIND_DIAG: "diagnostic",
                   KIND_RESERVED: "reserved"}
     print("")

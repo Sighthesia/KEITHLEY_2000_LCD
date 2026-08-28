@@ -49,7 +49,7 @@ def main(argv=None):
     parser.add_argument("image", help="path to the .img file (or flash dump)")
     parser.add_argument("--src-dir", default=None,
                         help="firmware/src with generated fonts; enables "
-                             "exact glyph-count, char-code and round-trip "
+                              "exact glyph-count, char-code and round-trip "
                               "checks (default: none)")
     parser.add_argument("--digit-src-dir", default=None,
                         help="archived font_digits source; used with --src-dir")
