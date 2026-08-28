@@ -86,11 +86,17 @@ rif_status_t rif_reader_find_glyph(const rif_image_t *image,
     if (entry->kind != kind || entry->code != code) {
         return RIF_ERR_FORMAT;
     }
-    /* Accept any tile rectangle: stride must match row-packed RGB565
-     * and size must equal the declared pixel area. */
+    /* Accept both orientations of the large-digit tile: UI-space
+     * WxH and its framebuffer transpose. Size must equal w*h*2. */
     if (!(entry->width != 0u && entry->height != 0u &&
-          entry->stride == entry->width * 2u &&
-          entry->size == (uint32_t)entry->width * entry->height * 2u) ||
+          ((entry->width == entry->height * 2u &&
+            entry->stride == entry->width * 2u) ||
+           (entry->height == entry->width * 2u) ||
+           ((entry->kind == RIF_KIND_TEXT_CHAR ||
+             entry->kind == RIF_KIND_TEXT_SYMBOL) &&
+            entry->width == 24u && entry->height == 12u &&
+            entry->stride == 48u))) ||
+        entry->size != (uint32_t)entry->width * entry->height * 2u ||
         entry->offset > image->image_size - entry->size) {
         return RIF_ERR_FORMAT;
     }
