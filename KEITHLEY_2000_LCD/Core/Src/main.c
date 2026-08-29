@@ -3333,7 +3333,21 @@ static void reading_only_render(void)
             s_frame.value_color;
         s_reading_only_trend_column = 0u;
         s_reading_only_trend_bg_failed = false;
-        s_reading_only_stage = READING_ONLY_TREND;
+        {
+            const char *trend_unit = trend_buffer_display_unit(&s_trend);
+            uint32_t now = HAL_GetTick();
+            bool trend_backgrounds_ready =
+                s_reading_only_page_trend_bg_valid[0] &&
+                s_reading_only_page_trend_bg_valid[1] &&
+                strcmp(s_reading_only_page_trend_unit[0], trend_unit) == 0 &&
+                strcmp(s_reading_only_page_trend_unit[1], trend_unit) == 0;
+
+            if (trend_backgrounds_ready && s_trend_scroll_ms != 0u &&
+                (uint32_t)(now - s_trend_scroll_ms) < 100u)
+                s_reading_only_stage = READING_ONLY_PRESENT;
+            else
+                s_reading_only_stage = READING_ONLY_TREND;
+        }
         return;
     }
     case READING_ONLY_TREND:
