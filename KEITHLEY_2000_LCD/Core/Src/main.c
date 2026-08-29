@@ -2422,7 +2422,7 @@ static void trend_set_drawn(uint16_t column, bool occupied,
     s_drawn_trend_y1[s_render_page][column] = y1;
 }
 
-static void READING_ONLY_LEGACY trend_restore_grid(uint16_t x0, uint16_t x1,
+static void trend_restore_grid(uint16_t x0, uint16_t x1,
                                uint16_t y0, uint16_t y1)
 {
     uint8_t i;
@@ -2442,7 +2442,7 @@ static void READING_ONLY_LEGACY trend_restore_grid(uint16_t x0, uint16_t x1,
     }
 }
 
-static uint16_t READING_ONLY_LEGACY trend_y_label_y(uint8_t index)
+static uint16_t trend_y_label_y(uint8_t index)
 {
     uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                  index * MAIN_DISPLAY_PLOT_H / 3u);
@@ -2516,7 +2516,7 @@ static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_pr
     trend_set_drawn(column, occupied, y0, y1);
 }
 
-static void READING_ONLY_LEGACY trend_draw_background(void)
+static void trend_draw_background(void)
 {
     (void)ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
                        MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CHART_PANEL_H,
@@ -2529,7 +2529,7 @@ static void READING_ONLY_LEGACY trend_draw_background(void)
                        MAIN_DISPLAY_COLOR_BAR_ALT);
 }
 
-static uint16_t READING_ONLY_LEGACY trend_x_label_x(uint16_t center, const char *label)
+static uint16_t trend_x_label_x(uint16_t center, const char *label)
 {
     size_t width = strlen(label) * FONT_TEXT_WIDTH;
     uint16_t x = center > width / 2u ? (uint16_t)(center - width / 2u)
@@ -2763,6 +2763,194 @@ static bool reading_only_render_info_panel(void)
     return true;
 }
 
+static bool reading_only_render_trend_background(void)
+{
+    static uint8_t idx;
+    static uint8_t last_page = 0xFFu;
+    static bool y_labels_only;
+    static char pending_unit[TREND_UNIT_ID_MAX];
+    const char *unit = trend_buffer_display_unit(&s_trend);
+
+    if (last_page != s_render_page)
+    {
+        idx = 0u;
+        y_labels_only = false;
+        pending_unit[0] = '\0';
+        last_page = s_render_page;
+    }
+    if (strcmp(pending_unit, unit) != 0)
+    {
+        idx = 0u;
+        y_labels_only = false;
+        strncpy(pending_unit, unit, TREND_UNIT_ID_MAX - 1u);
+        pending_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
+    }
+    /* These helpers remain part of the non-baseline renderer; keep their
+     * definitions live in the baseline build as well. */
+    (void)trend_draw_background;
+    (void)trend_restore_grid;
+    if (s_reading_only_page_trend_bg_valid[s_render_page] &&
+        strcmp(s_reading_only_page_trend_unit[s_render_page], unit) == 0)
+    {
+        if (memcmp(s_reading_only_page_y_labels[s_render_page],
+                   s_frame.y_labels, sizeof(s_frame.y_labels)) == 0)
+            return true;
+        y_labels_only = true;
+    }
+    else if (y_labels_only)
+    {
+        idx = 0u;
+        y_labels_only = false;
+    }
+
+    if (y_labels_only)
+    {
+        if (idx == 0u)
+        {
+            if (ui_fill_rect(0u, MAIN_DISPLAY_Y_AXIS_Y, MAIN_DISPLAY_Y_AXIS_W,
+                             MAIN_DISPLAY_Y_AXIS_H, MAIN_DISPLAY_COLOR_BAR) !=
+                LT7680_OK)
+            {
+                if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
+                return false;
+            }
+            idx = 1u;
+            return false;
+        }
+        if (idx < 5u)
+        {
+            uint8_t i = (uint8_t)(idx - 1u);
+            size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
+            uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                                   ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
+                                   : 0u;
+            if (s_frame.y_labels[i][0] != '\0' &&
+                !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
+                              MAIN_DISPLAY_COLOR_CYAN))
+            {
+                if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
+                return false;
+            }
+            idx++;
+            return false;
+        }
+        memcpy(s_reading_only_page_y_labels[s_render_page], s_frame.y_labels,
+               sizeof(s_reading_only_page_y_labels[0]));
+        idx = 0u;
+        y_labels_only = false;
+        return true;
+    }
+
+    if (idx == 0u)
+    {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CHART_PANEL_H,
+                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx = 1u;
+        return false;
+    }
+    if (idx == 1u)
+    {
+        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_BG_Y,
+                         MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_BG_H,
+                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx = 2u;
+        return false;
+    }
+    if (idx == 2u)
+    {
+        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_DIVIDER_Y,
+                         MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_DIVIDER_H,
+                         MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx = 3u;
+        return false;
+    }
+    if (idx < 7u)
+    {
+        uint8_t i = (uint8_t)(idx - 3u);
+        uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                i * MAIN_DISPLAY_PLOT_H / 3u);
+        if (ui_draw_line(MAIN_DISPLAY_PLOT_X, y,
+                         MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
+                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx++;
+        return false;
+    }
+    if (idx < 12u)
+    {
+        uint8_t i = (uint8_t)(idx - 7u);
+        uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                                i * MAIN_DISPLAY_PLOT_W / 4u);
+        if (ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x,
+                         MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
+                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx++;
+        return false;
+    }
+    if (idx < 16u)
+    {
+        uint8_t i = (uint8_t)(idx - 12u);
+        size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
+        uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                               ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
+                               : 0u;
+        if (s_frame.y_labels[i][0] != '\0' &&
+            !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
+                          MAIN_DISPLAY_COLOR_CYAN))
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx++;
+        return false;
+    }
+    if (idx < 21u)
+    {
+        uint8_t i = (uint8_t)(idx - 16u);
+        uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                                i * MAIN_DISPLAY_PLOT_W / 4u);
+        if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
+                          MAIN_DISPLAY_X_LABEL_Y, s_frame.x_labels[i],
+                          MAIN_DISPLAY_COLOR_CYAN))
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx++;
+        return false;
+    }
+    strncpy(s_reading_only_page_trend_unit[s_render_page], unit,
+            TREND_UNIT_ID_MAX - 1u);
+    s_reading_only_page_trend_unit[s_render_page][TREND_UNIT_ID_MAX - 1u] = '\0';
+    memcpy(s_reading_only_page_y_labels[s_render_page], s_frame.y_labels,
+           sizeof(s_reading_only_page_y_labels[0]));
+    memset(s_drawn_trend_occupied[s_render_page], 0,
+           sizeof(s_drawn_trend_occupied[0]));
+    s_reading_only_page_trend_bg_valid[s_render_page] = true;
+    idx = 0u;
+    return true;
+}
+
 static void reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -2993,18 +3181,20 @@ static void reading_only_render(void)
     case READING_ONLY_TREND:
     {
         uint32_t now = HAL_GetTick();
-        const char *unit;
 
-        (void)s_reading_only_page_y_labels;
         main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
         if (s_frame.trend_has_data)
             main_display_format_linear_trend_labels(&s_frame);
-        unit = trend_buffer_display_unit(&s_trend);
-        if (unit[0] == '\0' ||
-            strcmp(s_reading_only_page_trend_unit[s_render_page], unit) != 0)
+        if (!reading_only_render_trend_background())
         {
-            s_reading_only_page_trend_bg_valid[0] = false;
-            s_reading_only_page_trend_bg_valid[1] = false;
+            if (s_reading_only_io_error)
+            {
+                s_reading_only_page_trend_bg_valid[s_render_page] = false;
+                s_reading_only_trend_bg_failed = true;
+                s_reading_only_io_error = false;
+                s_reading_only_stage = READING_ONLY_PRESENT;
+            }
+            return;
         }
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
