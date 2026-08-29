@@ -334,6 +334,29 @@ static bool s_trend_axis_valid;
 static float s_trend_axis_min;
 static float s_trend_axis_max;
 static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
+static bool s_reading_only_page_trend_curve_valid[2];
+
+static void reading_only_invalidate_trend_pages(void)
+{
+    uint8_t page;
+
+    s_trend_scroll_ms = 0u;
+    s_reading_only_trend_column = 0u;
+    for (page = 0u; page < 2u; page++)
+    {
+        s_reading_only_page_trend_bg_valid[page] = false;
+        s_reading_only_page_trend_curve_valid[page] = false;
+        memset(s_reading_only_page_trend_unit[page], 0,
+               sizeof(s_reading_only_page_trend_unit[page]));
+        memset(s_reading_only_page_y_labels[page], 0,
+               sizeof(s_reading_only_page_y_labels[page]));
+        memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
+        memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
+        memset(s_drawn_trend_occupied[page], 0,
+               sizeof(s_drawn_trend_occupied[page]));
+        s_trend_grid_dirty[page] = false;
+    }
+}
 #endif
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
@@ -1009,6 +1032,9 @@ static void proto_on_event(const k2000_event_t *evt)
     uint8_t num_len;
     uint8_t unit_len;
     uint8_t special;
+#if K2000_READING_ONLY_BASELINE
+    char previous_trend_unit[TREND_UNIT_ID_MAX];
+#endif
 
     if (evt == 0)
     {
@@ -1049,7 +1075,19 @@ static void proto_on_event(const k2000_event_t *evt)
 #endif
         if (special == 0u)
         {
+#if K2000_READING_ONLY_BASELINE
+            strncpy(previous_trend_unit, trend_buffer_display_unit(&s_trend),
+                    sizeof(previous_trend_unit) - 1u);
+            previous_trend_unit[sizeof(previous_trend_unit) - 1u] = '\0';
+#endif
             (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
+#if K2000_READING_ONLY_BASELINE
+            if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
+            {
+                s_trend_axis_valid = false;
+                reading_only_invalidate_trend_pages();
+            }
+#endif
         }
         s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
@@ -2544,6 +2582,36 @@ static bool trend_draw_column(uint16_t column, bool erase_previous)
     return true;
 }
 
+static bool trend_join_column(uint16_t column)
+{
+    uint16_t x0;
+    uint16_t x1;
+    uint16_t y0;
+    uint16_t y1;
+
+    if (column == 0u || !trend_drawn_occupied((uint16_t)(column - 1u)) ||
+        !trend_drawn_occupied(column))
+        return true;
+    x0 = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                    (uint32_t)(column - 1u) * MAIN_DISPLAY_PLOT_W /
+                        TREND_MAX_COLUMNS);
+    x1 = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                    (uint32_t)column * MAIN_DISPLAY_PLOT_W /
+                        TREND_MAX_COLUMNS);
+    y0 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                    (s_drawn_trend_y0[s_render_page][column - 1u] +
+                     s_drawn_trend_y1[s_render_page][column - 1u]) /
+                        2u);
+    y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                    (s_drawn_trend_y0[s_render_page][column] +
+                     s_drawn_trend_y1[s_render_page][column]) /
+                        2u);
+    return ui_draw_line(x0, y0, x1, y1, MAIN_DISPLAY_COLOR_GREEN) ==
+           LT7680_OK;
+}
+
+static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1);
+
 static bool reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
 {
     uint16_t scroll;
@@ -2598,9 +2666,13 @@ static bool reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
                      MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
         return false;
 
-    memcpy(old_y0, s_drawn_trend_y0[s_render_page], sizeof(old_y0));
-    memcpy(old_y1, s_drawn_trend_y1[s_render_page], sizeof(old_y1));
-    memcpy(old_occupied, s_drawn_trend_occupied[s_render_page], sizeof(old_occupied));
+    /* The blit source is the visible page. Use its raster cache as the source
+     * of truth too; the hidden page may intentionally lag after a skipped
+     * trend update. Mixing the visible pixels with hidden-page bookkeeping
+     * leaves stale segments after the page flip. */
+    memcpy(old_y0, s_drawn_trend_y0[s_visible_page], sizeof(old_y0));
+    memcpy(old_y1, s_drawn_trend_y1[s_visible_page], sizeof(old_y1));
+    memcpy(old_occupied, s_drawn_trend_occupied[s_visible_page], sizeof(old_occupied));
     memset(s_drawn_trend_occupied[s_render_page], 0, sizeof(old_occupied));
     for (col = 0u; col < TREND_MAX_COLUMNS; col++)
     {
@@ -2622,22 +2694,33 @@ static bool reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
                     (uint8_t)(1u << (col & 7u));
         }
     }
-    for (col = 0u; col < MAIN_DISPLAY_X_LABEL_COUNT; col++)
+    /* Restore only the newly exposed horizontal guides after the curve pass;
+     * doing this before the curve would let the next erase cover them again. */
+    if (!trend_restore_horizontal_grid(
+            (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W - scroll),
+            (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)))
+        return false;
+    *scroll_out = scroll;
+    return true;
+}
+
+static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1)
+{
+    uint8_t row;
+
+    if (x0 < MAIN_DISPLAY_PLOT_X)
+        x0 = MAIN_DISPLAY_PLOT_X;
+    if (x1 > MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
+        x1 = MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W;
+    if (x0 >= x1)
+        return true;
+    for (row = 0u; row < MAIN_DISPLAY_Y_LABEL_COUNT; row++)
     {
-        uint16_t ghost_x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                      col * MAIN_DISPLAY_PLOT_W / 4u);
-        if (ghost_x >= MAIN_DISPLAY_PLOT_X + scroll &&
-            ui_draw_line((uint16_t)(ghost_x - scroll), MAIN_DISPLAY_PLOT_Y,
-                         (uint16_t)(ghost_x - scroll),
-                         MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
-                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
-            return false;
-        if (ui_draw_line(ghost_x, MAIN_DISPLAY_PLOT_Y, ghost_x,
-                         MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
-                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
+        uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                row * MAIN_DISPLAY_PLOT_H / 3u);
+        if (ui_draw_line(x0, y, x1, y, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
             return false;
     }
-    *scroll_out = scroll;
     return true;
 }
 
@@ -3070,6 +3153,7 @@ static bool reading_only_render_trend_background(void)
            sizeof(s_reading_only_page_y_labels[0]));
     memset(s_drawn_trend_occupied[s_render_page], 0,
            sizeof(s_drawn_trend_occupied[0]));
+    s_reading_only_page_trend_curve_valid[s_render_page] = false;
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
     idx = 0u;
     return true;
@@ -3118,6 +3202,12 @@ static void reading_only_render(void)
         s_render_page = READING_ONLY_PAGE_FLIP
                             ? (uint8_t)(s_visible_page ^ 1u)
                             : s_visible_page;
+        /* Throttled trend frames have no plot mutation to copy to the sibling
+         * page. Keep the reading update on the currently visible page so a
+         * commit cannot alternate between two different curve positions. */
+        if (READING_ONLY_PAGE_FLIP && s_trend_scroll_ms != 0u &&
+            (uint32_t)(now - s_trend_scroll_ms) < 100u)
+            s_render_page = s_visible_page;
         s_renderer.phase = RENDER_PHASE_UPDATE_READING;
         s_frame_rendering = true;
         s_render_full_page = false;
@@ -3328,8 +3418,7 @@ static void reading_only_render(void)
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
             s_trend_axis_valid = false;
-            s_trend_scroll_ms = 0u;
-            s_reading_only_page_trend_bg_valid[s_render_page] = false;
+            reading_only_invalidate_trend_pages();
         }
         main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
         if (s_frame.trend_has_data && s_trend_axis_valid &&
@@ -3347,17 +3436,73 @@ static void reading_only_render(void)
         }
         else if (s_frame.trend_has_data)
         {
-            s_trend_axis_min = s_frame.trend_minimum;
-            s_trend_axis_max = s_frame.trend_maximum;
+            bool axis_expanded = false;
+            float axis_min;
+            float axis_max;
+            float span;
+
+            if (!s_trend_axis_valid)
+            {
+                axis_min = s_frame.trend_minimum;
+                axis_max = s_frame.trend_maximum;
+                span = axis_max - axis_min;
+                if (span < 0.000001f)
+                    span = 0.000001f;
+                {
+                    float magnitude = axis_max < 0.0f ? -axis_max : axis_max;
+                    if (axis_min < 0.0f && -axis_min > magnitude)
+                        magnitude = -axis_min;
+                    /* A flat first sample has only the tiny display padding
+                     * from trend_buffer_range(). Seed a useful viewport so a
+                     * rising signal does not rebuild the entire plot on its
+                     * first few samples. */
+                    if (magnitude < 0.000001f)
+                        magnitude = 0.000001f;
+                    if (span < magnitude * 4.0f)
+                        span = magnitude * 4.0f;
+                    axis_min -= span * 0.5f;
+                    axis_max += span * 0.5f;
+                }
+                axis_expanded = true;
+            }
+            else
+            {
+                span = s_trend_axis_max - s_trend_axis_min;
+                if (span < 0.000001f)
+                    span = 0.000001f;
+                /* Do not rebuild while the window merely approaches an
+                 * edge. Rebuilding 240 columns during a monotonic ramp is
+                 * what caused the visible segmented slopes and stalls. Only
+                 * expand once the live range would actually clip. */
+                axis_expanded = s_frame.trend_minimum < s_trend_axis_min ||
+                                s_frame.trend_maximum > s_trend_axis_max;
+                axis_min = s_frame.trend_minimum < s_trend_axis_min
+                               ? s_frame.trend_minimum : s_trend_axis_min;
+                axis_max = s_frame.trend_maximum > s_trend_axis_max
+                               ? s_frame.trend_maximum : s_trend_axis_max;
+            }
+            span = axis_max - axis_min;
+            if (span < 0.000001f)
+                span = 0.000001f;
+            /* Reserve four spans of headroom when the live data approaches
+             * an edge. A rising ramp therefore causes one bounded rebuild
+             * instead of a full 240-column rebuild for every new peak. */
+            s_trend_axis_min = axis_min - span * 3.0f;
+            s_trend_axis_max = axis_max + span * 3.0f;
             s_trend_axis_valid = true;
+            s_frame.trend_minimum = s_trend_axis_min;
+            s_frame.trend_maximum = s_trend_axis_max;
             strncpy(s_trend_axis_unit, trend_unit, TREND_UNIT_ID_MAX - 1u);
             s_trend_axis_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
             main_display_format_linear_trend_labels(&s_frame);
+            if (axis_expanded)
+                reading_only_invalidate_trend_pages();
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
                            strcmp(s_reading_only_page_trend_unit[s_render_page],
                                   trend_buffer_display_unit(&s_trend)) == 0 &&
                            trend_y_labels_match(s_render_page);
+        bool background_was_ready = background_ready;
         if (!reading_only_render_trend_background())
         {
             if (s_reading_only_io_error)
@@ -3369,11 +3514,45 @@ static void reading_only_render(void)
             }
             return;
         }
+        if (!background_was_ready)
+        {
+            uint16_t col;
+            uint16_t newest = TREND_MAX_COLUMNS;
+
+            /* A newly invalidated unit/page has a clean background. Paint only
+             * columns backed by samples already in the new window; empty
+             * columns need no GE transaction. This lets a gear change reveal
+             * the new trace from the right without a 240-column hitch. */
+            (void)trend_buffer_project(&s_trend, now, s_trend_columns,
+                                       TREND_MAX_COLUMNS);
+            for (col = TREND_MAX_COLUMNS; col > 0u; col--)
+                if (s_trend_columns[col - 1u].occupied)
+                {
+                    newest = (uint16_t)(col - 1u);
+                    break;
+                }
+            if (newest < TREND_MAX_COLUMNS &&
+                (!trend_draw_column(newest, false) ||
+                 !trend_join_column(newest)))
+            {
+                s_reading_only_io_error = false;
+                s_reading_only_stage = READING_ONLY_PRESENT;
+                return;
+            }
+            s_reading_only_trend_column = TREND_MAX_COLUMNS;
+            s_trend_scroll_ms = now;
+            s_reading_only_page_trend_curve_valid[s_render_page] = true;
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
                            strcmp(s_reading_only_page_trend_unit[s_render_page],
                                   trend_buffer_display_unit(&s_trend)) == 0 &&
                            trend_y_labels_match(s_render_page);
-        if (!background_ready)
+        /* A page that was just rebuilt contains no pixels from the current
+         * trend snapshot. Never scroll the visible page into it in this same
+         * pass; that mixes the previous unit/axis with the new one. */
+        if (!background_was_ready)
             s_trend_scroll_ms = 0u;
         if (s_reading_only_trend_column == 0u)
             (void)trend_buffer_project(&s_trend, HAL_GetTick(), s_trend_columns,
@@ -3386,6 +3565,8 @@ static void reading_only_render(void)
         if (background_ready && s_visible_page != s_render_page &&
             s_reading_only_page_trend_bg_valid[s_visible_page] &&
             s_reading_only_page_trend_bg_valid[s_render_page] &&
+            s_reading_only_page_trend_curve_valid[s_visible_page] &&
+            s_reading_only_page_trend_curve_valid[s_render_page] &&
             s_frame.trend_has_data && s_trend_scroll_ms != 0u)
         {
             if ((uint32_t)(now - s_trend_scroll_ms) < 100u)
@@ -3413,14 +3594,25 @@ static void reading_only_render(void)
                     uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
                                             (uint32_t)col * MAIN_DISPLAY_PLOT_W /
                                             TREND_MAX_COLUMNS);
-                    if (x >= right && !trend_draw_column(col, false))
+                    if (x >= right &&
+                        (!trend_draw_column(col, false) ||
+                         !trend_join_column(col)))
                     {
                         s_reading_only_io_error = false;
                         s_reading_only_stage = READING_ONLY_PRESENT;
                         return;
                     }
                 }
+                if (!trend_restore_horizontal_grid(right,
+                                                   (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                                                              MAIN_DISPLAY_PLOT_W)))
+                {
+                    s_reading_only_io_error = false;
+                    s_reading_only_stage = READING_ONLY_PRESENT;
+                    return;
+                }
                 s_trend_scroll_ms = now;
+                s_reading_only_page_trend_curve_valid[s_render_page] = true;
                 s_reading_only_stage = READING_ONLY_PRESENT;
                 return;
             }
@@ -3431,31 +3623,33 @@ static void reading_only_render(void)
                 return;
             }
         }
-        while (s_reading_only_trend_column < TREND_MAX_COLUMNS)
         {
-            if (!trend_draw_column(s_reading_only_trend_column, true))
+            uint16_t col;
+            uint16_t newest = TREND_MAX_COLUMNS;
+
+            /* A page that cannot use the scroll path may have a clean
+             * background but stale curve bookkeeping. Do not fall back to a
+             * 240-column rebuild: that was the source of the long stalls and
+             * the visible piecewise slopes during a rising ramp. Seed only
+             * the newest point and let later scroll passes extend it. */
+            for (col = TREND_MAX_COLUMNS; col > 0u; col--)
+                if (s_trend_columns[col - 1u].occupied)
+                {
+                    newest = (uint16_t)(col - 1u);
+                    break;
+                }
+            if (newest < TREND_MAX_COLUMNS &&
+                (!trend_draw_column(newest, false) ||
+                 !trend_join_column(newest)))
             {
                 s_reading_only_io_error = false;
                 s_reading_only_stage = READING_ONLY_PRESENT;
                 return;
             }
-            s_reading_only_trend_column++;
-        }
-        if (s_trend_grid_dirty[s_render_page])
-        {
-            trend_restore_grid(MAIN_DISPLAY_PLOT_X,
-                               (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
-                               MAIN_DISPLAY_PLOT_Y,
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u));
-            if (s_reading_only_io_error)
-            {
-                s_reading_only_io_error = false;
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-            s_trend_grid_dirty[s_render_page] = false;
+            s_reading_only_trend_column = TREND_MAX_COLUMNS;
         }
         s_trend_scroll_ms = now;
+        s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
     }
