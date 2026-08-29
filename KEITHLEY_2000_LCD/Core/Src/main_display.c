@@ -120,6 +120,54 @@ static void format_fixed_axis(float value, const char *unit, float step,
     append_text(out, out_size, unit);
 }
 
+uint8_t main_display_trend_plot_y(float value, float minimum, float maximum)
+{
+    float span;
+    float fy;
+
+    span = maximum - minimum;
+    if (span < 0.000001f)
+        return (uint8_t)(MAIN_DISPLAY_PLOT_H / 2u);
+    fy = (maximum - value) * (float)MAIN_DISPLAY_PLOT_H / span;
+    if (fy < 0.0f)
+        fy = 0.0f;
+    if (fy > (float)MAIN_DISPLAY_PLOT_H - 1.0f)
+        fy = (float)MAIN_DISPLAY_PLOT_H - 1.0f;
+    return (uint8_t)fy;
+}
+
+void main_display_format_linear_trend_labels(main_display_frame_t *frame)
+{
+    float scale;
+    float minimum;
+    float maximum;
+    float span;
+    const char *unit;
+    uint8_t i;
+
+    if (frame == 0 || !frame->trend_has_data)
+        return;
+    unit = frame->trend_axis_unit[0] != '\0' ? frame->trend_axis_unit : "";
+    scale = 1.0f;
+    if (unit[0] == 'm')
+        scale = 1000.0f;
+    else if (unit[0] == 'u' ||
+             ((uint8_t)unit[0] == 0xC2u && (uint8_t)unit[1] == 0xB5u))
+        scale = 1000000.0f;
+    else if (unit[0] == 'k')
+        scale = 0.001f;
+    else if (unit[0] == 'M' && unit[1] != '\0')
+        scale = 0.000001f;
+    minimum = frame->trend_minimum * scale;
+    maximum = frame->trend_maximum * scale;
+    span = maximum - minimum;
+    if (span < 0.000001f)
+        span = 0.000001f;
+    for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
+        format_fixed_axis(maximum - span * (float)i / 3.0f, unit, span / 3.0f,
+                          frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
+}
+
 void main_display_set_trend_axis(main_display_frame_t *frame, float step,
                                  float top, const char *unit)
 {

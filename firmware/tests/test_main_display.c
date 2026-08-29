@@ -348,5 +348,66 @@ int main(void)
         assert(!candidate.valid);
     }
 
+    {
+        trend_buffer_t trend;
+        main_display_frame_t frame;
+        trend_column_t columns[TREND_MAX_COLUMNS];
+        uint16_t n;
+        uint8_t y_hi, y_lo;
+
+        memset(&frame, 0, sizeof(frame));
+        trend_buffer_init(&trend);
+        assert(trend_buffer_add(&trend, 0u, "1.00", "VDC"));
+        assert(trend_buffer_add(&trend, 200u, "3.00", "VDC"));
+        main_display_format_trend(&trend, 200u, "VDC", &frame);
+        assert(frame.trend_has_data);
+        main_display_format_linear_trend_labels(&frame);
+        assert(strstr(frame.y_labels[0], "VDC") != 0);
+        assert(strstr(frame.y_labels[3], "VDC") != 0);
+        /* Top label tracks window maximum, bottom tracks minimum. */
+        assert(frame.trend_maximum > 3.0f);
+        assert(frame.trend_minimum < 1.0f);
+        assert(strstr(frame.y_labels[0], "3") != 0);
+        assert(strstr(frame.y_labels[3], "VDC") != 0);
+        /* Padded minimum is ~0.8 VDC, never the raw sample "1.00". */
+        assert(strstr(frame.y_labels[3], "0.") != 0);
+        assert(strstr(frame.y_labels[3], "1.00") == 0);
+
+        y_hi = main_display_trend_plot_y(frame.trend_maximum,
+                                         frame.trend_minimum,
+                                         frame.trend_maximum);
+        y_lo = main_display_trend_plot_y(frame.trend_minimum,
+                                         frame.trend_minimum,
+                                         frame.trend_maximum);
+        assert(y_hi == 0u);
+        assert(y_lo == (uint8_t)(MAIN_DISPLAY_PLOT_H - 1u));
+
+        n = trend_buffer_project(&trend, 200u, columns, TREND_MAX_COLUMNS);
+        assert(n == TREND_MAX_COLUMNS);
+        {
+            uint16_t i;
+            bool any = false;
+            for (i = 0u; i < n; i++)
+            {
+                if (!columns[i].occupied)
+                    continue;
+                any = true;
+                assert(main_display_trend_plot_y(columns[i].maximum,
+                                                 frame.trend_minimum,
+                                                 frame.trend_maximum) <=
+                       main_display_trend_plot_y(columns[i].minimum,
+                                                 frame.trend_minimum,
+                                                 frame.trend_maximum));
+            }
+            assert(any);
+        }
+
+        assert(trend_buffer_add(&trend, 400u, "1.00", "VAC"));
+        assert(strcmp(trend_buffer_display_unit(&trend), "VAC") == 0);
+        assert(trend_buffer_range(&trend, 400u, &frame.trend_minimum,
+                                  &frame.trend_maximum));
+        assert(frame.trend_minimum > 0.9f && frame.trend_maximum < 1.1f);
+    }
+
     return 0;
 }
