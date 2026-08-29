@@ -290,6 +290,8 @@ static uint32_t s_perf_trend_columns_window;
 #if K2000_READING_ONLY_BASELINE
 typedef enum {
     READING_ONLY_IDLE = 0,
+    READING_ONLY_STATUS,
+    READING_ONLY_INFO,
     READING_ONLY_CLEAR,
     READING_ONLY_VALUE,
     READING_ONLY_UNIT,
@@ -314,6 +316,13 @@ static char s_reading_only_page_value[2][UI_MODEL_MAX_FIELD];
 static uint16_t s_reading_only_page_value_x[2];
 static uint16_t s_reading_only_page_value_color[2];
 static uint8_t s_reading_only_value_index;
+static bool s_reading_only_page_status_valid[2];
+static uint8_t s_reading_only_page_status_lamps[2];
+static bool s_reading_only_page_info_valid[2];
+static char s_reading_only_page_impedance[2][32];
+static char s_reading_only_page_range[2][32];
+static char s_reading_only_page_rate[2][32];
+static uint8_t s_reading_only_page_info_lamps[2];
 #endif
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
@@ -1427,6 +1436,11 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
      * stride 256) and drawn with a single block DMA flash->canvas. Colors
      * are baked in; only the background must match the canvas. Any other
      * geometry or color falls through to the run-length renderer below. */
+    if (color == MAIN_DISPLAY_COLOR_GREEN &&
+        s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
+        s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
+        s_rif_draw_job.tile.height == FONT_DIGIT_WIDTH &&
+        s_rif_draw_job.tile.stride == FONT_DIGIT_HEIGHT * 2u)
     if (color == MAIN_DISPLAY_COLOR_GREEN &&
         s_rif_draw_job.tile.background == MAIN_DISPLAY_COLOR_BG &&
         s_rif_draw_job.tile.width == FONT_DIGIT_HEIGHT &&
@@ -2676,12 +2690,102 @@ static bool READING_ONLY_LEGACY trend_yield_to_regions(void)
 }
 
 #if K2000_READING_ONLY_BASELINE
+static bool reading_only_render_status_bar(void)
+{
+    static const char *const labels[5] = {"REM", "TALK", "LSTN", "SRQ", "TRIG"};
+    static const uint8_t bits[5] = {0u, 1u, 2u, 3u, 5u};
+    static uint8_t idx;
+    if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
+    if (idx == 0u) {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_STATUS_Y, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+    }
+    while (idx < 5u) {
+        if (!ui_draw_text((uint16_t)(8u + idx * 116u), 0u, labels[idx], s_frame.status_active[bits[idx]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED)) return false;
+        idx++;
+    }
+    idx = 0u;
+    s_reading_only_page_status_valid[s_render_page] = true;
+    {
+        uint8_t cur = 0u;
+        for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[bits[i]]) cur |= (1u<<i);
+        s_reading_only_page_status_lamps[s_render_page] = cur;
+    }
+    return true;
+}
+static bool reading_only_render_info_panel(void)
+{
+    static const char *const names[4] = {"Zin", "Range", "Rate", "Status"};
+    static const uint16_t ys[4] = {MAIN_DISPLAY_INFO_ZIN_Y, MAIN_DISPLAY_INFO_RANGE_Y, MAIN_DISPLAY_INFO_RATE_Y, MAIN_DISPLAY_INFO_STATUS_Y};
+    static uint8_t idx;
+    if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
+    if (idx < 15u) {
+        bool ok = true;
+        if (idx < 12u) {
+            uint8_t row = idx / 4u;
+            uint8_t sub = idx % 4u;
+            uint16_t vx = MAIN_DISPLAY_INFO_X + MAIN_DISPLAY_INFO_NAME_W;
+            uint16_t ty = ys[row] + (MAIN_DISPLAY_INFO_ROW_H - FONT_TEXT_HEIGHT)/2u;
+            if (sub == 0u) ok = ui_fill_rect(MAIN_DISPLAY_INFO_X, ys[row], MAIN_DISPLAY_INFO_NAME_W, MAIN_DISPLAY_INFO_ROW_H, MAIN_DISPLAY_COLOR_BAR) == LT7680_OK;
+            else if (sub == 1u) ok = ui_fill_rect(vx, ys[row], MAIN_DISPLAY_INFO_VALUE_W, MAIN_DISPLAY_INFO_ROW_H, MAIN_DISPLAY_COLOR_BAR_ALT) == LT7680_OK;
+            else if (sub == 2u) ok = ui_draw_text(MAIN_DISPLAY_INFO_X, ty, names[row], row==0u?MAIN_DISPLAY_COLOR_MUTED:MAIN_DISPLAY_COLOR_WHITE);
+            else if (row==0u) ok = ui_draw_text(vx, ty, s_frame.impedance, MAIN_DISPLAY_COLOR_MUTED);
+            else if (row==1u) ok = ui_draw_text(vx, ty, s_frame.range, MAIN_DISPLAY_COLOR_WHITE);
+            else if (row==2u) ok = ui_draw_text(vx, ty, s_frame.rate, MAIN_DISPLAY_COLOR_WHITE);
+            else ok = true;
+        } else {
+            uint8_t lamp = idx - 12u;
+            static const char *const lamps[3] = {"FILT","REL","MATH"};
+            static const uint8_t bits[3] = {7u,6u,11u};
+            uint16_t vx = MAIN_DISPLAY_INFO_X + MAIN_DISPLAY_INFO_NAME_W;
+            uint16_t ty = ys[3] + (MAIN_DISPLAY_INFO_ROW_H - FONT_TEXT_HEIGHT)/2u;
+            ok = ui_draw_text(vx + lamp*4u*FONT_TEXT_WIDTH, ty, lamps[lamp], s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED);
+        }
+        if (!ok) return false;
+        idx++;
+        if (idx < 15u) return false;
+        s_reading_only_page_info_valid[s_render_page] = true;
+        strncpy(s_reading_only_page_impedance[s_render_page], s_frame.impedance, sizeof(s_reading_only_page_impedance[0])-1u);
+        strncpy(s_reading_only_page_range[s_render_page], s_frame.range, sizeof(s_reading_only_page_range[0])-1u);
+        strncpy(s_reading_only_page_rate[s_render_page], s_frame.rate, sizeof(s_reading_only_page_rate[0])-1u);
+        s_reading_only_page_impedance[s_render_page][sizeof(s_reading_only_page_impedance[0])-1u]='\0';
+        s_reading_only_page_range[s_render_page][sizeof(s_reading_only_page_range[0])-1u]='\0';
+        s_reading_only_page_rate[s_render_page][sizeof(s_reading_only_page_rate[0])-1u]='\0';
+        s_reading_only_page_info_lamps[s_render_page] = (s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u);
+        idx = 0u;
+        return true;
+    }
+    return true;
+}
+
 static void reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
 
     if (!s_display_ready)
         return;
+    if (s_reading_only_stage == READING_ONLY_STATUS) {
+        if (!reading_only_render_status_bar()) {
+            if (s_reading_only_io_error) reading_only_abort_frame(s_reading_only_last_error);
+            return;
+        }
+        {
+            bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+                             strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance)!=0 ||
+                             strcmp(s_reading_only_page_range[s_render_page], s_frame.range)!=0 ||
+                             strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate)!=0 ||
+                             s_reading_only_page_info_lamps[s_render_page] != (uint8_t)((s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u));
+            s_reading_only_stage = info_need ? READING_ONLY_INFO : READING_ONLY_CLEAR;
+        }
+        return;
+    }
+    if (s_reading_only_stage == READING_ONLY_INFO) {
+        if (!reading_only_render_info_panel()) {
+            if (s_reading_only_io_error) reading_only_abort_frame(s_reading_only_last_error);
+            return;
+        }
+        s_reading_only_stage = READING_ONLY_CLEAR;
+        return;
+    }
     if (s_reading_only_stage == READING_ONLY_IDLE)
     {
         if (!s_reading_only_dirty ||
