@@ -247,7 +247,7 @@ static float s_page_trend_maximum[2];
  * tests; this site only owns page history, projection and publication. */
 static main_display_trend_axis_t s_trend_axis_resident;
 static trend_axis_candidate_t READING_ONLY_LEGACY s_trend_axis_candidate;
-static bool s_trend_full_repaint;
+static bool READING_ONLY_LEGACY s_trend_full_repaint;
 /* Same-unit overflow rescale: only Y labels change meaning -- plot
  * surface, gridlines and X labels are pixel-identical. Skip the whole
  * chart-panel background fill (~300 ms of GE fills) and just relabel. */
@@ -1147,6 +1147,13 @@ static lt7680_status_t ui_draw_line(uint16_t x0, uint16_t y0, uint16_t x1,
                                           (int16_t)fx1, (int16_t)fy1, color);
         }
     }
+#if K2000_READING_ONLY_BASELINE
+    if (st != LT7680_OK)
+    {
+        s_reading_only_last_error = st;
+        s_reading_only_io_error = true;
+    }
+#endif
     return st;
 }
 
@@ -2454,7 +2461,7 @@ static uint16_t trend_y_label_y(uint8_t index)
     return label_y < MAIN_DISPLAY_TREND_Y ? MAIN_DISPLAY_TREND_Y : label_y;
 }
 
-static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_previous)
+static bool trend_draw_column(uint16_t column, bool erase_previous)
 {
     trend_column_t *c = &s_trend_columns[column];
     uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
@@ -2466,22 +2473,18 @@ static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_pr
 
     if (occupied)
     {
-        float span = s_frame.trend_maximum - s_frame.trend_minimum;
-        float fy0 = (s_frame.trend_maximum - c->maximum) *
-                    MAIN_DISPLAY_PLOT_H / span;
-        float fy1 = (s_frame.trend_maximum - c->minimum) *
-                    MAIN_DISPLAY_PLOT_H / span;
-        if (fy0 < 0.0f) fy0 = 0.0f;
-        if (fy1 < 0.0f) fy1 = 0.0f;
-        if (fy0 > MAIN_DISPLAY_PLOT_H - 1.0f)
-            fy0 = MAIN_DISPLAY_PLOT_H - 1.0f;
-        if (fy1 > MAIN_DISPLAY_PLOT_H - 1.0f)
-            fy1 = MAIN_DISPLAY_PLOT_H - 1.0f;
-        y0 = (uint8_t)fy0;
-        y1 = (uint8_t)fy1;
+        y0 = main_display_trend_plot_y(c->maximum, s_frame.trend_minimum,
+                                       s_frame.trend_maximum);
+        y1 = main_display_trend_plot_y(c->minimum, s_frame.trend_minimum,
+                                       s_frame.trend_maximum);
+        if (y1 < y0)
+        {
+            uint8_t tmp = y0;
+            y0 = y1;
+            y1 = tmp;
+        }
     }
-    if (!s_trend_full_repaint &&
-        occupied == trend_drawn_occupied(column) &&
+    if (occupied == trend_drawn_occupied(column) &&
         (!occupied ||
          ((uint8_t)(s_drawn_trend_y0[s_render_page][column] > y0
                ? s_drawn_trend_y0[s_render_page][column] - y0
@@ -2490,7 +2493,7 @@ static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_pr
                ? s_drawn_trend_y1[s_render_page][column] - y1
                : y1 - s_drawn_trend_y1[s_render_page][column]) < 2u)))
     {
-        return;
+        return true;
     }
 
     if (erase_previous && trend_drawn_occupied(column))
@@ -2499,21 +2502,22 @@ static void READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_pr
                                      s_drawn_trend_y0[s_render_page][column]);
         uint16_t old_y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                      s_drawn_trend_y1[s_render_page][column]);
-        (void)ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
-                           (uint16_t)(old_y1 - old_y0 + 1u),
-                           MAIN_DISPLAY_COLOR_BG);
+        if (ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
+                         (uint16_t)(old_y1 - old_y0 + 1u),
+                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
+            return false;
         s_trend_grid_dirty[s_render_page] = true;
     }
     if (occupied)
     {
-        /* Center column only. The two DIM glow columns tripled the GE
-         * line traffic; on a sloped trace nearly every column repaints,
-         * and that pushed heavy phases into multi-hundred-ms passes. */
-        (void)ui_draw_line(x, (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0), x,
-                           (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
-                           MAIN_DISPLAY_COLOR_GREEN);
+        if (ui_draw_line(x, (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0), x,
+                         (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
+                         MAIN_DISPLAY_COLOR_GREEN) != LT7680_OK)
+            return false;
     }
     trend_set_drawn(column, occupied, y0, y1);
+    s_perf_trend_columns_window++;
+    return true;
 }
 
 static void trend_draw_background(void)
@@ -3195,6 +3199,44 @@ static void reading_only_render(void)
                 s_reading_only_stage = READING_ONLY_PRESENT;
             }
             return;
+        }
+        if (s_reading_only_trend_column == 0u)
+            (void)trend_buffer_project(&s_trend, HAL_GetTick(), s_trend_columns,
+                                       TREND_MAX_COLUMNS);
+        if (!s_frame.trend_has_data)
+        {
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
+        while (s_reading_only_trend_column < TREND_MAX_COLUMNS)
+        {
+            uint16_t col = s_reading_only_trend_column;
+            bool occupied_before = trend_drawn_occupied(col);
+            uint8_t y0_before = s_drawn_trend_y0[s_render_page][col];
+            uint8_t y1_before = s_drawn_trend_y1[s_render_page][col];
+
+            if (!trend_draw_column(col, true))
+            {
+                if (s_reading_only_io_error)
+                {
+                    s_reading_only_io_error = false;
+                    s_reading_only_stage = READING_ONLY_PRESENT;
+                }
+                return;
+            }
+            s_reading_only_trend_column++;
+            if (occupied_before != trend_drawn_occupied(col) ||
+                y0_before != s_drawn_trend_y0[s_render_page][col] ||
+                y1_before != s_drawn_trend_y1[s_render_page][col])
+                return;
+        }
+        if (s_trend_grid_dirty[s_render_page])
+        {
+            trend_restore_grid(MAIN_DISPLAY_PLOT_X,
+                               (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
+                               MAIN_DISPLAY_PLOT_Y,
+                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u));
+            s_trend_grid_dirty[s_render_page] = false;
         }
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
