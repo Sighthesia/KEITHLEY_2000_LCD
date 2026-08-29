@@ -3075,37 +3075,6 @@ static bool reading_only_render_trend_background(void)
     return true;
 }
 
-static void reading_only_sync_trend_page(void)
-{
-    lt7680_rect_t rect;
-
-    if (s_render_page == s_visible_page ||
-        !s_reading_only_page_trend_bg_valid[s_visible_page] ||
-        s_reading_only_page_trend_bg_valid[s_render_page])
-        return;
-    panel_transform_ui_rect_to_fb(0u, MAIN_DISPLAY_TREND_Y,
-                                  MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_H,
-                                  &rect.x, &rect.y, &rect.w, &rect.h);
-    if (rect.w == 0u || rect.h == 0u ||
-        lt7680_gfx_copy_rect(s_visible_page, s_render_page, &rect) != LT7680_OK)
-        return;
-    s_reading_only_page_trend_bg_valid[s_render_page] = true;
-    memcpy(s_reading_only_page_trend_unit[s_render_page],
-           s_reading_only_page_trend_unit[s_visible_page],
-           sizeof(s_reading_only_page_trend_unit[0]));
-    memcpy(s_reading_only_page_y_labels[s_render_page],
-           s_reading_only_page_y_labels[s_visible_page],
-           sizeof(s_reading_only_page_y_labels[0]));
-    memcpy(s_drawn_trend_y0[s_render_page], s_drawn_trend_y0[s_visible_page],
-           sizeof(s_drawn_trend_y0[0]));
-    memcpy(s_drawn_trend_y1[s_render_page], s_drawn_trend_y1[s_visible_page],
-           sizeof(s_drawn_trend_y1[0]));
-    memcpy(s_drawn_trend_occupied[s_render_page],
-           s_drawn_trend_occupied[s_visible_page],
-           sizeof(s_drawn_trend_occupied[0]));
-    s_trend_grid_dirty[s_render_page] = s_trend_grid_dirty[s_visible_page];
-}
-
 static void reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -3149,7 +3118,6 @@ static void reading_only_render(void)
         s_render_page = READING_ONLY_PAGE_FLIP
                             ? (uint8_t)(s_visible_page ^ 1u)
                             : s_visible_page;
-        reading_only_sync_trend_page();
         s_renderer.phase = RENDER_PHASE_UPDATE_READING;
         s_frame_rendering = true;
         s_render_full_page = false;
