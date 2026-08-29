@@ -330,6 +330,10 @@ static char s_reading_only_page_y_labels[2][MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DIS
 static uint16_t s_reading_only_trend_column;
 static bool s_reading_only_trend_bg_failed;
 static uint32_t s_trend_scroll_ms;
+static bool s_trend_axis_valid;
+static float s_trend_axis_min;
+static float s_trend_axis_max;
+static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
 #endif
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
@@ -3335,12 +3339,39 @@ static void reading_only_render(void)
     case READING_ONLY_TREND:
     {
         uint32_t now = HAL_GetTick();
+        const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
         uint16_t scroll;
 
+        if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
+        {
+            s_trend_axis_valid = false;
+            s_trend_scroll_ms = 0u;
+            s_reading_only_page_trend_bg_valid[s_render_page] = false;
+        }
         main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
-        if (s_frame.trend_has_data)
+        if (s_frame.trend_has_data && s_trend_axis_valid &&
+            s_frame.trend_minimum >= s_trend_axis_min &&
+            s_frame.trend_maximum <= s_trend_axis_max)
+        {
+            s_frame.trend_minimum = s_trend_axis_min;
+            s_frame.trend_maximum = s_trend_axis_max;
+            if (s_reading_only_page_y_labels[s_render_page][0][0] != '\0')
+                memcpy(s_frame.y_labels,
+                       s_reading_only_page_y_labels[s_render_page],
+                       sizeof(s_frame.y_labels));
+            else
+                main_display_format_linear_trend_labels(&s_frame);
+        }
+        else if (s_frame.trend_has_data)
+        {
+            s_trend_axis_min = s_frame.trend_minimum;
+            s_trend_axis_max = s_frame.trend_maximum;
+            s_trend_axis_valid = true;
+            strncpy(s_trend_axis_unit, trend_unit, TREND_UNIT_ID_MAX - 1u);
+            s_trend_axis_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
             main_display_format_linear_trend_labels(&s_frame);
+        }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
                            strcmp(s_reading_only_page_trend_unit[s_render_page],
                                   trend_buffer_display_unit(&s_trend)) == 0 &&
@@ -3375,6 +3406,11 @@ static void reading_only_render(void)
             s_reading_only_page_trend_bg_valid[s_render_page] &&
             s_frame.trend_has_data && s_trend_scroll_ms != 0u)
         {
+            if ((uint32_t)(now - s_trend_scroll_ms) < 100u)
+            {
+                s_reading_only_stage = READING_ONLY_PRESENT;
+                return;
+            }
             if (reading_only_scroll_trend(now, &scroll))
             {
                 uint16_t col;
