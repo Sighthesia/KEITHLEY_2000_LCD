@@ -2488,10 +2488,10 @@ static bool trend_draw_column(uint16_t column, bool erase_previous)
         (!occupied ||
          ((uint8_t)(s_drawn_trend_y0[s_render_page][column] > y0
                ? s_drawn_trend_y0[s_render_page][column] - y0
-               : y0 - s_drawn_trend_y0[s_render_page][column]) < 2u &&
+                : y0 - s_drawn_trend_y0[s_render_page][column]) == 0u &&
           (uint8_t)(s_drawn_trend_y1[s_render_page][column] > y1
                ? s_drawn_trend_y1[s_render_page][column] - y1
-               : y1 - s_drawn_trend_y1[s_render_page][column]) < 2u)))
+                : y1 - s_drawn_trend_y1[s_render_page][column]) == 0u)))
     {
         return true;
     }
