@@ -2816,7 +2816,20 @@ static void reading_only_render(void)
         s_reading_only_io_error = false;
         s_perf_frame_start_tick = now;
         s_display_due_tick = now;
-        s_reading_only_stage = READING_ONLY_CLEAR;
+        {
+            uint8_t cur_status = 0u;
+            for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[(uint8_t[]){0u,1u,2u,3u,5u}[i]]) cur_status |= (1u<<i);
+            uint8_t cur_info_lamps = (uint8_t)((s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u));
+            bool status_need = !s_reading_only_page_status_valid[s_render_page] || s_reading_only_page_status_lamps[s_render_page] != cur_status;
+            bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+                             strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance)!=0 ||
+                             strcmp(s_reading_only_page_range[s_render_page], s_frame.range)!=0 ||
+                             strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate)!=0 ||
+                             s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps;
+            if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+            else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
+            else s_reading_only_stage = READING_ONLY_CLEAR;
+        }
         s_perf_reading_frames_window++;
         return;
     }
