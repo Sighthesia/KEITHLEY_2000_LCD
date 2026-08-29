@@ -3238,7 +3238,10 @@ static void reading_only_render(void)
                                (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
                                MAIN_DISPLAY_PLOT_Y,
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u));
-            s_trend_grid_dirty[s_render_page] = false;
+            if (s_reading_only_io_error)
+                s_reading_only_io_error = false;
+            else
+                s_trend_grid_dirty[s_render_page] = false;
         }
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
