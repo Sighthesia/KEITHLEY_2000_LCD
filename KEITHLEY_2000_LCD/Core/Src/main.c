@@ -296,6 +296,7 @@ typedef enum {
     READING_ONLY_VALUE,
     READING_ONLY_UNIT,
     READING_ONLY_SUFFIX,
+    READING_ONLY_TREND,
     READING_ONLY_PRESENT,
 } reading_only_stage_t;
 
@@ -323,6 +324,11 @@ static char s_reading_only_page_impedance[2][32];
 static char s_reading_only_page_range[2][32];
 static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
+static bool s_reading_only_page_trend_bg_valid[2];
+static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
+static char s_reading_only_page_y_labels[2][MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
+static uint16_t s_reading_only_trend_column;
+static bool s_reading_only_trend_bg_failed;
 #endif
 
 static void perf_u32(char *out, uint32_t value, uint8_t digits)
@@ -2979,6 +2985,27 @@ static void reading_only_render(void)
             suffix_x;
         s_reading_only_page_suffix_color[s_render_page] =
             s_frame.value_color;
+        s_reading_only_trend_column = 0u;
+        s_reading_only_trend_bg_failed = false;
+        s_reading_only_stage = READING_ONLY_TREND;
+        return;
+    }
+    case READING_ONLY_TREND:
+    {
+        uint32_t now = HAL_GetTick();
+        const char *unit;
+
+        (void)s_reading_only_page_y_labels;
+        main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
+        if (s_frame.trend_has_data)
+            main_display_format_linear_trend_labels(&s_frame);
+        unit = trend_buffer_display_unit(&s_trend);
+        if (unit[0] == '\0' ||
+            strcmp(s_reading_only_page_trend_unit[s_render_page], unit) != 0)
+        {
+            s_reading_only_page_trend_bg_valid[0] = false;
+            s_reading_only_page_trend_bg_valid[1] = false;
+        }
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
     }
