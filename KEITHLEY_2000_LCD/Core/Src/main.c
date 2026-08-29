@@ -2694,12 +2694,6 @@ static bool reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
                     (uint8_t)(1u << (col & 7u));
         }
     }
-    /* Restore only the newly exposed horizontal guides after the curve pass;
-     * doing this before the curve would let the next erase cover them again. */
-    if (!trend_restore_horizontal_grid(
-            (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W - scroll),
-            (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)))
-        return false;
     *scroll_out = scroll;
     return true;
 }
