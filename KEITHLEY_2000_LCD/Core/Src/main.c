@@ -4082,8 +4082,8 @@ static void reading_only_render(void)
                         magnitude = 0.000001f;
                     if (span < magnitude * 0.25f)
                         span = magnitude * 0.25f;
-                    axis_min -= span * 0.15f;
-                    axis_max += span * 0.15f;
+                    axis_min -= span * 0.35f;
+                    axis_max += span * 0.35f;
                 }
                 axis_expanded = true;
             }
@@ -4106,10 +4106,12 @@ static void reading_only_render(void)
             span = axis_max - axis_min;
             if (span < 0.000001f)
                 span = 0.000001f;
-            /* Tight auto-scale: ~15% margin each side (≈77% fill).
-             * Keeps the trace visually active instead of flat. */
-            s_trend_axis_min = axis_min - span * 0.15f;
-            s_trend_axis_max = axis_max + span * 0.15f;
+            /* Dynamic Y compression: keep ~35% margin each side (≈59%
+             * fill) so small peaks don't trigger a full-window rescan.
+             * Combined with the sweep's live-window rescan, this gives
+             * smooth compression instead of redrawing on every touch. */
+            s_trend_axis_min = axis_min - span * 0.35f;
+            s_trend_axis_max = axis_max + span * 0.35f;
             s_trend_axis_valid = true;
             s_frame.trend_minimum = s_trend_axis_min;
             s_frame.trend_maximum = s_trend_axis_max;
