@@ -134,7 +134,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * cursor storms at 50 buckets/s, single buckets get min/max-stretched ten
  * times over, and slots re-render several times per frame (visible
  * flicker). 10 Hz is the validated value (AGENTS 2026-08-22). */
-#define K2000_DEMO_INPUT_HZ 10u
+#define K2000_DEMO_INPUT_HZ 500u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -3229,7 +3229,7 @@ static bool trend_sweep_advance(void)
         trend_sweep_slot_window(slot, b, &w0, &w1);
         /* Render the slot once, after its last bucket is due (or at the
          * cursor target) so sub-slot samples are merged first. */
-        if (b + 1u == w1 || b == target)
+        if (b + 1u == w1)
         {
             if (!trend_sweep_render_slot(slot, b))
             {
@@ -4065,54 +4065,53 @@ static void reading_only_render(void)
             float axis_max;
             float span;
 
+            /* Fixed preset per unit: no live-data chasing, zero rescale
+             * flicker. Range comes from demo_units lo/hi (covers the
+             * triangle), with 5% margin each side. */
             if (!s_trend_axis_valid)
             {
-                axis_min = s_frame.trend_minimum;
-                axis_max = s_frame.trend_maximum;
+                bool preset_ok = false;
+                uint8_t ui;
+
+                for (ui = 0u; ui < DEMO_UNIT_COUNT; ui++)
+                {
+                    if (strcmp(s_demo_units[ui].unit, trend_unit) == 0)
+                    {
+                        float div = 1.0f;
+                        uint8_t d;
+
+                        for (d = 0u; d < s_demo_units[ui].frac_digits; d++)
+                            div *= 10.0f;
+                        axis_min = (float)s_demo_units[ui].lo_mant / div;
+                        axis_max = (float)s_demo_units[ui].hi_mant / div;
+                        preset_ok = true;
+                        break;
+                    }
+                }
+                if (!preset_ok)
+                {
+                    axis_min = s_frame.trend_minimum;
+                    axis_max = s_frame.trend_maximum;
+                }
                 span = axis_max - axis_min;
                 if (span < 0.000001f)
                     span = 0.000001f;
-                {
-                    float magnitude = axis_max < 0.0f ? -axis_max : axis_max;
-                    if (axis_min < 0.0f && -axis_min > magnitude)
-                        magnitude = -axis_min;
-                    /* A flat first sample has only the tiny display padding
-                     * from trend_buffer_range(). Seed a useful viewport so a
-                     * rising signal does not rebuild the entire plot on its
-                     * first few samples. */
-                    if (magnitude < 0.000001f)
-                        magnitude = 0.000001f;
-                    if (span < magnitude * 4.0f)
-                        span = magnitude * 4.0f;
-                    axis_min -= span * 0.5f;
-                    axis_max += span * 0.5f;
-                }
+                axis_min -= span * 0.05f;
+                axis_max += span * 0.05f;
                 axis_expanded = true;
             }
             else
             {
-                span = s_trend_axis_max - s_trend_axis_min;
-                if (span < 0.000001f)
-                    span = 0.000001f;
-                /* Do not rebuild while the window merely approaches an
-                 * edge. Rebuilding 240 columns during a monotonic ramp is
-                 * what caused the visible segmented slopes and stalls. Only
-                 * expand once the live range would actually clip. */
-                axis_expanded = s_frame.trend_minimum < s_trend_axis_min ||
-                                s_frame.trend_maximum > s_trend_axis_max;
-                axis_min = s_frame.trend_minimum < s_trend_axis_min
-                               ? s_frame.trend_minimum : s_trend_axis_min;
-                axis_max = s_frame.trend_maximum > s_trend_axis_max
-                               ? s_frame.trend_maximum : s_trend_axis_max;
+                /* Fixed range — never expand on live-data clip. */
+                axis_expanded = false;
+                axis_min = s_trend_axis_min;
+                axis_max = s_trend_axis_max;
             }
             span = axis_max - axis_min;
             if (span < 0.000001f)
                 span = 0.000001f;
-            /* Reserve four spans of headroom when the live data approaches
-             * an edge. A rising ramp therefore causes one bounded rebuild
-             * instead of a full 240-column rebuild for every new peak. */
-            s_trend_axis_min = axis_min - span * 3.0f;
-            s_trend_axis_max = axis_max + span * 3.0f;
+            s_trend_axis_min = axis_min;
+            s_trend_axis_max = axis_max;
             s_trend_axis_valid = true;
             s_frame.trend_minimum = s_trend_axis_min;
             s_frame.trend_maximum = s_trend_axis_max;
