@@ -128,8 +128,13 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
  * for input-path testing, e.g. K2000_DEMO_INPUT_HZ=500) must NOT raise the
  * display rate: reading updates stay coalesced to the newest frame and
- * display commits remain bounded by DISPLAY_FRAME_PERIOD_MS. */
-#define K2000_DEMO_INPUT_HZ 500u
+ * display commits remain bounded by DISPLAY_FRAME_PERIOD_MS.
+ * NOTE (2026-08-30): a leftover 500 here feeds a full reading frame every
+ * 2 ms — the documented regression from the 2026-08-22 fix: the trend
+ * cursor storms at 50 buckets/s, single buckets get min/max-stretched ten
+ * times over, and slots re-render several times per frame (visible
+ * flicker). 10 Hz is the validated value (AGENTS 2026-08-22). */
+#define K2000_DEMO_INPUT_HZ 10u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -2815,6 +2820,32 @@ static uint32_t s_sweep_epoch_bucket;
 static uint32_t s_sweep_epoch_first_ms; /* trend_buffer reset detector */
 static float s_sweep_scale_lo, s_sweep_scale_hi; /* applied axis, jitter gate */
 static bool s_sweep_active;
+static uint32_t s_sweep_cycle; /* completed 500-bucket cycles at last render */
+
+/* One-shot wipe when the sweep wraps: the previous cycle's trace would
+ * otherwise linger on the right of the cursor for a full 10 s window.
+ * Classic scope behavior is to clear the plot at the start of a new
+ * sweep, so erase the plot area and forget per-slot bookkeeping (the
+ * chart background and axis labels stay). */
+static void trend_sweep_wipe_cycle(void)
+{
+    uint8_t page;
+
+    (void)ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_Y,
+                       MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_H,
+                       MAIN_DISPLAY_COLOR_BG);
+    trend_restore_grid(MAIN_DISPLAY_PLOT_X,
+                       (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
+                       MAIN_DISPLAY_PLOT_Y,
+                       (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H));
+    for (page = 0u; page < 2u; page++)
+    {
+        memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
+        memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
+        memset(s_drawn_trend_occupied[page], 0,
+               sizeof(s_drawn_trend_occupied[page]));
+    }
+}
 
 static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket)
 {
@@ -3033,10 +3064,21 @@ static bool trend_sweep_advance(void)
          * reaching its wrap. Just follow the current time. */
         s_sweep_epoch_first_ms = s_trend.first_sample_ms;
         s_sweep_cursor_bucket = s_trend.newest_bucket;
+        s_sweep_cycle = (s_trend.newest_bucket - s_sweep_epoch_bucket) /
+                        TREND_BUCKET_COUNT;
         s_sweep_scale_lo = s_frame.trend_minimum;
         s_sweep_scale_hi = s_frame.trend_maximum;
         s_sweep_epoch_resets++;
         return true;
+    }
+    if ((s_trend.newest_bucket - s_sweep_epoch_bucket) / TREND_BUCKET_COUNT >
+        s_sweep_cycle)
+    {
+        /* Wrapped into a new sweep cycle: clear last cycle's trace. */
+        s_sweep_cycle =
+            (s_trend.newest_bucket - s_sweep_epoch_bucket) /
+            TREND_BUCKET_COUNT;
+        trend_sweep_wipe_cycle();
     }
     if (s_frame.trend_minimum != s_sweep_scale_lo ||
         s_frame.trend_maximum != s_sweep_scale_hi)
