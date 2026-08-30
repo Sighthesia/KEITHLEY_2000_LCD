@@ -578,6 +578,64 @@ static void READING_ONLY_LEGACY perf_format_display(char *out)
     out[12] = '\0';
 }
 
+/* Diagnostic: read the visible canvas back through MRWDP and print the
+ * trend plot as ASCII (trace=#, bg=., other=?). Two consecutive frames
+ * make any "flicker" visible as literal pixel motion, independent of the
+ * renderer's assumptions. */
+static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket);
+static uint32_t s_sweep_cycle;
+#define K2000_TREND_DUMP 0
+
+#if K2000_TREND_DUMP
+static void trend_debug_dump(void)
+{
+    uint16_t i;
+    uint16_t fx, fy;
+
+    (void)lt7680_gfx_select_canvas_page(s_visible_page);
+    (void)lt7680_gfx_set_canvas_width(320u);
+    hal_uart_send_text("\r\nDUMP vis=");
+    hal_uart_send_hex8(s_visible_page);
+    hal_uart_send_text(" slot=");
+    perf_send_u32(s_trend.has_sample
+                      ? trend_sweep_slot_of_bucket(s_trend.newest_bucket)
+                      : 0u);
+    hal_uart_send_text(" cyc=");
+    perf_send_u32(s_sweep_cycle);
+    for (i = 0u; i < 12u; i++)
+    {
+        uint16_t ui_x = (uint16_t)(MAIN_DISPLAY_PLOT_X + i * 70u);
+        uint16_t y;
+        char buf[2] = {'-', '-'};
+
+        if (ui_x < MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
+        {
+            for (y = MAIN_DISPLAY_PLOT_Y; y < MAIN_DISPLAY_PLOT_Y +
+                                              MAIN_DISPLAY_PLOT_H;
+                 y += 2u)
+            {
+                uint16_t px = 0u;
+
+                panel_transform_ui_to_fb(ui_x, y, &fx, &fy);
+                if (lt7680_gfx_peek_pixel(fx, fy, &px) == LT7680_OK &&
+                    (px == MAIN_DISPLAY_COLOR_GREEN ||
+                     px == MAIN_DISPLAY_COLOR_GREEN_DIM))
+                {
+                    buf[0] = "0123456789ABCDEF"[(y - MAIN_DISPLAY_PLOT_Y) >> 4];
+                    buf[1] = "0123456789ABCDEF"[(y - MAIN_DISPLAY_PLOT_Y) & 0xFu];
+                    break;
+                }
+            }
+        }
+        hal_uart_send((const uint8_t *)buf, 2u);
+        hal_uart_send((const uint8_t *)" ", 1u);
+    }
+    hal_uart_send_text("\r\n");
+    (void)lt7680_gfx_select_canvas_page(s_render_page);
+    (void)lt7680_gfx_set_canvas_width(320u);
+}
+
+#endif
 static uint16_t s_rif_bte_hits;
 static uint16_t s_rif_bte_misses;
 static uint32_t s_prof_fill_ms;
@@ -587,6 +645,8 @@ static uint32_t s_prof_dma_n;
 static uint32_t s_sweep_cursor_bucket;
 static uint32_t s_sweep_scale_changes;
 static uint32_t s_sweep_epoch_resets;
+static uint32_t s_sweep_px_ok;
+static uint32_t s_sweep_px_missed;
 
 static void perf_record_frame(void)
 {
@@ -647,6 +707,15 @@ static void perf_record_frame(void)
         perf_send_u32(s_sweep_scale_changes);
         hal_uart_send_text(" sw_reset=");
         perf_send_u32(s_sweep_epoch_resets);
+        hal_uart_send_text(" sw_pxok=");
+        perf_send_u32(s_sweep_px_ok);
+        hal_uart_send_text("/");
+        perf_send_u32(s_sweep_px_missed);
+        s_sweep_px_ok = 0u;
+        s_sweep_px_missed = 0u;
+#if K2000_TREND_DUMP
+        trend_debug_dump();
+#endif
         hal_uart_send_text(" reading_errors=");
         perf_send_u32(s_reading_only_render_errors);
         hal_uart_send_text(" last_error=");
@@ -1153,10 +1222,16 @@ static bool hidden_page_sync_regions(void)
 /* True when normal runtime composition may write the render page only.
  * The blanked first frame builds with dual-page writes so both canvases
  * start pixel-identical; every later frame composes on one page and lets
- * hidden_page_sync_regions() level the sibling at the next frame start. */
+ * hidden_page_sync_regions() level the sibling at the next frame start.
+ * EXCEPTION: the sweep renderer is NOT integrated with the region
+ * machinery — its strips are never flagged, so single-page mode leaves
+ * the sibling page without the trace and every page flip visibly
+ * flickers. While the sweep draws, dual-page writes are forced. */
+static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
-    return s_frame_rendering && !s_render_full_page &&
+    return !s_trend_sweep_drawing && s_frame_rendering &&
+           !s_render_full_page &&
            frame_region_for_phase(s_renderer.phase) != 0u;
 }
 
@@ -3030,6 +3105,33 @@ static bool trend_sweep_render_slot(uint16_t slot, uint32_t ref_bucket)
     trend_set_drawn(slot, occ, y0, y1);
     trend_sweep_mirror_drawn(slot);
     s_perf_trend_columns_window++;
+    {
+        /* Reconciliation probe: did the pixels actually land? Read the
+         * slot center back from the visible page. */
+        uint16_t fx, fy, px = 0u;
+        uint16_t py = (uint16_t)(occ ? (MAIN_DISPLAY_PLOT_Y +
+                                       (y0 + y1) / 2u)
+                                     : MAIN_DISPLAY_PLOT_Y + 45u);
+
+        if (occ)
+        {
+            (void)lt7680_gfx_select_canvas_page(s_visible_page);
+            (void)lt7680_gfx_set_canvas_width(320u);
+            panel_transform_ui_to_fb(x, py, &fx, &fy);
+            if (lt7680_gfx_peek_pixel(fx, fy, &px) == LT7680_OK &&
+                px != MAIN_DISPLAY_COLOR_GREEN &&
+                px != MAIN_DISPLAY_COLOR_GREEN_DIM)
+            {
+                s_sweep_px_missed++;
+            }
+            else
+            {
+                s_sweep_px_ok++;
+            }
+            (void)lt7680_gfx_select_canvas_page(s_render_page);
+            (void)lt7680_gfx_set_canvas_width(320u);
+        }
+    }
     return true;
 }
 
@@ -3078,7 +3180,9 @@ static bool trend_sweep_advance(void)
         s_sweep_cycle =
             (s_trend.newest_bucket - s_sweep_epoch_bucket) /
             TREND_BUCKET_COUNT;
+        s_trend_sweep_drawing = true;
         trend_sweep_wipe_cycle();
+        s_trend_sweep_drawing = false;
     }
     if (s_frame.trend_minimum != s_sweep_scale_lo ||
         s_frame.trend_maximum != s_sweep_scale_hi)
@@ -3115,6 +3219,7 @@ static bool trend_sweep_advance(void)
     }
     if (steps > budget)
         steps = budget;
+    s_trend_sweep_drawing = true;
     for (i = 0u; i < steps; i++)
     {
         uint32_t b = s_sweep_cursor_bucket + 1u + i;
@@ -3127,9 +3232,13 @@ static bool trend_sweep_advance(void)
         if (b + 1u == w1 || b == target)
         {
             if (!trend_sweep_render_slot(slot, b))
+            {
+                s_trend_sweep_drawing = false;
                 return false;
+            }
         }
     }
+    s_trend_sweep_drawing = false;
     s_sweep_cursor_bucket += steps;
     return true;
 }
