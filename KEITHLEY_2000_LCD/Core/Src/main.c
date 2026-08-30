@@ -2756,7 +2756,7 @@ static bool READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_pr
     return true;
 }
 
-static bool trend_join_column(uint16_t column)
+static bool READING_ONLY_LEGACY trend_join_column(uint16_t column)
 {
     uint16_t x0;
     uint16_t x1;
@@ -2828,6 +2828,49 @@ static bool trend_sweep_bucket_range(uint32_t bucket, float *lo, float *hi)
     return true;
 }
 
+static void trend_sweep_mirror_drawn(uint16_t slot)
+{
+    /* GE primitives write both pages, so both pages hold identical pixels
+     * for this slot; the per-page drawn bookkeeping must say so too. The
+     * alternate page would otherwise re-render the same slot on the next
+     * frame flip, visibly jittering the trace left and right. */
+    uint8_t page;
+    for (page = 0u; page < 2u; page++)
+    {
+        uint8_t mask = (uint8_t)(1u << (slot & 7u));
+        if (((s_drawn_trend_occupied[page][slot >> 3] & mask) != 0u) ==
+            ((s_drawn_trend_occupied[page ^ 1u][slot >> 3] & mask) != 0u) &&
+            s_drawn_trend_y0[page][slot] == s_drawn_trend_y0[page ^ 1u][slot] &&
+            s_drawn_trend_y1[page][slot] == s_drawn_trend_y1[page ^ 1u][slot])
+            continue;
+        s_drawn_trend_occupied[page ^ 1u][slot >> 3] =
+            (uint8_t)((s_drawn_trend_occupied[page ^ 1u][slot >> 3] &
+                       (uint8_t)~mask) |
+                      (s_drawn_trend_occupied[page][slot >> 3] & mask));
+        s_drawn_trend_y0[page ^ 1u][slot] = s_drawn_trend_y0[page][slot];
+        s_drawn_trend_y1[page ^ 1u][slot] = s_drawn_trend_y1[page][slot];
+    }
+}
+
+/* Slots without a sample HOLD the previous value as a short flat segment
+ * (staircase), which is both honest for instrument readings and keeps
+ * every slot's pixels inside its own 3 px strip: a diagonal join would
+ * leave line stubs in neighbouring strips when the later slot is next
+ * erased. The chain propagates because each empty slot is rendered once,
+ * left to right, behind the slot it holds from. */
+static bool trend_sweep_hold_prev(uint16_t slot, uint8_t *y0, uint8_t *y1)
+{
+    uint16_t p = (uint16_t)((slot + TREND_MAX_COLUMNS - 1u) %
+                            TREND_MAX_COLUMNS);
+
+    if (!trend_drawn_occupied(p))
+        return false;
+    *y0 = (uint8_t)((s_drawn_trend_y0[s_render_page][p] +
+                     s_drawn_trend_y1[s_render_page][p]) / 2u);
+    *y1 = *y0;
+    return true;
+}
+
 static bool trend_sweep_render_slot(uint16_t slot)
 {
     uint32_t b0 = trend_sweep_bucket_of_slot(slot);
@@ -2879,7 +2922,20 @@ static bool trend_sweep_render_slot(uint16_t slot)
     }
     else
     {
-        occ = false;
+        /* No sample in this slot: hold the previous value so the trace
+         * stays continuous across the sample gap. */
+        uint8_t hy0 = 0u, hy1 = 0u;
+
+        if (trend_sweep_hold_prev(slot, &hy0, &hy1))
+        {
+            y0 = hy0;
+            y1 = hy1;
+            occ = true;
+        }
+        else
+        {
+            occ = false;
+        }
     }
 
     if (occ == drawn &&
@@ -2916,8 +2972,9 @@ static bool trend_sweep_render_slot(uint16_t slot)
             return false;
     }
     trend_set_drawn(slot, occ, y0, y1);
+    trend_sweep_mirror_drawn(slot);
     s_perf_trend_columns_window++;
-    return trend_join_column(slot);
+    return true;
 }
 
 static bool trend_sweep_advance(void)
