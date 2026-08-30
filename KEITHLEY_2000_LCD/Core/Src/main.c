@@ -4120,10 +4120,13 @@ static void reading_only_render(void)
             main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
             {
-                /* Clean background + labels; the sweep's own axis-move
-                 * detector restarts a live-window rescan at the new
-                 * scale (no per-slot cursor reset needed here). */
-                reading_only_invalidate_trend_pages();
+                /* Invalidate only Y labels; keep the plot background.
+                 * A full plot clear (reading_only_invalidate_trend_pages)
+                 * flashes black and is unnecessary — the sweep's
+                 * live-window rescan redraws each column at the new
+                 * scale, giving true dynamic Y compression. */
+                s_reading_only_page_y_labels[s_render_page][0][0] = '\0';
+                s_reading_only_page_y_labels[s_render_page ^ 1u][0][0] = '\0';
             }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
