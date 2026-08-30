@@ -2791,27 +2791,39 @@ static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1);
  * oscilloscope sweep instead: absolute time maps to fixed screen columns,
  * new samples overwrite in place, nothing is ever moved. Data source is the
  * 20 ms bucket ring inside trend_buffer_t; one render pass advances the
- * cursor by a bounded bucket budget so a pass always fits the frame. */
+ * cursor by a bounded bucket budget so a pass always fits the frame.
+ * Slot addressing is CYCLE-relative: the buffer keeps the last
+ * TREND_BUCKET_COUNT buckets, so a slot at the cursor resolves to the
+ * buckets in the cursor's own sweep cycle, not the very first one. */
 #define TREND_SWEEP_BUDGET 8u
 #define TREND_SWEEP_RESCAN_BUDGET 48u
 static uint32_t s_sweep_epoch_bucket;
 static uint32_t s_sweep_cursor_bucket;  /* first bucket not yet rendered */
 static uint32_t s_sweep_epoch_first_ms; /* trend_buffer reset detector */
+static float s_sweep_scale_lo, s_sweep_scale_hi; /* applied axis, jitter gate */
 static bool s_sweep_active;
 
 static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket)
 {
-    /* A full-window offset lands exactly on 240; wrap it back to slot 0
-     * (the buffer resets at that point anyway). */
     return (uint16_t)(((bucket - s_sweep_epoch_bucket) * TREND_MAX_COLUMNS /
                        TREND_BUCKET_COUNT) %
                       TREND_MAX_COLUMNS);
 }
 
-static uint32_t trend_sweep_bucket_of_slot(uint16_t slot)
+/* Bucket window [w0,w1) that `slot` maps to inside the cycle containing
+ * `ref_bucket`. Each cycle spans TREND_BUCKET_COUNT buckets. */
+static void trend_sweep_slot_window(uint16_t slot, uint32_t ref_bucket,
+                                    uint32_t *w0, uint32_t *w1)
 {
-    return s_sweep_epoch_bucket +
-           ((uint32_t)slot * TREND_BUCKET_COUNT) / TREND_MAX_COLUMNS;
+    uint32_t cycle_base =
+        s_sweep_epoch_bucket +
+        ((ref_bucket - s_sweep_epoch_bucket) / TREND_BUCKET_COUNT) *
+            TREND_BUCKET_COUNT;
+
+    *w0 = cycle_base +
+          ((uint32_t)slot * TREND_BUCKET_COUNT) / TREND_MAX_COLUMNS;
+    *w1 = cycle_base +
+          ((uint32_t)(slot + 1u) * TREND_BUCKET_COUNT) / TREND_MAX_COLUMNS;
 }
 
 static bool trend_sweep_bucket_range(uint32_t bucket, float *lo, float *hi)
@@ -2871,10 +2883,9 @@ static bool trend_sweep_hold_prev(uint16_t slot, uint8_t *y0, uint8_t *y1)
     return true;
 }
 
-static bool trend_sweep_render_slot(uint16_t slot)
+static bool trend_sweep_render_slot(uint16_t slot, uint32_t ref_bucket)
 {
-    uint32_t b0 = trend_sweep_bucket_of_slot(slot);
-    uint32_t b1 = trend_sweep_bucket_of_slot((uint16_t)(slot + 1u));
+    uint32_t b0, b1;
     uint32_t b;
     float lo = 0.0f, hi = 0.0f;
     bool occ = false;
@@ -2889,6 +2900,7 @@ static bool trend_sweep_render_slot(uint16_t slot)
     uint8_t y0 = 0u, y1 = 0u;
     bool drawn = trend_drawn_occupied(slot);
 
+    trend_sweep_slot_window(slot, ref_bucket, &b0, &b1);
     for (b = b0; b < b1; b++)
     {
         float blo, bhi;
@@ -2995,17 +3007,36 @@ static bool trend_sweep_advance(void)
         s_sweep_epoch_bucket = s_trend.newest_bucket;
         s_sweep_cursor_bucket = s_sweep_epoch_bucket;
         s_sweep_active = true;
+        s_sweep_scale_lo = s_frame.trend_minimum;
+        s_sweep_scale_hi = s_frame.trend_maximum;
         return true;
+    }
+    if (s_frame.trend_minimum != s_sweep_scale_lo ||
+        s_frame.trend_maximum != s_sweep_scale_hi)
+    {
+        /* Axis moved: every drawn slot is at the old scale. Sweep the
+         * whole live window again so the trace rescales as one piece —
+         * per-slot rescales at different times are what read as jitter. */
+        s_sweep_scale_lo = s_frame.trend_minimum;
+        s_sweep_scale_hi = s_frame.trend_maximum;
+        s_sweep_cursor_bucket =
+            target > (TREND_BUCKET_COUNT - 1u)
+                ? target - (TREND_BUCKET_COUNT - 1u)
+                : s_sweep_epoch_bucket;
     }
     if (target <= s_sweep_cursor_bucket)
         return true;
     steps = target - s_sweep_cursor_bucket;
     if (steps > TREND_BUCKET_COUNT)
     {
-        /* The cursor fell more than a full window behind (e.g. the axis
-         * rescale restart): sweep the whole visible window again. */
+        /* The cursor fell more than a full window behind: sweep the whole
+         * visible window again. */
         s_sweep_cursor_bucket = target - TREND_BUCKET_COUNT;
         steps = TREND_BUCKET_COUNT;
+        budget = TREND_SWEEP_RESCAN_BUDGET;
+    }
+    else if (target - s_sweep_cursor_bucket > TREND_SWEEP_BUDGET)
+    {
         budget = TREND_SWEEP_RESCAN_BUDGET;
     }
     else
@@ -3018,13 +3049,14 @@ static bool trend_sweep_advance(void)
     {
         uint32_t b = s_sweep_cursor_bucket + 1u + i;
         uint16_t slot = trend_sweep_slot_of_bucket(b);
-        uint32_t slot_end = trend_sweep_bucket_of_slot((uint16_t)(slot + 1u));
+        uint32_t w0, w1;
 
+        trend_sweep_slot_window(slot, b, &w0, &w1);
         /* Render the slot once, after its last bucket is due (or at the
          * cursor target) so sub-slot samples are merged first. */
-        if (b + 1u == slot_end || b == target)
+        if (b + 1u == w1 || b == target)
         {
-            if (!trend_sweep_render_slot(slot))
+            if (!trend_sweep_render_slot(slot, b))
                 return false;
         }
     }
@@ -3910,11 +3942,10 @@ static void reading_only_render(void)
             main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
             {
+                /* Clean background + labels; the sweep's own axis-move
+                 * detector restarts a live-window rescan at the new
+                 * scale (no per-slot cursor reset needed here). */
                 reading_only_invalidate_trend_pages();
-                /* Re-scale every visible slot at the new axis over the next
-                 * passes; the clean background gives the sweep a fresh
-                 * canvas and the rescan budget bounds each pass. */
-                s_sweep_cursor_bucket = s_sweep_epoch_bucket;
             }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
