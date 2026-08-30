@@ -340,10 +340,9 @@ void hal_panel_init(void)
 #if PANEL_LANDSCAPE
     /* Landscape: ST7701S MADCTL (0x36) row/column exchange so each 960-wide
      * LT7680 scan line lands on the panel's long (960 px) axis. 0x60 = MX|MV
-     * (90 deg); alternate 0xE0 = MY|MV flips the other way. Value must be
-     * confirmed on real device; if MADCTL is ignored in RGB mode, fall back
-     * to rotating via LT7680 MACR REG[02h] bit[2:1] in lt7680_gfx.c. PCLK
-     * (LT7680 PLL C1/C2) may need retuning for the swapped 960x320 timing. */
+     * pairs with LT7680 VDIR=1 (the long-verified V16 combo). PIP was probed
+     * (VDIR=0 + MADCTL 0xE0) but this die's PIP compositor does not output,
+     * so the VDIR pairing stays. */
     panel_write_command(0x36u, (const uint8_t[]){0x60u}, 1u);
 #endif
     HAL_Delay(120u);

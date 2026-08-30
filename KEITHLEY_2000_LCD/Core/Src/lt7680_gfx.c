@@ -945,8 +945,10 @@ static lt7680_status_t configure_panel(void)
     if (st != LT7680_OK) return st;
     st = write_reg(LT7680_REG_VPWR, LT7680_V_SYNC - 1u);
     if (st != LT7680_OK) return st;
-    /* REG[12h]: V16 init via RMW clears bit7 (PCLK), sets bit3 (scan dir),
-     * clears bit4 (HSCAN L->R) and bits0-2 (PDATA RGB order). */
+    /* REG[12h]: V16 init via RMW clears bit7 (PCLK), sets bit3 (VDIR scan
+     * dir), clears bit4 (HSCAN L->R) and bits0-2 (PDATA RGB order).
+     * VDIR=1 prohibits PIP (DS V4.2 10.3); PIP was probed with VDIR=0 and
+     * this die never composited, so the V16 value is kept. */
     return rmw_reg(LT7680_REG_DISPLAY_CTRL, 0x08u, 0x97u);
 }
 

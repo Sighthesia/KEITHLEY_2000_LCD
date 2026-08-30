@@ -367,7 +367,12 @@ static void reading_only_invalidate_trend_pages(void)
     }
 }
 
-static bool trend_pip_init(void)
+/* Probed on-target 2026-08-30: both PIP1 and PIP2 accept the full datasheet
+ * V4.2 10.3 sequence (registers verified by readback, VDIR conflict removed
+ * via panel MADCTL) but never composite a saturated test pattern on this
+ * die.  The trend path therefore stays on the main-window renderer; these
+ * helpers are kept dormant for future silicon revisions. */
+static bool READING_ONLY_LEGACY trend_pip_init(void)
 {
     lt7680_rect_t clear = {0u, 0u, TREND_PIP_SOURCE_WIDTH,
                            TREND_PIP_SOURCE_HEIGHT};
@@ -442,7 +447,7 @@ static bool trend_pip_init(void)
 
 static void trend_pip_reset(void);
 
-static bool trend_pip_update(uint32_t now)
+static bool READING_ONLY_LEGACY trend_pip_update(uint32_t now)
 {
     uint32_t head;
     uint16_t y;
@@ -3578,14 +3583,6 @@ static void reading_only_render(void)
         bool background_ready;
         uint16_t scroll;
 
-        if (s_trend_pip_ready)
-        {
-            main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
-            (void)trend_pip_update(now);
-            s_reading_only_stage = READING_ONLY_PRESENT;
-            return;
-        }
-
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
             s_trend_axis_valid = false;
@@ -4716,14 +4713,12 @@ int main(void)
                                 s_render_page = s_visible_page;
                                 st = lt7680_gfx_clear(0x0000u);
                             }
-                            if (st == LT7680_OK)
-                                st = lt7680_gfx_present_page(s_visible_page);
+                             if (st == LT7680_OK)
+                                 st = lt7680_gfx_present_page(s_visible_page);
 #if K2000_READING_ONLY_BASELINE
-                            /* PIP bring-up failure is non-fatal: trend_pip_init
-                             * prints the failing step and the main-window
-                             * renderer stays active as fallback. */
-                            if (st == LT7680_OK)
-                                (void)trend_pip_init();
+                            /* PIP dormant: this die never composites PIP1 or
+                             * PIP2 windows (verified 2026-08-30). Trend uses
+                             * the main-window renderer only. */
 #endif
                         }
                             if (st != LT7680_OK)
