@@ -2697,7 +2697,7 @@ static bool trend_y_labels_match(uint8_t page)
     return true;
 }
 
-static bool trend_draw_column(uint16_t column, bool erase_previous)
+static bool READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_previous)
 {
     trend_column_t *c = &s_trend_columns[column];
     uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
@@ -2786,7 +2786,196 @@ static bool trend_join_column(uint16_t column)
 
 static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1);
 
-static bool reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
+/* Sweep renderer (2026-08-30). This die's BTE blit corrupts pixels and its
+ * PIP windows never composite, so hardware "scroll" is unavailable. Classic
+ * oscilloscope sweep instead: absolute time maps to fixed screen columns,
+ * new samples overwrite in place, nothing is ever moved. Data source is the
+ * 20 ms bucket ring inside trend_buffer_t; one render pass advances the
+ * cursor by a bounded bucket budget so a pass always fits the frame. */
+#define TREND_SWEEP_BUDGET 8u
+#define TREND_SWEEP_RESCAN_BUDGET 48u
+static uint32_t s_sweep_epoch_bucket;
+static uint32_t s_sweep_cursor_bucket;  /* first bucket not yet rendered */
+static uint32_t s_sweep_epoch_first_ms; /* trend_buffer reset detector */
+static bool s_sweep_active;
+
+static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket)
+{
+    /* A full-window offset lands exactly on 240; wrap it back to slot 0
+     * (the buffer resets at that point anyway). */
+    return (uint16_t)(((bucket - s_sweep_epoch_bucket) * TREND_MAX_COLUMNS /
+                       TREND_BUCKET_COUNT) %
+                      TREND_MAX_COLUMNS);
+}
+
+static uint32_t trend_sweep_bucket_of_slot(uint16_t slot)
+{
+    return s_sweep_epoch_bucket +
+           ((uint32_t)slot * TREND_BUCKET_COUNT) / TREND_MAX_COLUMNS;
+}
+
+static bool trend_sweep_bucket_range(uint32_t bucket, float *lo, float *hi)
+{
+    uint16_t idx = (uint16_t)(bucket % TREND_BUCKET_COUNT);
+
+    if (bucket > s_trend.newest_bucket ||
+        (s_trend.newest_bucket - bucket) >= TREND_BUCKET_COUNT)
+        return false;
+    if (((s_trend.occupied[idx >> 3] >> (idx & 7u)) & 1u) == 0u)
+        return false;
+    *lo = s_trend.minimum[idx];
+    *hi = s_trend.maximum[idx];
+    return true;
+}
+
+static bool trend_sweep_render_slot(uint16_t slot)
+{
+    uint32_t b0 = trend_sweep_bucket_of_slot(slot);
+    uint32_t b1 = trend_sweep_bucket_of_slot((uint16_t)(slot + 1u));
+    uint32_t b;
+    float lo = 0.0f, hi = 0.0f;
+    bool occ = false;
+    uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
+                            (uint32_t)slot * MAIN_DISPLAY_PLOT_W /
+                                TREND_MAX_COLUMNS);
+    uint16_t x0 = x > MAIN_DISPLAY_PLOT_X ? (uint16_t)(x - 1u) : x;
+    uint16_t x1 = x < (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W -
+                                1u)
+                      ? (uint16_t)(x + 1u)
+                      : x;
+    uint8_t y0 = 0u, y1 = 0u;
+    bool drawn = trend_drawn_occupied(slot);
+
+    for (b = b0; b < b1; b++)
+    {
+        float blo, bhi;
+        if (trend_sweep_bucket_range(b, &blo, &bhi))
+        {
+            if (!occ)
+            {
+                lo = blo;
+                hi = bhi;
+                occ = true;
+            }
+            else
+            {
+                if (blo < lo) lo = blo;
+                if (bhi > hi) hi = bhi;
+            }
+        }
+    }
+    if (occ && s_frame.trend_has_data)
+    {
+        y0 = main_display_trend_plot_y(hi, s_frame.trend_minimum,
+                                       s_frame.trend_maximum);
+        y1 = main_display_trend_plot_y(lo, s_frame.trend_minimum,
+                                       s_frame.trend_maximum);
+        if (y1 < y0)
+        {
+            uint8_t tmp = y0;
+            y0 = y1;
+            y1 = tmp;
+        }
+    }
+    else
+    {
+        occ = false;
+    }
+
+    if (occ == drawn &&
+        (!occ || ((uint8_t)(s_drawn_trend_y0[s_render_page][slot] > y0
+                           ? s_drawn_trend_y0[s_render_page][slot] - y0
+                           : y0 - s_drawn_trend_y0[s_render_page][slot]) ==
+                      0u &&
+                  (uint8_t)(s_drawn_trend_y1[s_render_page][slot] > y1
+                           ? s_drawn_trend_y1[s_render_page][slot] - y1
+                           : y1 - s_drawn_trend_y1[s_render_page][slot]) ==
+                      0u)))
+        return true;
+
+    if (drawn)
+    {
+        uint16_t old_y0 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                     s_drawn_trend_y0[s_render_page][slot]);
+        uint16_t old_y1 = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                     s_drawn_trend_y1[s_render_page][slot]);
+        if (ui_fill_rect(x0, old_y0, (uint16_t)(x1 - x0 + 1u),
+                         (uint16_t)(old_y1 - old_y0 + 1u),
+                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
+            return false;
+        /* Put the horizontal grid lines back inside the strip before the
+         * new trace is drawn so the trace stays on top. */
+        if (!trend_restore_horizontal_grid(x0, (uint16_t)(x1 + 1u)))
+            return false;
+    }
+    if (occ)
+    {
+        if (ui_draw_line(x, (uint16_t)(MAIN_DISPLAY_PLOT_Y + y0), x,
+                         (uint16_t)(MAIN_DISPLAY_PLOT_Y + y1),
+                         MAIN_DISPLAY_COLOR_GREEN) != LT7680_OK)
+            return false;
+    }
+    trend_set_drawn(slot, occ, y0, y1);
+    s_perf_trend_columns_window++;
+    return trend_join_column(slot);
+}
+
+static bool trend_sweep_advance(void)
+{
+    uint32_t target = s_trend.newest_bucket;
+    uint32_t steps;
+    uint32_t budget;
+    uint32_t i;
+
+    if (!s_trend.has_sample)
+        return true;
+    if (!s_sweep_active || s_trend.first_sample_ms != s_sweep_epoch_first_ms)
+    {
+        /* Buffer reset (unit change / long idle): anchor slot 0 at the
+         * newest sample; the page invalidation that accompanies the reset
+         * gives a clean plot, the trace regrows from the left edge. */
+        s_sweep_epoch_first_ms = s_trend.first_sample_ms;
+        s_sweep_epoch_bucket = s_trend.newest_bucket;
+        s_sweep_cursor_bucket = s_sweep_epoch_bucket;
+        s_sweep_active = true;
+        return true;
+    }
+    if (target <= s_sweep_cursor_bucket)
+        return true;
+    steps = target - s_sweep_cursor_bucket;
+    if (steps > TREND_BUCKET_COUNT)
+    {
+        /* The cursor fell more than a full window behind (e.g. the axis
+         * rescale restart): sweep the whole visible window again. */
+        s_sweep_cursor_bucket = target - TREND_BUCKET_COUNT;
+        steps = TREND_BUCKET_COUNT;
+        budget = TREND_SWEEP_RESCAN_BUDGET;
+    }
+    else
+    {
+        budget = TREND_SWEEP_BUDGET;
+    }
+    if (steps > budget)
+        steps = budget;
+    for (i = 0u; i < steps; i++)
+    {
+        uint32_t b = s_sweep_cursor_bucket + 1u + i;
+        uint16_t slot = trend_sweep_slot_of_bucket(b);
+        uint32_t slot_end = trend_sweep_bucket_of_slot((uint16_t)(slot + 1u));
+
+        /* Render the slot once, after its last bucket is due (or at the
+         * cursor target) so sub-slot samples are merged first. */
+        if (b + 1u == slot_end || b == target)
+        {
+            if (!trend_sweep_render_slot(slot))
+                return false;
+        }
+    }
+    s_sweep_cursor_bucket += steps;
+    return true;
+}
+
+static bool READING_ONLY_LEGACY reading_only_scroll_trend(uint32_t now, uint16_t *scroll_out)
 {
     uint16_t scroll;
     uint16_t src_x, src_y, src_w, src_h;
@@ -3581,7 +3770,6 @@ static void reading_only_render(void)
         uint32_t now = HAL_GetTick();
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
-        uint16_t scroll;
 
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
@@ -3664,7 +3852,13 @@ static void reading_only_render(void)
             s_trend_axis_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
             main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
+            {
                 reading_only_invalidate_trend_pages();
+                /* Re-scale every visible slot at the new axis over the next
+                 * passes; the clean background gives the sweep a fresh
+                 * canvas and the rescan budget bounds each pass. */
+                s_sweep_cursor_bucket = s_sweep_epoch_bucket;
+            }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
                            strcmp(s_reading_only_page_trend_unit[s_render_page],
@@ -3684,139 +3878,16 @@ static void reading_only_render(void)
         }
         if (!background_was_ready)
         {
-            uint16_t col;
-            uint16_t newest = TREND_MAX_COLUMNS;
-
-            /* A newly invalidated unit/page has a clean background. Paint only
-             * columns backed by samples already in the new window; empty
-             * columns need no GE transaction. This lets a gear change reveal
-             * the new trace from the right without a 240-column hitch. */
-            (void)trend_buffer_project(&s_trend, now, s_trend_columns,
-                                       TREND_MAX_COLUMNS);
-            for (col = TREND_MAX_COLUMNS; col > 0u; col--)
-                if (s_trend_columns[col - 1u].occupied)
-                {
-                    newest = (uint16_t)(col - 1u);
-                    break;
-                }
-            if (newest < TREND_MAX_COLUMNS &&
-                (!trend_draw_column(newest, false) ||
-                 !trend_join_column(newest)))
-            {
-                s_reading_only_io_error = false;
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-            s_reading_only_trend_column = TREND_MAX_COLUMNS;
-            s_trend_scroll_ms = now;
+            /* Fresh background (unit change or axis rescale): the sweep
+             * re-anchors through the trend-buffer reset detector or the
+             * rescale restart above and redraws the window within its
+             * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
-        background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
-                           strcmp(s_reading_only_page_trend_unit[s_render_page],
-                                  trend_buffer_display_unit(&s_trend)) == 0 &&
-                           trend_y_labels_match(s_render_page);
-        /* A page that was just rebuilt contains no pixels from the current
-         * trend snapshot. Never scroll the visible page into it in this same
-         * pass; that mixes the previous unit/axis with the new one. */
-        if (!background_was_ready)
-            s_trend_scroll_ms = 0u;
-        if (s_reading_only_trend_column == 0u)
-            (void)trend_buffer_project(&s_trend, HAL_GetTick(), s_trend_columns,
-                                       TREND_MAX_COLUMNS);
-        if (!s_frame.trend_has_data)
-        {
-            s_reading_only_stage = READING_ONLY_PRESENT;
-            return;
-        }
-        if (background_ready && s_visible_page != s_render_page &&
-            s_reading_only_page_trend_bg_valid[s_visible_page] &&
-            s_reading_only_page_trend_bg_valid[s_render_page] &&
-            s_reading_only_page_trend_curve_valid[s_visible_page] &&
-            s_reading_only_page_trend_curve_valid[s_render_page] &&
-            s_frame.trend_has_data && s_trend_scroll_ms != 0u)
-        {
-            if ((uint32_t)(now - s_trend_scroll_ms) < 100u)
-            {
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-            if (reading_only_scroll_trend(now, &scroll))
-            {
-                uint16_t col;
-                if (scroll == 0u)
-                {
-                    if (!trend_draw_column(TREND_MAX_COLUMNS - 1u, true))
-                        s_reading_only_io_error = false;
-                    s_trend_scroll_ms = now;
-                    s_reading_only_stage = READING_ONLY_PRESENT;
-                    return;
-                }
-                uint16_t right = (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                            MAIN_DISPLAY_PLOT_W - scroll);
-                (void)trend_buffer_project(&s_trend, now, s_trend_columns,
-                                           TREND_MAX_COLUMNS);
-                for (col = 0u; col < TREND_MAX_COLUMNS; col++)
-                {
-                    uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                            (uint32_t)col * MAIN_DISPLAY_PLOT_W /
-                                            TREND_MAX_COLUMNS);
-                    if (x >= right &&
-                        (!trend_draw_column(col, false) ||
-                         !trend_join_column(col)))
-                    {
-                        s_reading_only_io_error = false;
-                        s_reading_only_stage = READING_ONLY_PRESENT;
-                        return;
-                    }
-                }
-                if (!trend_restore_horizontal_grid(right,
-                                                   (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                                              MAIN_DISPLAY_PLOT_W)))
-                {
-                    s_reading_only_io_error = false;
-                    s_reading_only_stage = READING_ONLY_PRESENT;
-                    return;
-                }
-                s_trend_scroll_ms = now;
-                s_reading_only_page_trend_curve_valid[s_render_page] = true;
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-            if (s_reading_only_io_error)
-            {
-                s_reading_only_io_error = false;
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-        }
-        {
-            uint16_t col;
-            uint16_t newest = TREND_MAX_COLUMNS;
-
-            /* A page that cannot use the scroll path may have a clean
-             * background but stale curve bookkeeping. Do not fall back to a
-             * 240-column rebuild: that was the source of the long stalls and
-             * the visible piecewise slopes during a rising ramp. Seed only
-             * the newest point and let later scroll passes extend it. */
-            for (col = TREND_MAX_COLUMNS; col > 0u; col--)
-                if (s_trend_columns[col - 1u].occupied)
-                {
-                    newest = (uint16_t)(col - 1u);
-                    break;
-                }
-            if (newest < TREND_MAX_COLUMNS &&
-                (!trend_draw_column(newest, false) ||
-                 !trend_join_column(newest)))
-            {
-                s_reading_only_io_error = false;
-                s_reading_only_stage = READING_ONLY_PRESENT;
-                return;
-            }
-            s_reading_only_trend_column = TREND_MAX_COLUMNS;
-        }
-        s_trend_scroll_ms = now;
+        if (!trend_sweep_advance())
+            s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
