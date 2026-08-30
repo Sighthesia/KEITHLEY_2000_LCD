@@ -579,6 +579,9 @@ static uint32_t s_prof_fill_ms;
 static uint32_t s_prof_fill_n;
 static uint32_t s_prof_dma_ms;
 static uint32_t s_prof_dma_n;
+static uint32_t s_sweep_cursor_bucket;
+static uint32_t s_sweep_scale_changes;
+static uint32_t s_sweep_epoch_resets;
 
 static void perf_record_frame(void)
 {
@@ -629,6 +632,16 @@ static void perf_record_frame(void)
         perf_send_u32(s_perf_axis_rebuilds_window);
         hal_uart_send_text(" trend_column_updates=");
         perf_send_u32(s_perf_trend_columns_window);
+        hal_uart_send_text(" sw_behind=");
+        perf_send_u32(s_trend.has_sample
+                          ? (s_trend.newest_bucket > s_sweep_cursor_bucket
+                                 ? s_trend.newest_bucket - s_sweep_cursor_bucket
+                                 : 0u)
+                          : 0u);
+        hal_uart_send_text(" sw_scale=");
+        perf_send_u32(s_sweep_scale_changes);
+        hal_uart_send_text(" sw_reset=");
+        perf_send_u32(s_sweep_epoch_resets);
         hal_uart_send_text(" reading_errors=");
         perf_send_u32(s_reading_only_render_errors);
         hal_uart_send_text(" last_error=");
@@ -2798,7 +2811,7 @@ static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1);
 #define TREND_SWEEP_BUDGET 8u
 #define TREND_SWEEP_RESCAN_BUDGET 48u
 static uint32_t s_sweep_epoch_bucket;
-static uint32_t s_sweep_cursor_bucket;  /* first bucket not yet rendered */
+/* s_sweep_cursor_bucket declared with the perf counters above. */
 static uint32_t s_sweep_epoch_first_ms; /* trend_buffer reset detector */
 static float s_sweep_scale_lo, s_sweep_scale_hi; /* applied axis, jitter gate */
 static bool s_sweep_active;
@@ -3000,15 +3013,29 @@ static bool trend_sweep_advance(void)
         return true;
     if (!s_sweep_active || s_trend.first_sample_ms != s_sweep_epoch_first_ms)
     {
-        /* Buffer reset (unit change / long idle): anchor slot 0 at the
-         * newest sample; the page invalidation that accompanies the reset
-         * gives a clean plot, the trace regrows from the left edge. */
+        if (!s_sweep_active)
+        {
+            /* Cold start: slot 0 anchors at the newest sample. */
+            s_sweep_epoch_bucket = s_trend.newest_bucket;
+            s_sweep_active = true;
+        }
+        else if (s_trend.newest_bucket >
+                 s_sweep_epoch_bucket + 2u * TREND_BUCKET_COUNT)
+        {
+            /* Buffer reset from a long idle gap (more than one full window
+             * behind the epoch): re-anchor so buckets are not all rejected
+             * as stale by trend_sweep_bucket_range. */
+            s_sweep_epoch_bucket = s_trend.newest_bucket;
+        }
+        /* A unit-change reset keeps the epoch: re-anchoring it would slide
+         * every existing slot sideways at once, which reads as the trace
+         * jittering left and right and prevents the sweep from ever
+         * reaching its wrap. Just follow the current time. */
         s_sweep_epoch_first_ms = s_trend.first_sample_ms;
-        s_sweep_epoch_bucket = s_trend.newest_bucket;
-        s_sweep_cursor_bucket = s_sweep_epoch_bucket;
-        s_sweep_active = true;
+        s_sweep_cursor_bucket = s_trend.newest_bucket;
         s_sweep_scale_lo = s_frame.trend_minimum;
         s_sweep_scale_hi = s_frame.trend_maximum;
+        s_sweep_epoch_resets++;
         return true;
     }
     if (s_frame.trend_minimum != s_sweep_scale_lo ||
@@ -3019,6 +3046,7 @@ static bool trend_sweep_advance(void)
          * per-slot rescales at different times are what read as jitter. */
         s_sweep_scale_lo = s_frame.trend_minimum;
         s_sweep_scale_hi = s_frame.trend_maximum;
+        s_sweep_scale_changes++;
         s_sweep_cursor_bucket =
             target > (TREND_BUCKET_COUNT - 1u)
                 ? target - (TREND_BUCKET_COUNT - 1u)
