@@ -125,13 +125,16 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
- * default 500 Hz reproduces a 2 ms field flow (numeric path), while
- * display commits stay coalesced to DISPLAY_FRAME_PERIOD_MS (30 Hz).
- * Trend rendering is decoupled via 20 ms buckets and 41.7 ms slots:
- * a slot renders once at w1, never at b==target, so 10 readings that
- * land in the same bucket merge to one min/max before the slot draws
- * (no per-reading flicker). */
-#define K2000_DEMO_INPUT_HZ 500u
+ * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
+ * for input-path testing, e.g. K2000_DEMO_INPUT_HZ=500) must NOT raise the
+ * display rate: reading updates stay coalesced to the newest frame and
+ * display commits remain bounded by DISPLAY_FRAME_PERIOD_MS.
+ * NOTE (2026-08-30): a leftover 500 here feeds a full reading frame every
+ * 2 ms — the documented regression from the 2026-08-22 fix: the trend
+ * cursor storms at 50 buckets/s, single buckets get min/max-stretched ten
+ * times over, and slots re-render several times per frame (visible
+ * flicker). 10 Hz is the validated value (AGENTS 2026-08-22). */
+#define K2000_DEMO_INPUT_HZ 10u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -3224,10 +3227,9 @@ static bool trend_sweep_advance(void)
         uint32_t w0, w1;
 
         trend_sweep_slot_window(slot, b, &w0, &w1);
-        /* Render once per slot window — never at b==target, otherwise 10
-         * readings that share the same 20 ms bucket stretch the same slot
-         * 10 times in 20 ms. Buckets merge to one min/max at w1. */
-        if (b + 1u == w1)
+        /* Render the slot once, after its last bucket is due (or at the
+         * cursor target) so sub-slot samples are merged first. */
+        if (b + 1u == w1 || b == target)
         {
             if (!trend_sweep_render_slot(slot, b))
             {
@@ -4080,10 +4082,10 @@ static void reading_only_render(void)
                      * first few samples. */
                     if (magnitude < 0.000001f)
                         magnitude = 0.000001f;
-                    if (span < magnitude * 0.25f)
-                        span = magnitude * 0.25f;
-                    axis_min -= span * 0.35f;
-                    axis_max += span * 0.35f;
+                    if (span < magnitude * 4.0f)
+                        span = magnitude * 4.0f;
+                    axis_min -= span * 0.5f;
+                    axis_max += span * 0.5f;
                 }
                 axis_expanded = true;
             }
@@ -4106,12 +4108,11 @@ static void reading_only_render(void)
             span = axis_max - axis_min;
             if (span < 0.000001f)
                 span = 0.000001f;
-            /* Dynamic Y compression: keep ~35% margin each side (≈59%
-             * fill) so small peaks don't trigger a full-window rescan.
-             * Combined with the sweep's live-window rescan, this gives
-             * smooth compression instead of redrawing on every touch. */
-            s_trend_axis_min = axis_min - span * 0.35f;
-            s_trend_axis_max = axis_max + span * 0.35f;
+            /* Reserve four spans of headroom when the live data approaches
+             * an edge. A rising ramp therefore causes one bounded rebuild
+             * instead of a full 240-column rebuild for every new peak. */
+            s_trend_axis_min = axis_min - span * 3.0f;
+            s_trend_axis_max = axis_max + span * 3.0f;
             s_trend_axis_valid = true;
             s_frame.trend_minimum = s_trend_axis_min;
             s_frame.trend_maximum = s_trend_axis_max;
@@ -4120,13 +4121,10 @@ static void reading_only_render(void)
             main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
             {
-                /* Invalidate only Y labels; keep the plot background.
-                 * A full plot clear (reading_only_invalidate_trend_pages)
-                 * flashes black and is unnecessary — the sweep's
-                 * live-window rescan redraws each column at the new
-                 * scale, giving true dynamic Y compression. */
-                s_reading_only_page_y_labels[s_render_page][0][0] = '\0';
-                s_reading_only_page_y_labels[s_render_page ^ 1u][0][0] = '\0';
+                /* Clean background + labels; the sweep's own axis-move
+                 * detector restarts a live-window rescan at the new
+                 * scale (no per-slot cursor reset needed here). */
+                reading_only_invalidate_trend_pages();
             }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
