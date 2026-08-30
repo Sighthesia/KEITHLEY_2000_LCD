@@ -122,12 +122,32 @@ lt7680_status_t lt7680_gfx_select_canvas_page(uint8_t page);
 lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address);
 /* Set the canvas image width directly, in pixels. */
 lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels);
+/* Select an arbitrary SDRAM surface and its GE clipping window. */
+lt7680_status_t lt7680_gfx_set_surface(uint32_t address,
+                                       uint16_t width_pixels,
+                                       uint16_t height_pixels);
+lt7680_status_t lt7680_gfx_surface_draw_line(uint16_t x0, uint16_t y0,
+                                             uint16_t x1, uint16_t y1,
+                                             uint16_t rgb565);
 /* Write a packed RGB565 scanline buffer into the current canvas at x/y. */
 lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
                                         const uint16_t *pixels,
                                         uint16_t count);
 /* Atomically make a completed canvas page the visible main image. */
 lt7680_status_t lt7680_gfx_present_page(uint8_t page);
+/* Configure PIP1 as an independent 16bpp source window. Display coordinates
+ * are native 320x960 framebuffer coordinates; source_y is the image-window
+ * offset used for hardware scrolling. */
+lt7680_status_t lt7680_gfx_pip1_configure(uint32_t source_address,
+                                          uint16_t source_width,
+                                          uint16_t display_x,
+                                          uint16_t display_y,
+                                          uint16_t window_width,
+                                          uint16_t window_height,
+                                          uint16_t source_x,
+                                          uint16_t source_y);
+lt7680_status_t lt7680_gfx_pip1_set_source_y(uint16_t source_y);
+lt7680_status_t lt7680_gfx_pip1_enable(bool enable);
 /* Clone one complete RGB565 canvas page with the verified BTE copy ROP. */
 lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page);
 /* Copy an RGB565 rectangle between the two canvas pages with the verified

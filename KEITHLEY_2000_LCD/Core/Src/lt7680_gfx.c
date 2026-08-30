@@ -64,6 +64,14 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
 #define LT7680_REG_MIW0 0x24u  /* Main Image Width (14-bit, lo then hi) */
 #define LT7680_REG_MWULX0 0x26u /* Main Window Upper-Left X (13-bit) */
 #define LT7680_REG_MWULY0 0x28u /* Main Window Upper-Left Y (13-bit) */
+#define LT7680_REG_PWDULX0 0x2Au /* PIP display window X */
+#define LT7680_REG_PWDULY0 0x2Cu /* PIP display window Y */
+#define LT7680_REG_PISA0 0x2Eu /* PIP image start address */
+#define LT7680_REG_PIW0 0x32u /* PIP image width */
+#define LT7680_REG_PWIULX0 0x34u /* PIP source window X */
+#define LT7680_REG_PWIULY0 0x36u /* PIP source window Y */
+#define LT7680_REG_PWW0 0x38u /* PIP window width */
+#define LT7680_REG_PWH0 0x3Au /* PIP window height */
 #define LT7680_REG_CVSSA0 0x50u /* Canvas Start Address (4 bytes) */
 #define LT7680_REG_CVS_IMWTH0 0x54u /* Canvas Image Width (14-bit) */
 #define LT7680_REG_AWUL_X0 0x56u /* Active Window Upper-Left X (13-bit) */
@@ -1032,6 +1040,46 @@ lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels)
     return wr13(LT7680_REG_CVS_IMWTH0, width_pixels);
 }
 
+lt7680_status_t lt7680_gfx_set_surface(uint32_t address,
+                                        uint16_t width_pixels,
+                                        uint16_t height_pixels)
+{
+    lt7680_status_t st;
+
+    if (address > 0x00FFFFFFu || width_pixels == 0u || height_pixels == 0u ||
+        (uint32_t)address + (uint32_t)width_pixels * height_pixels * 2u >
+            0x01000000u)
+        return LT7680_ERR_PARAM;
+    st = wr32le(LT7680_REG_CVSSA0, address);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_CVS_IMWTH0, width_pixels);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AWUL_X0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AWUL_Y0, 0u);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_AW_WTH0, width_pixels);
+    if (st != LT7680_OK) return st;
+    return wr13(LT7680_REG_AW_HT0, height_pixels);
+}
+
+lt7680_status_t lt7680_gfx_surface_draw_line(uint16_t x0, uint16_t y0,
+                                              uint16_t x1, uint16_t y1,
+                                              uint16_t rgb565)
+{
+    lt7680_status_t st;
+
+    st = set_fg_color16(rgb565);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_GE_SPT, (uint32_t)x0 | ((uint32_t)y0 << 16));
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_GE_EPT, (uint32_t)x1 | ((uint32_t)y1 << 16));
+    if (st != LT7680_OK) return st;
+    st = write_reg(LT7680_REG_DCR0, 0x80u);
+    if (st != LT7680_OK) return st;
+    return wait_2d_idle();
+}
+
 lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
                                         const uint16_t *pixels,
                                         uint16_t count)
@@ -1075,6 +1123,59 @@ lt7680_status_t lt7680_gfx_present_page(uint8_t page)
      * the panel and therefore presents the already-complete page atomically. */
     return wr32le(LT7680_REG_MISA0,
                   (uint32_t)page * LT7680_CANVAS_PAGE_BYTES);
+}
+
+lt7680_status_t lt7680_gfx_pip1_configure(uint32_t source_address,
+                                           uint16_t source_width,
+                                           uint16_t display_x,
+                                           uint16_t display_y,
+                                           uint16_t window_width,
+                                           uint16_t window_height,
+                                           uint16_t source_x,
+                                           uint16_t source_y)
+{
+    lt7680_status_t st;
+
+    if (source_address > 0x00FFFFFFu || source_width == 0u ||
+        window_width == 0u || window_height == 0u ||
+        (display_x & 3u) != 0u || (window_width & 3u) != 0u ||
+        (uint32_t)display_x + window_width > s_panel.width ||
+        (uint32_t)display_y + window_height > s_panel.height ||
+        (uint32_t)source_x + window_width > source_width ||
+        (uint32_t)source_y + window_height > 8191u)
+        return LT7680_ERR_PARAM;
+    st = write_reg(0x11u, 0x04u);
+    if (st != LT7680_OK) return st;
+    st = wr32le(LT7680_REG_PISA0, source_address);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PIW0, source_width);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PWDULX0, display_x);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PWDULY0, display_y);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PWIULX0, source_x);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PWIULY0, source_y);
+    if (st != LT7680_OK) return st;
+    st = wr13(LT7680_REG_PWW0, window_width);
+    if (st != LT7680_OK) return st;
+    return wr13(LT7680_REG_PWH0, window_height);
+}
+
+lt7680_status_t lt7680_gfx_pip1_set_source_y(uint16_t source_y)
+{
+    return wr13(LT7680_REG_PWIULY0, source_y);
+}
+
+lt7680_status_t lt7680_gfx_pip1_enable(bool enable)
+{
+    uint8_t value;
+    lt7680_status_t st = lt7680_read_reg(0x10u, &value);
+    if (st != LT7680_OK) return st;
+    if (enable) value |= 0x80u;
+    else value &= (uint8_t)~0x80u;
+    return write_reg(0x10u, value);
 }
 
 lt7680_status_t lt7680_gfx_copy_page(uint8_t source_page, uint8_t target_page)
@@ -1481,7 +1582,10 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
 static lt7680_status_t wait_2d_idle(void)
 {
     uint8_t status = 0;
-    for (uint16_t i = 0u; i < 1000u; i++) {
+    /* Budget: ~1000 back-to-back status polls (~5ms) only covered a 614KB
+     * full-page clear; the 96x4096 PIP source clear (768KB, ~8ms) timed out
+     * spuriously. 10000 polls gives ~50ms for any single GE fill. */
+    for (uint32_t i = 0u; i < 10000u; i++) {
         lt7680_status_t st = lt7680_read_status(&status);
         if (st != LT7680_OK) {
             return st;

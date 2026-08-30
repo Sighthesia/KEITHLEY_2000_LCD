@@ -335,6 +335,15 @@ static float s_trend_axis_min;
 static float s_trend_axis_max;
 static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
 static bool s_reading_only_page_trend_curve_valid[2];
+#define TREND_PIP_SOURCE_ADDRESS 0x00400000u
+#define TREND_PIP_SOURCE_WIDTH 96u
+#define TREND_PIP_SOURCE_HEIGHT 4096u
+static bool s_trend_pip_ready;
+static uint32_t s_trend_pip_head;
+static uint32_t s_trend_pip_last_tick;
+static uint16_t s_trend_pip_prev_x;
+static uint32_t s_trend_pip_prev_y;
+static bool s_trend_pip_prev_valid;
 
 static void reading_only_invalidate_trend_pages(void)
 {
@@ -356,6 +365,164 @@ static void reading_only_invalidate_trend_pages(void)
                sizeof(s_drawn_trend_occupied[page]));
         s_trend_grid_dirty[page] = false;
     }
+}
+
+static bool trend_pip_init(void)
+{
+    lt7680_rect_t clear = {0u, 0u, TREND_PIP_SOURCE_WIDTH,
+                           TREND_PIP_SOURCE_HEIGHT};
+    lt7680_status_t st;
+    uint8_t step = 0u;
+
+    st = lt7680_gfx_pip1_enable(false);
+    if (st == LT7680_OK)
+    {
+        step = 1u;
+        st = lt7680_gfx_set_surface(TREND_PIP_SOURCE_ADDRESS,
+                                    TREND_PIP_SOURCE_WIDTH,
+                                    TREND_PIP_SOURCE_HEIGHT);
+    }
+    if (st == LT7680_OK)
+    {
+        step = 2u;
+        st = lt7680_gfx_fill_rect(&clear, MAIN_DISPLAY_COLOR_BG);
+    }
+    if (st == LT7680_OK)
+    {
+        static const uint16_t value_grid_x[4] = {0u, 28u, 56u, 91u};
+        static const uint16_t time_grid_y[5] = {0u, 210u, 420u, 630u, 840u};
+        uint8_t i;
+
+        step = 3u;
+        for (i = 0u; i < 4u && st == LT7680_OK; i++)
+            st = lt7680_gfx_surface_draw_line(
+                value_grid_x[i], 0u, value_grid_x[i],
+                TREND_PIP_SOURCE_HEIGHT - 1u, MAIN_DISPLAY_COLOR_GRID);
+        for (i = 0u; i < 5u && st == LT7680_OK; i++)
+            st = lt7680_gfx_surface_draw_line(
+                0u, time_grid_y[i], TREND_PIP_SOURCE_WIDTH - 5u,
+                time_grid_y[i], MAIN_DISPLAY_COLOR_GRID);
+    }
+    if (st == LT7680_OK)
+    {
+        step = 4u;
+        st = lt7680_gfx_pip1_configure(TREND_PIP_SOURCE_ADDRESS,
+                                       TREND_PIP_SOURCE_WIDTH, 196u, 96u,
+                                       92u, 840u, 0u, 0u);
+    }
+    if (st == LT7680_OK)
+    {
+        /* Restore BOTH the canvas and the active window: set_surface()
+         * repointed AW to the PIP surface, and a stale 96x4096 active window
+         * would clip every later main-page GE operation. */
+        step = 5u;
+        st = lt7680_gfx_set_surface(0u, 320u, 960u);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_select_canvas_page(0u);
+    }
+    if (st == LT7680_OK)
+    {
+        step = 6u;
+        st = lt7680_gfx_pip1_enable(true);
+    }
+    if (st != LT7680_OK)
+    {
+        hal_uart_send_text("[PIP] fail step=");
+        hal_uart_send_hex8(step);
+        hal_uart_send_text(" st=");
+        hal_uart_send_hex8((uint8_t)st);
+        hal_uart_send_text("\r\n");
+    }
+    s_trend_pip_ready = st == LT7680_OK;
+    s_trend_pip_head = 0u;
+    s_trend_pip_last_tick = HAL_GetTick();
+    s_trend_pip_prev_valid = false;
+    return s_trend_pip_ready;
+}
+
+static void trend_pip_reset(void);
+
+static bool trend_pip_update(uint32_t now)
+{
+    uint32_t head;
+    uint16_t y;
+    uint16_t plot_x;
+    lt7680_status_t st;
+
+    if (!s_trend_pip_ready || !s_frame.trend_has_data)
+        return true;
+    if (s_trend_pip_head >= TREND_PIP_SOURCE_HEIGHT - 2u)
+    {
+        trend_pip_reset();
+        if (!s_trend_pip_ready)
+            return false;
+    }
+    head = ((uint32_t)(now - s_trend_pip_last_tick) * 840u) / 10000u;
+    if (head == 0u)
+        return true;
+    s_trend_pip_last_tick = now;
+    s_trend_pip_head += head;
+    y = (uint16_t)s_trend_pip_head;
+    plot_x = main_display_trend_plot_y(
+        s_trend_columns[TREND_MAX_COLUMNS - 1u].maximum,
+        s_frame.trend_minimum, s_frame.trend_maximum);
+    st = lt7680_gfx_set_surface(TREND_PIP_SOURCE_ADDRESS,
+                                TREND_PIP_SOURCE_WIDTH,
+                                TREND_PIP_SOURCE_HEIGHT);
+    if (st == LT7680_OK && s_trend_pip_prev_valid)
+        st = lt7680_gfx_surface_draw_line(
+            s_trend_pip_prev_x, (uint16_t)(s_trend_pip_prev_y),
+            plot_x, y, MAIN_DISPLAY_COLOR_GREEN);
+    if (st == LT7680_OK)
+        st = lt7680_gfx_pip1_set_source_y(
+            s_trend_pip_head > 840u ? (uint16_t)(s_trend_pip_head - 840u) : 0u);
+    if (st == LT7680_OK)
+    {
+        st = lt7680_gfx_set_surface(0u, 320u, 960u);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_select_canvas_page(s_render_page);
+    }
+    if (st != LT7680_OK)
+    {
+        (void)lt7680_gfx_pip1_enable(false);
+        s_trend_pip_ready = false;
+        s_reading_only_last_error = st;
+        s_reading_only_io_error = true;
+        return false;
+    }
+    s_trend_pip_prev_x = plot_x;
+    s_trend_pip_prev_y = s_trend_pip_head;
+    s_trend_pip_prev_valid = true;
+    return true;
+}
+
+static void trend_pip_reset(void)
+{
+    lt7680_rect_t clear = {0u, 0u, TREND_PIP_SOURCE_WIDTH,
+                           TREND_PIP_SOURCE_HEIGHT};
+    lt7680_status_t st;
+
+    (void)lt7680_gfx_pip1_enable(false);
+    st = lt7680_gfx_set_surface(TREND_PIP_SOURCE_ADDRESS,
+                                TREND_PIP_SOURCE_WIDTH,
+                                TREND_PIP_SOURCE_HEIGHT);
+    if (st == LT7680_OK)
+        st = lt7680_gfx_fill_rect(&clear, MAIN_DISPLAY_COLOR_BG);
+    if (st == LT7680_OK)
+        st = lt7680_gfx_pip1_set_source_y(0u);
+    if (st == LT7680_OK)
+    {
+        st = lt7680_gfx_set_surface(0u, 320u, 960u);
+        if (st == LT7680_OK)
+            st = lt7680_gfx_select_canvas_page(s_render_page);
+    }
+    if (st == LT7680_OK)
+        st = lt7680_gfx_pip1_enable(true);
+    s_trend_pip_head = 0u;
+    s_trend_pip_last_tick = HAL_GetTick();
+    s_trend_pip_prev_valid = false;
+    if (st != LT7680_OK)
+        s_trend_pip_ready = false;
 }
 #endif
 
@@ -1086,6 +1253,8 @@ static void proto_on_event(const k2000_event_t *evt)
             {
                 s_trend_axis_valid = false;
                 reading_only_invalidate_trend_pages();
+                if (s_trend_pip_ready)
+                    trend_pip_reset();
             }
 #endif
         }
@@ -3409,6 +3578,14 @@ static void reading_only_render(void)
         bool background_ready;
         uint16_t scroll;
 
+        if (s_trend_pip_ready)
+        {
+            main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
+            (void)trend_pip_update(now);
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
+
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
             s_trend_axis_valid = false;
@@ -4541,6 +4718,13 @@ int main(void)
                             }
                             if (st == LT7680_OK)
                                 st = lt7680_gfx_present_page(s_visible_page);
+#if K2000_READING_ONLY_BASELINE
+                            /* PIP bring-up failure is non-fatal: trend_pip_init
+                             * prints the failing step and the main-window
+                             * renderer stays active as fallback. */
+                            if (st == LT7680_OK)
+                                (void)trend_pip_init();
+#endif
                         }
                             if (st != LT7680_OK)
                             {

@@ -23,3 +23,29 @@ Completed Task 4 for the reading-only baseline trend chart.
 ## Commit
 
 `0e90758 feat: incremental trend columns on the reading baseline`
+
+## Review Fix
+
+The trend-column cache comparison now skips only when both projected Y
+coordinates are exactly unchanged. A 1px projection change therefore erases
+and redraws the column as required.
+
+### Verification
+
+Command: `(cd firmware && ./tests/run_tests.sh)`
+
+Output: all host tests passed, including `PASS test_trend_buffer`,
+`PASS test_main_display`, and `PASS test_render_scheduler`.
+
+Command: `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`
+
+Output:
+
+```text
+[1/2] Building C object CMakeFiles/KEITHLEY_2000_LCD.dir/Core/Src/main.c.obj
+[2/2] Linking C executable KEITHLEY_2000_LCD.elf
+RAM: 16296 B / 20 KB (79.57%)
+FLASH: 39112 B / 64 KB (59.68%)
+```
+
+`git diff --check`: PASS.
