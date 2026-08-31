@@ -1233,6 +1233,7 @@ static bool hidden_page_sync_regions(void)
  * the sibling page without the trace and every page flip visibly
  * flickers. While the sweep draws, dual-page writes are forced. */
 static bool s_trend_sweep_drawing;
+static bool s_trend_stats_changed;
 static bool ui_runtime_single_page(void)
 {
     return !s_trend_sweep_drawing && s_frame_rendering &&
@@ -3834,10 +3835,8 @@ static bool reading_only_render_trend_stats(void)
     ty = (uint16_t)(ys[row[page]] +
                     (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
     {
-        bitmap_job_t title_job = {0};
         bitmap_job_t value_job = {0};
 
-        s_trend_sweep_drawing = true;
         if (ui_fill_rect(
                          s_reading_only_page_trend_stats_valid[page]
                              ? vx : MAIN_DISPLAY_TREND_STATS_X,
@@ -3850,28 +3849,28 @@ static bool reading_only_render_trend_stats(void)
                              ? MAIN_DISPLAY_COLOR_BAR_ALT
                              : MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
         {
-            s_trend_sweep_drawing = false;
             return false;
         }
-        if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X, ty,
-                                   names[row[page]], MAIN_DISPLAY_COLOR_WHITE,
-                                   3u))
+        if (!s_reading_only_page_trend_stats_valid[page])
         {
-            s_trend_sweep_drawing = false;
-            return false;
+            bitmap_job_t title_job = {0};
+
+            if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X,
+                                      ty, names[row[page]],
+                                      MAIN_DISPLAY_COLOR_WHITE, 3u))
+                return false;
         }
         if (!ui_draw_bitmap_slice(&value_job, vx, ty, value,
                                   MAIN_DISPLAY_COLOR_WHITE, 3u))
         {
-            s_trend_sweep_drawing = false;
             return false;
         }
-        s_trend_sweep_drawing = false;
     }
     strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
             MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
     s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
     row[page]++;
+    s_trend_stats_changed = true;
     if (row[page] < 3u)
         return false;
     row[page] = 0u;
@@ -4296,6 +4295,13 @@ static void reading_only_render(void)
         /* Statistics are low-priority. Their page-local bitmap job may span
          * several calls, but it must never hold the frame commit hostage. */
         (void)reading_only_render_trend_stats();
+        if (s_trend_stats_changed)
+        {
+            /* The stats are rendered on the hidden page only. Synchronize
+             * the complete trend band before the next page flip. */
+            s_frame_regions |= FRAME_REGION_TREND;
+            s_trend_stats_changed = false;
+        }
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
