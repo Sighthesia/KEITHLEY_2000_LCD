@@ -754,6 +754,7 @@ typedef struct
 } bitmap_job_t;
 
 static bitmap_job_t s_bitmap_job;
+static bitmap_job_t s_trend_stats_bitmap_job;
 
 typedef struct
 {
@@ -811,6 +812,7 @@ static void reading_only_abort_frame(lt7680_status_t error)
     memset(s_reading_only_page_value_x, 0,
            sizeof(s_reading_only_page_value_x));
     memset(&s_bitmap_job, 0, sizeof(s_bitmap_job));
+    memset(&s_trend_stats_bitmap_job, 0, sizeof(s_trend_stats_bitmap_job));
     memset(&s_rif_draw_job, 0, sizeof(s_rif_draw_job));
     s_reading_only_io_error = false;
 }
@@ -1513,33 +1515,34 @@ static const uint8_t *text_glyph(const char *text, uint8_t *advance)
 
 /* Draw at most twelve horizontal bitmap runs. A run maps to one transformed
  * GE rectangle, bounding every call independently of string/glyph size. */
-static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
-                                 uint16_t color, uint8_t mode)
+static bool ui_draw_bitmap_slice(bitmap_job_t *job, uint16_t x, uint16_t y,
+                                 const char *text, uint16_t color,
+                                 uint8_t mode)
 {
     /* A GE rectangle is a blocking SPI transaction.  Keep this small enough
      * that the main loop can return to the RX ISR/keypad between calls; a
      * large glyph may therefore span several cooperative calls. */
-    uint16_t budget = 64u;
-    if (!s_bitmap_job.active)
+    uint16_t budget = mode == 3u ? 256u : 64u;
+    if (!job->active)
     {
-        s_bitmap_job.text = text;
-        s_bitmap_job.x = x;
-        s_bitmap_job.y = y;
-        s_bitmap_job.color = color;
-        s_bitmap_job.cx = x;
-        s_bitmap_job.row = 0u;
-        s_bitmap_job.col = 0u;
-        s_bitmap_job.mode = mode;
-        s_bitmap_job.active = true;
+        job->text = text;
+        job->x = x;
+        job->y = y;
+        job->color = color;
+        job->cx = x;
+        job->row = 0u;
+        job->col = 0u;
+        job->mode = mode;
+        job->active = true;
     }
-    while (budget > 0u && *s_bitmap_job.text != '\0')
+    while (budget > 0u && *job->text != '\0')
     {
         uint8_t advance = 1u;
         uint8_t width = FONT_TEXT_WIDTH;
         uint8_t height = FONT_TEXT_HEIGHT;
         uint8_t bpr = FONT_TEXT_BYTES_PER_ROW;
         const uint8_t *bitmap;
-        if (s_bitmap_job.mode == 2u)
+        if (job->mode == 2u)
         {
             bitmap = font_half_bitmap(*s_bitmap_job.text);
             width = FONT_HALF_WIDTH;
@@ -1548,32 +1551,32 @@ static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
         }
         else
         {
-            bitmap = text_glyph(s_bitmap_job.text, &advance);
+            bitmap = text_glyph(job->text, &advance);
         }
         if (bitmap == 0)
         {
-            s_bitmap_job.text += advance;
+            job->text += advance;
             continue;
         }
-        while (s_bitmap_job.row < height)
+        while (job->row < height)
         {
-            const uint8_t *bits = bitmap + s_bitmap_job.row * bpr;
-            while (s_bitmap_job.col < width &&
-                   (bits[s_bitmap_job.col >> 3] & (uint8_t)(0x80u >> (s_bitmap_job.col & 7u))) == 0u)
-                s_bitmap_job.col++;
-            if (s_bitmap_job.col < width)
+            const uint8_t *bits = bitmap + job->row * bpr;
+            while (job->col < width &&
+                   (bits[job->col >> 3] & (uint8_t)(0x80u >> (job->col & 7u))) == 0u)
+                job->col++;
+            if (job->col < width)
             {
-                uint8_t start = s_bitmap_job.col;
-                while (s_bitmap_job.col < width &&
-                       (bits[s_bitmap_job.col >> 3] & (uint8_t)(0x80u >> (s_bitmap_job.col & 7u))) != 0u)
-                    s_bitmap_job.col++;
+                uint8_t start = job->col;
+                while (job->col < width &&
+                       (bits[job->col >> 3] & (uint8_t)(0x80u >> (job->col & 7u))) != 0u)
+                    job->col++;
                 if (ui_fill_rect(
-                        (uint16_t)(s_bitmap_job.cx + start),
-                        (uint16_t)(s_bitmap_job.y + s_bitmap_job.row),
-                        (uint16_t)(s_bitmap_job.col - start), 1u,
-                        s_bitmap_job.color) != LT7680_OK)
+                        (uint16_t)(job->cx + start),
+                        (uint16_t)(job->y + job->row),
+                        (uint16_t)(job->col - start), 1u,
+                        job->color) != LT7680_OK)
                 {
-                    s_bitmap_job.active = false;
+                    job->active = false;
                     return false;
                 }
                 budget--;
@@ -1582,23 +1585,23 @@ static bool ui_draw_bitmap_slice(uint16_t x, uint16_t y, const char *text,
             }
             else
             {
-                s_bitmap_job.col = 0u;
-                s_bitmap_job.row++;
+                job->col = 0u;
+                job->row++;
             }
         }
-        s_bitmap_job.row = 0u;
-        s_bitmap_job.col = 0u;
-        s_bitmap_job.cx = (uint16_t)(s_bitmap_job.cx + width);
-        s_bitmap_job.text += advance;
+        job->row = 0u;
+        job->col = 0u;
+        job->cx = (uint16_t)(job->cx + width);
+        job->text += advance;
     }
-    s_bitmap_job.active = false;
+    job->active = false;
     return true;
 }
 
 static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
-    return ui_draw_bitmap_slice(x, y, text, color, 0u);
+    return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 0u);
 }
 
 static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
@@ -2637,7 +2640,7 @@ static void rif_init(void)
 static bool READING_ONLY_LEGACY ui_draw_half(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
-    return ui_draw_bitmap_slice(x, y, text, color, 2u);
+    return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 2u);
 }
 
 #define DRAW_ITEM(call_) \
@@ -3784,41 +3787,6 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx < 31u)
-    {
-        uint8_t row = (uint8_t)((idx - 19u) / 4u);
-        uint8_t sub = (uint8_t)((idx - 19u) % 4u);
-        static const char *const names[3] = {"MAX", "MIN", "AVG"};
-        static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
-                                       MAIN_DISPLAY_TREND_STATS_MIN_Y,
-                                       MAIN_DISPLAY_TREND_STATS_AVG_Y};
-        const char *value = row == 0u ? s_frame.trend_stat_maximum_text
-                                      : row == 1u ? s_frame.trend_stat_minimum_text
-                                                  : s_frame.trend_stat_average_text;
-        uint16_t vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
-                                 MAIN_DISPLAY_TREND_STATS_NAME_W);
-        uint16_t ty = (uint16_t)(ys[row] +
-                                 (MAIN_DISPLAY_TREND_STATS_ROW_H -
-                                  FONT_TEXT_HEIGHT) / 2u);
-
-        if (sub == 0u)
-            (void)ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row],
-                               MAIN_DISPLAY_TREND_STATS_NAME_W,
-                               MAIN_DISPLAY_TREND_STATS_ROW_H,
-                               MAIN_DISPLAY_COLOR_BAR);
-        else if (sub == 1u)
-            (void)ui_fill_rect(vx, ys[row], MAIN_DISPLAY_TREND_STATS_VALUE_W,
-                               MAIN_DISPLAY_TREND_STATS_ROW_H,
-                               MAIN_DISPLAY_COLOR_BAR_ALT);
-        else if (sub == 2u)
-            (void)ui_draw_text(MAIN_DISPLAY_TREND_STATS_X, ty, names[row],
-                               MAIN_DISPLAY_COLOR_WHITE);
-        else
-            (void)ui_draw_text(vx, ty, value, MAIN_DISPLAY_COLOR_WHITE);
-        idx++;
-        return false;
-    }
-
     strncpy(s_reading_only_page_trend_unit[s_render_page], unit,
             TREND_UNIT_ID_MAX - 1u);
     s_reading_only_page_trend_unit[s_render_page][TREND_UNIT_ID_MAX - 1u] = '\0';
@@ -3834,49 +3802,98 @@ static bool reading_only_render_trend_background(void)
 
 static bool reading_only_render_trend_stats(void)
 {
-    static uint8_t row;
-    static uint32_t last_update_tick;
+    static uint8_t row[2];
+    static uint8_t sub[2];
+    static uint32_t last_update_tick[2];
+    static uint8_t job_page = 0xFFu;
     static const char *const names[3] = {"MAX", "MIN", "AVG"};
     static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
                                    MAIN_DISPLAY_TREND_STATS_MIN_Y,
                                    MAIN_DISPLAY_TREND_STATS_AVG_Y};
     const char *value;
     uint32_t now = HAL_GetTick();
+    uint8_t page = s_render_page;
     uint16_t vx;
     uint16_t ty;
 
-    if (s_reading_only_page_trend_stats_valid[s_render_page] &&
-        (uint32_t)(now - last_update_tick) < 500u)
-        return true;
-    value = row == 0u ? s_frame.trend_stat_maximum_text
-                      : row == 1u ? s_frame.trend_stat_minimum_text
-                                  : s_frame.trend_stat_average_text;
-    if (!s_reading_only_page_trend_stats_valid[s_render_page] ||
-        strcmp(s_reading_only_page_trend_stats[s_render_page][row], value) != 0)
+    if (job_page != page)
     {
-        vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
-                        MAIN_DISPLAY_TREND_STATS_NAME_W);
-        ty = (uint16_t)(ys[row] +
-                        (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
-        if (ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row],
+        memset(&s_trend_stats_bitmap_job, 0,
+               sizeof(s_trend_stats_bitmap_job));
+        row[page] = 0u;
+        sub[page] = 0u;
+        job_page = page;
+    }
+    value = row[page] == 0u ? s_frame.trend_stat_maximum_text
+                            : row[page] == 1u ? s_frame.trend_stat_minimum_text
+                                              : s_frame.trend_stat_average_text;
+    if (s_reading_only_page_trend_stats_valid[page] &&
+        (uint32_t)(now - last_update_tick[page]) < 2000u)
+        return true;
+    if (s_reading_only_page_trend_stats_valid[page] &&
+        strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
+    {
+        sub[page] = 0u;
+        row[page]++;
+        if (row[page] >= 3u)
+        {
+            row[page] = 0u;
+            last_update_tick[page] = now;
+        }
+        return row[page] == 0u;
+    }
+    vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
+                    MAIN_DISPLAY_TREND_STATS_NAME_W);
+    ty = (uint16_t)(ys[row[page]] +
+                    (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
+    if (sub[page] == 0u)
+    {
+        s_trend_sweep_drawing = true;
+        if (ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
                          MAIN_DISPLAY_TREND_STATS_W,
                          MAIN_DISPLAY_TREND_STATS_ROW_H,
                          MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+        {
+            s_trend_sweep_drawing = false;
             return false;
-        if (!ui_draw_text(MAIN_DISPLAY_TREND_STATS_X, ty, names[row],
-                          MAIN_DISPLAY_COLOR_WHITE) ||
-            !ui_draw_text(vx, ty, value, MAIN_DISPLAY_COLOR_WHITE))
-            return false;
-        strncpy(s_reading_only_page_trend_stats[s_render_page][row], value,
-                MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
-        s_reading_only_page_trend_stats[s_render_page][row][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
-    }
-    row++;
-    if (row < 3u)
+        }
+        s_trend_sweep_drawing = false;
+        sub[page] = 1u;
         return false;
-    row = 0u;
-    last_update_tick = now;
-    s_reading_only_page_trend_stats_valid[s_render_page] = true;
+    }
+    if (sub[page] == 1u)
+    {
+        s_trend_sweep_drawing = true;
+        if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job,
+                                  MAIN_DISPLAY_TREND_STATS_X, ty,
+                                   names[row[page]], MAIN_DISPLAY_COLOR_WHITE,
+                                   3u))
+        {
+            s_trend_sweep_drawing = false;
+            return false;
+        }
+        s_trend_sweep_drawing = false;
+        sub[page] = 2u;
+        return false;
+    }
+    s_trend_sweep_drawing = true;
+    if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job, vx, ty, value,
+                              MAIN_DISPLAY_COLOR_WHITE, 3u))
+    {
+        s_trend_sweep_drawing = false;
+        return false;
+    }
+    s_trend_sweep_drawing = false;
+    strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
+            MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
+    s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
+    sub[page] = 0u;
+    row[page]++;
+    if (row[page] < 3u)
+        return false;
+    row[page] = 0u;
+    last_update_tick[page] = now;
+    s_reading_only_page_trend_stats_valid[page] = true;
     return true;
 }
 
@@ -4293,9 +4310,13 @@ static void reading_only_render(void)
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
-        /* Refresh at most one MAX/MIN/AVG row per frame. Do not gate the
-         * trend sweep on this low-priority text update. */
-        (void)reading_only_render_trend_stats();
+        /* Complete the current stats row before presenting. Its bitmap job
+         * is page-local; allowing the sweep/present to proceed mid-row would
+         * resume text on a different canvas and flash or lose labels. */
+        if (!reading_only_render_trend_stats())
+        {
+            return;
+        }
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
