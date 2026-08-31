@@ -157,6 +157,16 @@ int main(void)
     assert(strstr(frame.y_labels[0], "A") != 0);
     assert(strstr(frame.y_labels[0], "6.89") == 0);
 
+    /* Prefix-scaled statistics must use the display-unit span only once;
+     * otherwise sub-volt mVAC values are rounded to the misleading 0mVAC. */
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 100u, "0.300", "MVAC"));
+    assert(trend_buffer_add(&trend, 120u, "0.400", "MVAC"));
+    main_display_format_trend(&trend, 120u, "mVAC", &frame);
+    assert(strcmp(frame.trend_stat_minimum_text, "0.30mVAC") == 0);
+    assert(strcmp(frame.trend_stat_maximum_text, "0.40mVAC") == 0);
+    assert(strcmp(frame.trend_stat_average_text, "0.35mVAC") == 0);
+
     /* Negative and sub-unit values must keep a finite, ordered scale. */
     trend_buffer_reset(&trend);
     assert(trend_buffer_add(&trend, 100u, "-0.002", "mA"));

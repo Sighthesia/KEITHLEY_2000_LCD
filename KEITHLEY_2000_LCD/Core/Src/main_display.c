@@ -369,12 +369,12 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
         }
     }
     format_stat_value(frame->trend_stat_maximum * scale, axis_unit,
-                      (maximum - minimum) * scale, frame->trend_stat_maximum_text,
+                      maximum - minimum, frame->trend_stat_maximum_text,
                       sizeof(frame->trend_stat_maximum_text));
     format_stat_value(frame->trend_stat_minimum * scale, axis_unit,
-                      (maximum - minimum) * scale, frame->trend_stat_minimum_text,
+                      maximum - minimum, frame->trend_stat_minimum_text,
                       sizeof(frame->trend_stat_minimum_text));
     format_stat_value(frame->trend_stat_average * scale, axis_unit,
-                      (maximum - minimum) * scale, frame->trend_stat_average_text,
+                      maximum - minimum, frame->trend_stat_average_text,
                       sizeof(frame->trend_stat_average_text));
 }

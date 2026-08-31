@@ -114,7 +114,11 @@ bool trend_parse_reading_display(const char *text, const char *unit,
         factor = 0.000001f;
         u += (uint8_t)unit[0] == 0xC2u ? 2 : 1;
     } else if (unit[0] == 'k') { factor = 1000.0f; u++; }
-    else if (unit[0] == 'M') { factor = 1000000.0f; u++; }
+    else if (unit[0] == 'M' && (unit[1] == 'V' || unit[1] == 'A')) {
+        /* The host uses uppercase MV/MA for milli-volt/ampere modes. */
+        factor = 0.001f;
+        u++;
+    } else if (unit[0] == 'M') { factor = 1000000.0f; u++; }
     if (factor > 1.0f && value > FLT_MAX / factor) return false;
     if (factor > 1.0f && value < -FLT_MAX / factor) return false;
     if (strstr(u, "V") != 0) { dim = TREND_DIM_VOLTAGE; base = "V"; }
