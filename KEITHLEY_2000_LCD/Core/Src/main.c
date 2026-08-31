@@ -3813,6 +3813,12 @@ static bool reading_only_render_trend_stats(void)
     uint16_t vx;
     uint16_t ty;
 
+    /* A unit change briefly resets the 10 s buffer. Keep the last valid
+     * statistics visible through that empty transition instead of clearing
+     * the cells and publishing blank/zero-looking text. */
+    if (!s_frame.trend_has_data)
+        return true;
+
     value = row[page] == 0u ? s_frame.trend_stat_maximum_text
                             : row[page] == 1u ? s_frame.trend_stat_minimum_text
                                               : s_frame.trend_stat_average_text;
@@ -3835,23 +3841,18 @@ static bool reading_only_render_trend_stats(void)
     ty = (uint16_t)(ys[row[page]] +
                     (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
     {
-        bitmap_job_t value_job = {0};
+        const char *old = s_reading_only_page_trend_stats[page][row[page]];
+        const char *op = old;
+        const char *np = value;
+        uint8_t glyph = 0u;
+        bool first = !s_reading_only_page_trend_stats_valid[page];
 
-        if (ui_fill_rect(
-                         s_reading_only_page_trend_stats_valid[page]
-                             ? vx : MAIN_DISPLAY_TREND_STATS_X,
-                         ys[row[page]],
-                         s_reading_only_page_trend_stats_valid[page]
-                             ? MAIN_DISPLAY_TREND_STATS_VALUE_W
-                             : MAIN_DISPLAY_TREND_STATS_W,
-                         MAIN_DISPLAY_TREND_STATS_ROW_H,
-                         s_reading_only_page_trend_stats_valid[page]
-                             ? MAIN_DISPLAY_COLOR_BAR_ALT
-                             : MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
-        {
+        if (first && ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
+                                  MAIN_DISPLAY_TREND_STATS_W,
+                                  MAIN_DISPLAY_TREND_STATS_ROW_H,
+                                  MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
             return false;
-        }
-        if (!s_reading_only_page_trend_stats_valid[page])
+        if (first)
         {
             bitmap_job_t title_job = {0};
 
@@ -3860,10 +3861,41 @@ static bool reading_only_render_trend_stats(void)
                                       MAIN_DISPLAY_COLOR_WHITE, 3u))
                 return false;
         }
-        if (!ui_draw_bitmap_slice(&value_job, vx, ty, value,
-                                  MAIN_DISPLAY_COLOR_WHITE, 3u))
+        while (*op != '\0' || *np != '\0')
         {
-            return false;
+            uint8_t oa = 1u;
+            uint8_t na = 1u;
+            bool same;
+            char token[3] = {0};
+            bitmap_job_t value_job = {0};
+
+            if (*op != '\0')
+                (void)text_glyph(op, &oa);
+            if (*np != '\0')
+                (void)text_glyph(np, &na);
+            same = oa == na && oa != 0u && memcmp(op, np, oa) == 0;
+            if (!same)
+            {
+                uint16_t gx = (uint16_t)(vx + glyph * FONT_TEXT_WIDTH);
+
+                if (ui_fill_rect(gx, ys[row[page]], FONT_TEXT_WIDTH,
+                                 MAIN_DISPLAY_TREND_STATS_ROW_H,
+                                 MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
+                    return false;
+                if (*np != '\0')
+                {
+                    token[0] = np[0];
+                    if (na > 1u) token[1] = np[1];
+                    if (!ui_draw_bitmap_slice(&value_job, gx, ty, token,
+                                              MAIN_DISPLAY_COLOR_WHITE, 3u))
+                        return false;
+                }
+            }
+            if (*op != '\0') op += oa;
+            if (*np != '\0') np += na;
+            glyph++;
+            if (glyph >= MAIN_DISPLAY_TREND_STATS_VALUE_W / FONT_TEXT_WIDTH)
+                break;
         }
     }
     strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
