@@ -86,7 +86,7 @@ static void append_unsigned(char *out, uint8_t size, uint32_t value,
 static float nice_step(float span)
 {
     float step = 1.0f;
-    float scaled = span / 3.0f;
+    float scaled = span / 2.0f;
     while (scaled >= 10.0f) { scaled *= 0.1f; step *= 10.0f; }
     while (scaled < 1.0f) { scaled *= 10.0f; step *= 0.1f; }
     if (scaled <= 1.0f) return step;
@@ -164,7 +164,7 @@ void main_display_format_linear_trend_labels(main_display_frame_t *frame)
     if (span < 0.000001f)
         span = 0.000001f;
     for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
-        format_fixed_axis(maximum - span * (float)i / 3.0f, unit, span / 3.0f,
+        format_fixed_axis(maximum - span * (float)i / 2.0f, unit, span / 2.0f,
                           frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
 }
 

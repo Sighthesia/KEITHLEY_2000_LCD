@@ -2756,7 +2756,7 @@ static void trend_restore_grid(uint16_t x0, uint16_t x1,
     for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
     {
         uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                i * MAIN_DISPLAY_PLOT_H / 3u);
+                                i * MAIN_DISPLAY_PLOT_H / 2u);
         if (y >= y0 && y <= y1)
             (void)ui_draw_line(x0, y, x1, y, MAIN_DISPLAY_COLOR_GRID);
     }
@@ -2772,7 +2772,7 @@ static void trend_restore_grid(uint16_t x0, uint16_t x1,
 static uint16_t trend_y_label_y(uint8_t index)
 {
     uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                 index * MAIN_DISPLAY_PLOT_H / 3u);
+                                 index * MAIN_DISPLAY_PLOT_H / 2u);
     uint16_t label_y = axis_y > 8u ? (uint16_t)(axis_y - 8u) : 0u;
 
     /* The first label is centred near the top grid line, but its bitmap must
@@ -3342,7 +3342,7 @@ static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1)
     for (row = 0u; row < MAIN_DISPLAY_Y_LABEL_COUNT; row++)
     {
         uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                row * MAIN_DISPLAY_PLOT_H / 3u);
+                                row * MAIN_DISPLAY_PLOT_H / 2u);
         if (ui_draw_line(x0, y, x1, y, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
             return false;
     }
@@ -3713,7 +3713,7 @@ static bool reading_only_render_trend_background(void)
     {
         uint8_t i = (uint8_t)(idx - 3u);
         uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                i * MAIN_DISPLAY_PLOT_H / 3u);
+                                i * MAIN_DISPLAY_PLOT_H / 2u);
         if (ui_draw_line(MAIN_DISPLAY_PLOT_X, y,
                          MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
                          MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
@@ -4702,7 +4702,7 @@ static void reading_scene_render(void)
         if (s_render_item >= 1u && s_render_item <= 4u)
         {
             uint8_t i = (uint8_t)(s_render_item - 1u);
-            uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y + i * MAIN_DISPLAY_PLOT_H / 3u);
+            uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y + i * MAIN_DISPLAY_PLOT_H / 2u);
             size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
             uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
                                    ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
@@ -4770,7 +4770,7 @@ static void reading_scene_render(void)
         {
             uint8_t i = (uint8_t)((s_render_item - 1u) / 2u);
             uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                    i * MAIN_DISPLAY_PLOT_H / 3u);
+                                    i * MAIN_DISPLAY_PLOT_H / 2u);
             (void)ui_draw_line(MAIN_DISPLAY_PLOT_X, y,
                                MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
                                MAIN_DISPLAY_COLOR_GRID);

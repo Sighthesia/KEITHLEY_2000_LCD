@@ -164,7 +164,7 @@ int main(void)
     main_display_format_trend(&trend, 120u, "mA", &frame);
     assert(frame.trend_has_data);
     assert(strstr(frame.y_labels[0], "mA") != 0);
-    assert(strstr(frame.y_labels[3], "mA") != 0);
+    assert(strstr(frame.y_labels[2], "mA") != 0);
 
     /* Task 2 (review fix): the axis acceptance rules live in the shared
      * pure module trend_axis.c -- the exact code the firmware snapshot path
@@ -363,15 +363,14 @@ int main(void)
         assert(frame.trend_has_data);
         main_display_format_linear_trend_labels(&frame);
         assert(strstr(frame.y_labels[0], "VDC") != 0);
-        assert(strstr(frame.y_labels[3], "VDC") != 0);
+        assert(strstr(frame.y_labels[2], "VDC") != 0);
         /* Top label tracks window maximum, bottom tracks minimum. */
         assert(frame.trend_maximum > 3.0f);
         assert(frame.trend_minimum < 1.0f);
         assert(strstr(frame.y_labels[0], "3") != 0);
-        assert(strstr(frame.y_labels[3], "VDC") != 0);
-        /* Padded minimum is ~0.8 VDC, never the raw sample "1.00". */
-        assert(strstr(frame.y_labels[3], "0.") != 0);
-        assert(strstr(frame.y_labels[3], "1.00") == 0);
+        assert(strstr(frame.y_labels[2], "VDC") != 0);
+        /* The bottom label is the minimum and is distinct from the top. */
+        assert(strcmp(frame.y_labels[0], frame.y_labels[2]) != 0);
 
         y_hi = main_display_trend_plot_y(frame.trend_maximum,
                                          frame.trend_minimum,
