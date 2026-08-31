@@ -754,7 +754,6 @@ typedef struct
 } bitmap_job_t;
 
 static bitmap_job_t s_bitmap_job;
-static bitmap_job_t s_trend_stats_bitmap_job[2];
 
 typedef struct
 {
@@ -812,7 +811,6 @@ static void reading_only_abort_frame(lt7680_status_t error)
     memset(s_reading_only_page_value_x, 0,
            sizeof(s_reading_only_page_value_x));
     memset(&s_bitmap_job, 0, sizeof(s_bitmap_job));
-    memset(s_trend_stats_bitmap_job, 0, sizeof(s_trend_stats_bitmap_job));
     memset(&s_rif_draw_job, 0, sizeof(s_rif_draw_job));
     s_reading_only_io_error = false;
 }
@@ -3803,7 +3801,6 @@ static bool reading_only_render_trend_background(void)
 static bool reading_only_render_trend_stats(void)
 {
     static uint8_t row[2];
-    static uint8_t sub[2];
     static uint32_t last_update_tick[2];
     static const char *const names[3] = {"MAX", "MIN", "AVG"};
     static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
@@ -3824,7 +3821,6 @@ static bool reading_only_render_trend_stats(void)
     if (s_reading_only_page_trend_stats_valid[page] &&
         strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
     {
-        sub[page] = 0u;
         row[page]++;
         if (row[page] >= 3u)
         {
@@ -3837,8 +3833,10 @@ static bool reading_only_render_trend_stats(void)
                     MAIN_DISPLAY_TREND_STATS_NAME_W);
     ty = (uint16_t)(ys[row[page]] +
                     (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
-    if (sub[page] == 0u)
     {
+        bitmap_job_t title_job = {0};
+        bitmap_job_t value_job = {0};
+
         s_trend_sweep_drawing = true;
         if (ui_fill_rect(
                          s_reading_only_page_trend_stats_valid[page]
@@ -3855,37 +3853,24 @@ static bool reading_only_render_trend_stats(void)
             s_trend_sweep_drawing = false;
             return false;
         }
-        s_trend_sweep_drawing = false;
-        sub[page] = s_reading_only_page_trend_stats_valid[page] ? 2u : 1u;
-        return false;
-    }
-    if (sub[page] == 1u)
-    {
-        s_trend_sweep_drawing = true;
-        if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job[page],
-                                  MAIN_DISPLAY_TREND_STATS_X, ty,
+        if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X, ty,
                                    names[row[page]], MAIN_DISPLAY_COLOR_WHITE,
                                    3u))
         {
             s_trend_sweep_drawing = false;
             return false;
         }
+        if (!ui_draw_bitmap_slice(&value_job, vx, ty, value,
+                                  MAIN_DISPLAY_COLOR_WHITE, 3u))
+        {
+            s_trend_sweep_drawing = false;
+            return false;
+        }
         s_trend_sweep_drawing = false;
-        sub[page] = 2u;
-        return false;
     }
-    s_trend_sweep_drawing = true;
-    if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job[page], vx, ty, value,
-                              MAIN_DISPLAY_COLOR_WHITE, 3u))
-    {
-        s_trend_sweep_drawing = false;
-        return false;
-    }
-    s_trend_sweep_drawing = false;
     strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
             MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
     s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
-    sub[page] = 0u;
     row[page]++;
     if (row[page] < 3u)
         return false;
