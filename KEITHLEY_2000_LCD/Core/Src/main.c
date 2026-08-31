@@ -3849,16 +3849,23 @@ static bool reading_only_render_trend_stats(void)
     if (sub[page] == 0u)
     {
         s_trend_sweep_drawing = true;
-        if (ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
-                         MAIN_DISPLAY_TREND_STATS_W,
+        if (ui_fill_rect(
+                         s_reading_only_page_trend_stats_valid[page]
+                             ? vx : MAIN_DISPLAY_TREND_STATS_X,
+                         ys[row[page]],
+                         s_reading_only_page_trend_stats_valid[page]
+                             ? MAIN_DISPLAY_TREND_STATS_VALUE_W
+                             : MAIN_DISPLAY_TREND_STATS_W,
                          MAIN_DISPLAY_TREND_STATS_ROW_H,
-                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+                         s_reading_only_page_trend_stats_valid[page]
+                             ? MAIN_DISPLAY_COLOR_BAR_ALT
+                             : MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
         {
             s_trend_sweep_drawing = false;
             return false;
         }
         s_trend_sweep_drawing = false;
-        sub[page] = 1u;
+        sub[page] = s_reading_only_page_trend_stats_valid[page] ? 2u : 1u;
         return false;
     }
     if (sub[page] == 1u)
@@ -4310,13 +4317,9 @@ static void reading_only_render(void)
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
-        /* Complete the current stats row before presenting. Its bitmap job
-         * is page-local; allowing the sweep/present to proceed mid-row would
-         * resume text on a different canvas and flash or lose labels. */
-        if (!reading_only_render_trend_stats())
-        {
-            return;
-        }
+        /* Statistics are low-priority. Their page-local bitmap job may span
+         * several calls, but it must never hold the frame commit hostage. */
+        (void)reading_only_render_trend_stats();
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
