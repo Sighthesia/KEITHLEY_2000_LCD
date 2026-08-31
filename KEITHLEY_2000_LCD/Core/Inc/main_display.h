@@ -68,8 +68,18 @@
 
 #define MAIN_DISPLAY_PLOT_X 96u
 #define MAIN_DISPLAY_PLOT_Y 196u
-#define MAIN_DISPLAY_PLOT_W 840u
+#define MAIN_DISPLAY_PLOT_W 600u
 #define MAIN_DISPLAY_PLOT_H 92u
+#define MAIN_DISPLAY_TREND_STATS_X 712u
+#define MAIN_DISPLAY_TREND_STATS_W \
+    (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_TREND_STATS_X)
+#define MAIN_DISPLAY_TREND_STATS_NAME_W 56u
+#define MAIN_DISPLAY_TREND_STATS_VALUE_W \
+    (MAIN_DISPLAY_TREND_STATS_W - MAIN_DISPLAY_TREND_STATS_NAME_W)
+#define MAIN_DISPLAY_TREND_STATS_ROW_H 30u
+#define MAIN_DISPLAY_TREND_STATS_MAX_Y 196u
+#define MAIN_DISPLAY_TREND_STATS_MIN_Y 226u
+#define MAIN_DISPLAY_TREND_STATS_AVG_Y 256u
 #define MAIN_DISPLAY_X_LABEL_Y 296u
 #define MAIN_DISPLAY_CHART_PANEL_Y MAIN_DISPLAY_TREND_Y
 #define MAIN_DISPLAY_CHART_PANEL_H MAIN_DISPLAY_TREND_H
@@ -121,6 +131,12 @@ typedef struct {
     bool trend_has_data;
     float trend_minimum;
     float trend_maximum;
+    float trend_stat_minimum;
+    float trend_stat_maximum;
+    float trend_stat_average;
+    char trend_stat_minimum_text[MAIN_DISPLAY_AXIS_LABEL_MAX];
+    char trend_stat_maximum_text[MAIN_DISPLAY_AXIS_LABEL_MAX];
+    char trend_stat_average_text[MAIN_DISPLAY_AXIS_LABEL_MAX];
     /* Derived 1/2/5 axis geometry: the full trend rebuild (grid + labels)
      * is only needed when these change, not when raw min/max drift.
      * trend_minimum/trend_maximum remain DATA bounds; the projection onto

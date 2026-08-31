@@ -96,6 +96,21 @@ static float nice_step(float span)
 }
 
 static void format_fixed_axis(float value, const char *unit, float step,
+                              char *out, uint8_t out_size);
+
+static void format_stat_value(float value, const char *unit, float span,
+                              char *out, uint8_t out_size)
+{
+    char number[MAIN_DISPLAY_AXIS_LABEL_MAX];
+    float step = span / 10.0f;
+
+    if (step < 0.000001f)
+        step = 0.000001f;
+    format_fixed_axis(value, unit, step, number, sizeof(number));
+    copy_text(out, out_size, number);
+}
+
+static void format_fixed_axis(float value, const char *unit, float step,
                               char *out, uint8_t out_size)
 {
     uint8_t decimals = 0u;
@@ -299,10 +314,6 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     }
     minimum *= scale;
     maximum *= scale;
-    /* 50% headroom: an axis that exactly hugs the window forces a rescale
-     * every time the signal moves (measured as a 2-second relabel+remap
-     * storm on sweeping inputs). Padding lets the resident axis absorb
-     * normal drift between rescales. */
     {
         float pad = (maximum - minimum) * 0.5f;
 
@@ -319,4 +330,51 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
     for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
         format_fixed_axis(top - step * i, axis_unit, step,
                           frame->y_labels[i], MAIN_DISPLAY_AXIS_LABEL_MAX);
+
+    frame->trend_stat_minimum = minimum;
+    frame->trend_stat_maximum = maximum;
+    frame->trend_stat_average = (minimum + maximum) * 0.5f;
+    {
+        uint32_t count = 0u;
+        uint32_t b;
+        float sum = 0.0f;
+        float lo = 0.0f;
+        float hi = 0.0f;
+        bool found = false;
+        uint32_t now_bucket = now_ms / TREND_BUCKET_MS;
+        uint32_t first = now_bucket >= TREND_BUCKET_COUNT - 1u
+                              ? now_bucket - (TREND_BUCKET_COUNT - 1u)
+                              : 0u;
+
+        for (b = first; b <= now_bucket; b++)
+        {
+            uint16_t index = (uint16_t)(b % TREND_BUCKET_COUNT);
+            if (b <= trend->newest_bucket &&
+                trend->newest_bucket - b < TREND_BUCKET_COUNT &&
+                (trend->occupied[index >> 3] & (uint8_t)(1u << (index & 7u))) != 0u)
+            {
+                float mid = (trend->minimum[index] + trend->maximum[index]) * 0.5f;
+                if (!found || trend->minimum[index] < lo) lo = trend->minimum[index];
+                if (!found || trend->maximum[index] > hi) hi = trend->maximum[index];
+                sum += mid;
+                count++;
+                found = true;
+            }
+        }
+        if (found)
+        {
+            frame->trend_stat_minimum = lo;
+            frame->trend_stat_maximum = hi;
+            frame->trend_stat_average = sum / (float)count;
+        }
+    }
+    format_stat_value(frame->trend_stat_maximum * scale, axis_unit,
+                      (maximum - minimum) * scale, frame->trend_stat_maximum_text,
+                      sizeof(frame->trend_stat_maximum_text));
+    format_stat_value(frame->trend_stat_minimum * scale, axis_unit,
+                      (maximum - minimum) * scale, frame->trend_stat_minimum_text,
+                      sizeof(frame->trend_stat_minimum_text));
+    format_stat_value(frame->trend_stat_average * scale, axis_unit,
+                      (maximum - minimum) * scale, frame->trend_stat_average_text,
+                      sizeof(frame->trend_stat_average_text));
 }

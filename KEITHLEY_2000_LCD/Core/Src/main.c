@@ -332,6 +332,8 @@ static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static char s_reading_only_page_y_labels[2][MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
+static bool s_reading_only_page_trend_stats_valid[2];
+static char s_reading_only_page_trend_stats[2][3][MAIN_DISPLAY_AXIS_LABEL_MAX];
 static uint16_t s_reading_only_trend_column;
 static bool s_reading_only_trend_bg_failed;
 static uint32_t s_trend_scroll_ms;
@@ -364,6 +366,9 @@ static void reading_only_invalidate_trend_pages(void)
                sizeof(s_reading_only_page_trend_unit[page]));
         memset(s_reading_only_page_y_labels[page], 0,
                sizeof(s_reading_only_page_y_labels[page]));
+        memset(s_reading_only_page_trend_stats[page], 0,
+               sizeof(s_reading_only_page_trend_stats[page]));
+        s_reading_only_page_trend_stats_valid[page] = false;
         memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
         memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
         memset(s_drawn_trend_occupied[page], 0,
@@ -2773,7 +2778,13 @@ static uint16_t trend_y_label_y(uint8_t index)
 {
     uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                  index * MAIN_DISPLAY_PLOT_H / 2u);
-    uint16_t label_y = axis_y > 8u ? (uint16_t)(axis_y - 8u) : 0u;
+    uint16_t label_y = axis_y > FONT_TEXT_HEIGHT / 2u
+                           ? (uint16_t)(axis_y - FONT_TEXT_HEIGHT / 2u)
+                           : 0u;
+
+    if (index + 1u == MAIN_DISPLAY_Y_LABEL_COUNT)
+        label_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H -
+                             FONT_TEXT_HEIGHT);
 
     /* The first label is centred near the top grid line, but its bitmap must
      * remain inside the resident trend region. Otherwise a periodic axis
@@ -3365,6 +3376,8 @@ static void trend_draw_background(void)
 static uint16_t trend_x_label_x(uint16_t center, const char *label)
 {
     size_t width = strlen(label) * FONT_TEXT_WIDTH;
+    if (center == MAIN_DISPLAY_PLOT_X && width <= MAIN_DISPLAY_PLOT_W)
+        return MAIN_DISPLAY_PLOT_X;
     uint16_t x = center > width / 2u ? (uint16_t)(center - width / 2u)
                                      : MAIN_DISPLAY_PLOT_X;
     if (x + width > MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
@@ -3709,7 +3722,7 @@ static bool reading_only_render_trend_background(void)
         idx = 3u;
         return false;
     }
-    if (idx < 7u)
+    if (idx < 6u)
     {
         uint8_t i = (uint8_t)(idx - 3u);
         uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
@@ -3724,9 +3737,9 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx < 12u)
+    if (idx < 11u)
     {
-        uint8_t i = (uint8_t)(idx - 7u);
+        uint8_t i = (uint8_t)(idx - 6u);
         uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
                                 i * MAIN_DISPLAY_PLOT_W / 4u);
         if (ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x,
@@ -3739,9 +3752,9 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx < 16u)
+    if (idx < 14u)
     {
-        uint8_t i = (uint8_t)(idx - 12u);
+        uint8_t i = (uint8_t)(idx - 11u);
         size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
         uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
                                ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - label_width)
@@ -3756,9 +3769,9 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx < 21u)
+    if (idx < 19u)
     {
-        uint8_t i = (uint8_t)(idx - 16u);
+        uint8_t i = (uint8_t)(idx - 14u);
         uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
                                 i * MAIN_DISPLAY_PLOT_W / 4u);
         if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
@@ -3771,6 +3784,41 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
+    if (idx < 31u)
+    {
+        uint8_t row = (uint8_t)((idx - 19u) / 4u);
+        uint8_t sub = (uint8_t)((idx - 19u) % 4u);
+        static const char *const names[3] = {"MAX", "MIN", "AVG"};
+        static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
+                                       MAIN_DISPLAY_TREND_STATS_MIN_Y,
+                                       MAIN_DISPLAY_TREND_STATS_AVG_Y};
+        const char *value = row == 0u ? s_frame.trend_stat_maximum_text
+                                      : row == 1u ? s_frame.trend_stat_minimum_text
+                                                  : s_frame.trend_stat_average_text;
+        uint16_t vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
+                                 MAIN_DISPLAY_TREND_STATS_NAME_W);
+        uint16_t ty = (uint16_t)(ys[row] +
+                                 (MAIN_DISPLAY_TREND_STATS_ROW_H -
+                                  FONT_TEXT_HEIGHT) / 2u);
+
+        if (sub == 0u)
+            (void)ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row],
+                               MAIN_DISPLAY_TREND_STATS_NAME_W,
+                               MAIN_DISPLAY_TREND_STATS_ROW_H,
+                               MAIN_DISPLAY_COLOR_BAR);
+        else if (sub == 1u)
+            (void)ui_fill_rect(vx, ys[row], MAIN_DISPLAY_TREND_STATS_VALUE_W,
+                               MAIN_DISPLAY_TREND_STATS_ROW_H,
+                               MAIN_DISPLAY_COLOR_BAR_ALT);
+        else if (sub == 2u)
+            (void)ui_draw_text(MAIN_DISPLAY_TREND_STATS_X, ty, names[row],
+                               MAIN_DISPLAY_COLOR_WHITE);
+        else
+            (void)ui_draw_text(vx, ty, value, MAIN_DISPLAY_COLOR_WHITE);
+        idx++;
+        return false;
+    }
+
     strncpy(s_reading_only_page_trend_unit[s_render_page], unit,
             TREND_UNIT_ID_MAX - 1u);
     s_reading_only_page_trend_unit[s_render_page][TREND_UNIT_ID_MAX - 1u] = '\0';
@@ -3782,6 +3830,121 @@ static bool reading_only_render_trend_background(void)
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
     idx = 0u;
     return true;
+}
+
+static bool reading_only_render_trend_stats(void)
+{
+    static uint8_t row;
+    static uint32_t last_update_tick;
+    static const char *const names[3] = {"MAX", "MIN", "AVG"};
+    static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
+                                   MAIN_DISPLAY_TREND_STATS_MIN_Y,
+                                   MAIN_DISPLAY_TREND_STATS_AVG_Y};
+    const char *value;
+    uint32_t now = HAL_GetTick();
+    uint16_t vx;
+    uint16_t ty;
+
+    if (s_reading_only_page_trend_stats_valid[s_render_page] &&
+        (uint32_t)(now - last_update_tick) < 500u)
+        return true;
+    value = row == 0u ? s_frame.trend_stat_maximum_text
+                      : row == 1u ? s_frame.trend_stat_minimum_text
+                                  : s_frame.trend_stat_average_text;
+    if (!s_reading_only_page_trend_stats_valid[s_render_page] ||
+        strcmp(s_reading_only_page_trend_stats[s_render_page][row], value) != 0)
+    {
+        vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
+                        MAIN_DISPLAY_TREND_STATS_NAME_W);
+        ty = (uint16_t)(ys[row] +
+                        (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
+        if (ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row],
+                         MAIN_DISPLAY_TREND_STATS_W,
+                         MAIN_DISPLAY_TREND_STATS_ROW_H,
+                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+            return false;
+        if (!ui_draw_text(MAIN_DISPLAY_TREND_STATS_X, ty, names[row],
+                          MAIN_DISPLAY_COLOR_WHITE) ||
+            !ui_draw_text(vx, ty, value, MAIN_DISPLAY_COLOR_WHITE))
+            return false;
+        strncpy(s_reading_only_page_trend_stats[s_render_page][row], value,
+                MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
+        s_reading_only_page_trend_stats[s_render_page][row][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
+    }
+    row++;
+    if (row < 3u)
+        return false;
+    row = 0u;
+    last_update_tick = now;
+    s_reading_only_page_trend_stats_valid[s_render_page] = true;
+    return true;
+}
+
+static void keithley_trend_axis_range(const char *unit, float peak,
+                                      float *minimum, float *maximum)
+{
+    static const float voltage[] = {0.1f, 1.0f, 10.0f, 100.0f, 1000.0f};
+    static const float ac_voltage[] = {0.1f, 1.0f, 10.0f, 100.0f, 750.0f};
+    static const float current[] = {0.01f, 0.1f, 1.0f, 3.0f};
+    static const float ac_current[] = {1.0f, 3.0f};
+    static const float resistance[] = {100.0f, 1000.0f, 10000.0f,
+                                       100000.0f, 1000000.0f, 10000000.0f,
+                                       100000000.0f};
+    const float *levels = voltage;
+    uint8_t count = (uint8_t)(sizeof(voltage) / sizeof(voltage[0]));
+    uint8_t i;
+    float full_scale;
+
+    *minimum = 0.0f;
+    *maximum = voltage[0];
+    if (unit != 0 && strstr(unit, "VAC") != 0)
+    {
+        levels = ac_voltage;
+        count = (uint8_t)(sizeof(ac_voltage) / sizeof(ac_voltage[0]));
+    }
+    else if (unit != 0 && (strstr(unit, "ADC") != 0 ||
+                           strstr(unit, "mA") != 0))
+    {
+        levels = current;
+        count = (uint8_t)(sizeof(current) / sizeof(current[0]));
+    }
+    else if (unit != 0 && strstr(unit, "AAC") != 0)
+    {
+        levels = ac_current;
+        count = (uint8_t)(sizeof(ac_current) / sizeof(ac_current[0]));
+    }
+    else if (unit != 0 && (strstr(unit, "OHM") != 0 ||
+                           strstr(unit, "Ohm") != 0 ||
+                           strstr(unit, "\xCE\xA9") != 0))
+    {
+        levels = resistance;
+        count = (uint8_t)(sizeof(resistance) / sizeof(resistance[0]));
+        *minimum = 0.0f;
+    }
+    else if (unit != 0 && (strstr(unit, "CEL") != 0 ||
+                           strstr(unit, "\xC2\xB0") != 0))
+    {
+        *minimum = -200.0f;
+        *maximum = 1372.0f;
+        return;
+    }
+    else if (unit != 0 && strstr(unit, "Hz") != 0)
+    {
+        *minimum = 0.0f;
+        *maximum = 500000.0f;
+        return;
+    }
+    full_scale = levels[count - 1u];
+    for (i = 0u; i < count; i++)
+        if (peak <= levels[i])
+        {
+            full_scale = levels[i];
+            break;
+        }
+    if (*minimum == 0.0f && strstr(unit, "OHM") == 0 &&
+        strstr(unit, "Ohm") == 0 && strstr(unit, "\xCE\xA9") == 0)
+        *minimum = -full_scale;
+    *maximum = full_scale;
 }
 
 static void reading_only_render(void)
@@ -4065,39 +4228,17 @@ static void reading_only_render(void)
             float axis_max;
             float span;
 
-            /* Fixed preset per unit: no live-data chasing, zero rescale
-             * flicker. Range comes from demo_units lo/hi (covers the
-             * triangle), with 5% margin each side. */
+            /* main_display_format_trend() has already selected the smallest
+             * standard Keithley range that contains the 10 s peak. Keep that
+             * fixed axis here; never replace it with demo-only bounds. */
             if (!s_trend_axis_valid)
             {
-                bool preset_ok = false;
-                uint8_t ui;
+                float peak = s_frame.trend_maximum > -s_frame.trend_minimum
+                                 ? s_frame.trend_maximum
+                                 : -s_frame.trend_minimum;
 
-                for (ui = 0u; ui < DEMO_UNIT_COUNT; ui++)
-                {
-                    if (strcmp(s_demo_units[ui].unit, trend_unit) == 0)
-                    {
-                        float div = 1.0f;
-                        uint8_t d;
-
-                        for (d = 0u; d < s_demo_units[ui].frac_digits; d++)
-                            div *= 10.0f;
-                        axis_min = (float)s_demo_units[ui].lo_mant / div;
-                        axis_max = (float)s_demo_units[ui].hi_mant / div;
-                        preset_ok = true;
-                        break;
-                    }
-                }
-                if (!preset_ok)
-                {
-                    axis_min = s_frame.trend_minimum;
-                    axis_max = s_frame.trend_maximum;
-                }
-                span = axis_max - axis_min;
-                if (span < 0.000001f)
-                    span = 0.000001f;
-                axis_min -= span * 0.05f;
-                axis_max += span * 0.05f;
+                keithley_trend_axis_range(trend_unit, peak, &axis_min,
+                                          &axis_max);
                 axis_expanded = true;
             }
             else
@@ -4152,6 +4293,9 @@ static void reading_only_render(void)
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
+        /* Refresh at most one MAX/MIN/AVG row per frame. Do not gate the
+         * trend sweep on this low-priority text update. */
+        (void)reading_only_render_trend_stats();
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
