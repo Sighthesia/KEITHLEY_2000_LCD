@@ -754,7 +754,7 @@ typedef struct
 } bitmap_job_t;
 
 static bitmap_job_t s_bitmap_job;
-static bitmap_job_t s_trend_stats_bitmap_job;
+static bitmap_job_t s_trend_stats_bitmap_job[2];
 
 typedef struct
 {
@@ -812,7 +812,7 @@ static void reading_only_abort_frame(lt7680_status_t error)
     memset(s_reading_only_page_value_x, 0,
            sizeof(s_reading_only_page_value_x));
     memset(&s_bitmap_job, 0, sizeof(s_bitmap_job));
-    memset(&s_trend_stats_bitmap_job, 0, sizeof(s_trend_stats_bitmap_job));
+    memset(s_trend_stats_bitmap_job, 0, sizeof(s_trend_stats_bitmap_job));
     memset(&s_rif_draw_job, 0, sizeof(s_rif_draw_job));
     s_reading_only_io_error = false;
 }
@@ -3805,7 +3805,6 @@ static bool reading_only_render_trend_stats(void)
     static uint8_t row[2];
     static uint8_t sub[2];
     static uint32_t last_update_tick[2];
-    static uint8_t job_page = 0xFFu;
     static const char *const names[3] = {"MAX", "MIN", "AVG"};
     static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
                                    MAIN_DISPLAY_TREND_STATS_MIN_Y,
@@ -3816,14 +3815,6 @@ static bool reading_only_render_trend_stats(void)
     uint16_t vx;
     uint16_t ty;
 
-    if (job_page != page)
-    {
-        memset(&s_trend_stats_bitmap_job, 0,
-               sizeof(s_trend_stats_bitmap_job));
-        row[page] = 0u;
-        sub[page] = 0u;
-        job_page = page;
-    }
     value = row[page] == 0u ? s_frame.trend_stat_maximum_text
                             : row[page] == 1u ? s_frame.trend_stat_minimum_text
                                               : s_frame.trend_stat_average_text;
@@ -3871,7 +3862,7 @@ static bool reading_only_render_trend_stats(void)
     if (sub[page] == 1u)
     {
         s_trend_sweep_drawing = true;
-        if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job,
+        if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job[page],
                                   MAIN_DISPLAY_TREND_STATS_X, ty,
                                    names[row[page]], MAIN_DISPLAY_COLOR_WHITE,
                                    3u))
@@ -3884,7 +3875,7 @@ static bool reading_only_render_trend_stats(void)
         return false;
     }
     s_trend_sweep_drawing = true;
-    if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job, vx, ty, value,
+    if (!ui_draw_bitmap_slice(&s_trend_stats_bitmap_job[page], vx, ty, value,
                               MAIN_DISPLAY_COLOR_WHITE, 3u))
     {
         s_trend_sweep_drawing = false;
