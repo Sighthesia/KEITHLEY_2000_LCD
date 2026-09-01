@@ -8,7 +8,7 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 </style>
 </head>
 <body>
-<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · 顶栏单行信息栏 v2 · 读数全宽 928px · 统计栏 208px</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
+<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · v2.1 顶栏单行 · 绘图内边距 + 轴沟槽底板 · 统计 7位</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
 <div class="side"><h2 style="color:#ECEFF1;margin:0 0 8px;font-size:15px;letter-spacing:0.5px">Keithley 2000 工业趋势预览 v2</h2>
 <p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏单行：Zin | Range | Rate | FILT REL MATH → 读数全宽 + 趋势统计加宽</p>
 <label>读数 <input id="reading" value="+03.68900"></label>
@@ -17,18 +17,18 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 <label><input id="demo" type="checkbox"> Demo 动态档位轮换</label>
 <p class="note">完整设计预设包含 10V AUTO、MOVING 10 与 GPIB 16；这些是仿真场景输入，不代表面板协议能够提供这些字段。</p>
 <div class="legend">
-<b>v2 优化</b><br>
-• 信息栏由右侧 180px 竖栏 → 顶部 928px 横栏单行，彻底解决 “500 Read/s / MATH” 截断<br>
-• 读数带由 760px → 928px 全宽，可多显示 2–3 个 68px 大字<br>
-• 统计栏由 180px → 208px（值区 108→136），长单位 “kΩ/MΩ/MHz” 不再溢出<br>
-• 状态栏 24→18px，信息栏 26px，深灰底+青分隔线，信息层级更清晰
+<b>v2.1 优化</b><br>
+• 统计栏 60/148 划分，值区 148px 支持 7位整数（不含小数点/单位）如 <b>1234567 mV</b> 完整显示<br>
+• 趋势图：绘图区 196/92 → 202/84，顶部6px/底部10px呼吸，X 沟槽 22px，深灰分隔不再贴边<br>
+• 轴标签：Y/X 由“大底板浮字”改为沟槽底板+右对齐/居中，Y 每行轻底板，突兀感消除<br>
+• 网格改外框+内虚线，绘图区 1px 内框强化边界
 </div>
 </div>
 <script src="font_data.js"></script>
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
- const L={statusY:0,statusH:18,infoBarY:18,infoBarH:26,infoBarX:12,infoBarW:928,readingY:44,readingH:148,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:18,infoRangeY:18,infoRateY:18,infoStatusY:18,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:624,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:296,xAxisH:24,statsX:732,statsW:208,statsNameW:72,statsRowH:30,statsRangeY:196,statsMaxY:226,statsMinY:256,statsAvgY:286};
+ const L={statusY:0,statusH:18,infoBarY:18,infoBarH:26,infoBarX:12,infoBarW:928,readingY:44,readingH:148,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:18,infoRangeY:18,infoRateY:18,infoStatusY:18,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:202,plotW:624,plotH:84,plotBgY:202,plotBgH:84,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288};
 const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -122,23 +122,41 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
     digits(ctx,value,dx,ry,color);
   }
   // 右侧已无信息竖栏，读数可延伸至 928px
+  // 趋势面板：增加 6px 顶部呼吸 + 8px 底部呼吸，Y/X 沟槽底板化消除悬浮
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH);
-  ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotBgY,L.plotW,L.plotBgH);
-  ctx.fillStyle=COLORS.bar2;ctx.fillRect(L.plotX,L.plotDividerY,L.plotW,L.plotDividerH);ctx.fillRect(L.plotX,L.plotY,L.plotW,1);ctx.fillRect(L.plotX+L.plotW-1,L.plotY,1,L.plotH);
-   ctx.strokeStyle=COLORS.grid;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=0.9;
-   for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}
-   for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}
+  // 顶部 4px 分隔条
+  ctx.fillStyle=COLORS.bar2;ctx.fillRect(0,L.plotDividerY,UI_W,L.plotDividerH);
+  // Y 沟槽底板
+  ctx.fillStyle="#162126";ctx.fillRect(L.yAxisX,L.yAxisY,L.yAxisW,L.yAxisH);
+  ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(L.yAxisW-1, L.yAxisY, 1, L.yAxisH);
+  // X 沟槽底板
+  ctx.fillStyle="#1E2F35";ctx.fillRect(L.xAxisX,L.xAxisY,L.xAxisW,L.xAxisH);
+  ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(L.xAxisX, L.xAxisY, L.xAxisW,1);
+  // 绘图区黑底 + 1px 内框
+  ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotY,L.plotW,L.plotH);
+  ctx.strokeStyle="rgba(42,63,69,0.8)";ctx.lineWidth=1;ctx.strokeRect(L.plotX+0.5,L.plotY+0.5,L.plotW-1,L.plotH-1);
+  // 网格（在绘图区内）
+   ctx.strokeStyle=COLORS.grid;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=0.85;
+   for(let i=1;i<3;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}
+   for(let i=1;i<4;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}
    ctx.setLineDash([]);ctx.globalAlpha=1;
-   // 统计栏 - 加宽至 208px，值区 136px 长单位不再截断
-   {const sx=L.statsX,sw=L.statsW,sn=L.statsNameW,sv=sx+sn,vw=sw-sn,sh=L.statsRowH,ys=[L.statsRangeY,L.statsMaxY,L.statsMinY,L.statsAvgY],names=["Range","MAX","MIN","AVG"],vals=[demo.on?demo.rangeVal:"AUTO","1.20V","0.90V","1.10V"];for(let i=0;i<4;i++){ctx.fillStyle=COLORS.bar;ctx.fillRect(sx,ys[i],sn,sh);ctx.fillStyle=COLORS.bar2;ctx.fillRect(sv,ys[i],vw,sh);ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(sv-1,ys[i],1,sh);text(ctx,names[i],sx+4,ys[i]+(sh-TEXT_H)/2,COLORS.muted);const vv=vals[i];const vx2=sv+vw - vv.length*TEXT_W -4; text(ctx,vv,Math.max(sv+4,vx2),ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white)}}
+   // 统计栏 - 60/148 划分，支持 7位整数 + 小数点 + 单位（如 -1234567 mV）不截断
+   {const sx=L.statsX,sw=L.statsW,sn=L.statsNameW,sv=sx+sn,vw=sw-sn,sh=L.statsRowH,ys=[L.statsRangeY,L.statsMaxY,L.statsMinY,L.statsAvgY],names=["Range","MAX","MIN","AVG"],
+     // 演示长值：刻意用 7 位以验证不截断
+     vals=[demo.on?demo.rangeVal:"AUTO", demo.on?"1234567V":"1.20V","-1234567mV","1234.567kΩ"];
+     for(let i=0;i<4;i++){ctx.fillStyle=COLORS.bar;ctx.fillRect(sx,ys[i],sn,sh);ctx.fillStyle=COLORS.bar2;ctx.fillRect(sv,ys[i],vw,sh);ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(sv-1,ys[i],1,sh);text(ctx,names[i],sx+4,ys[i]+(sh-TEXT_H)/2,COLORS.muted);const vv=vals[i];const vx2=sv+vw - vv.length*TEXT_W -4; text(ctx,vv,Math.max(sv+4,vx2),ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white)}}
    const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
   const axisUnit=demo.on?demoAxisUnit():"V";
   const axisScale=1;
   const niceStep=(span)=>{let s=span/3,p=1;while(s>=10){s/=10;p*=10}while(s<1){s*=10;p/=10}return (s<=1?p:s<=2?2*p:s<=5?5*p:10*p)};
   const scaledLo=ylo*axisScale,scaledHi=yhi*axisScale,step=niceStep(scaledHi-scaledLo),top=Math.ceil(scaledHi/step)*step;
   const fmtAxis=(v)=>Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Math.abs(v)>=1?v.toFixed(2):v.toFixed(3);
-   for(let i=0;i<4;i++){const s=fmtAxis(top-step*i)+axisUnit;const x=Math.max(0,Math.min(L.plotX-s.length*TEXT_W-4,L.plotX-4-s.length*TEXT_W));text(ctx,s,x,L.plotY+i*L.plotH/3-10,COLORS.cyan)}
-  X_LABELS.forEach((s,i)=>{const center=L.plotX+i*L.plotW/4;const x=Math.max(L.plotX,Math.min(L.plotX+L.plotW-s.length*TEXT_W,center-s.length*TEXT_W/2));text(ctx,s,x,L.xAxisY,"rgba(77,208,225,0.95)")});
+   // Y 轴标签：沟槽内右对齐带 4px 底板，不再悬浮
+   for(let i=0;i<4;i++){const s=fmtAxis(top-step*i)+axisUnit;const ly = L.plotY + i*L.plotH/3; const ty = Math.round(ly - TEXT_H/2); const tx = L.yAxisW - s.length*TEXT_W - 6;
+     // 轻底板（与沟槽同色，仅 2px 内边距避免突兀）
+     ctx.fillStyle = i%2===0 ? "rgba(22,33,38,1)" : "rgba(30,47,53,0.9)"; ctx.fillRect(2, ty-2, L.yAxisW-4, TEXT_H+4);
+     text(ctx,s, Math.max(2,tx), ty, COLORS.cyan)}
+  X_LABELS.forEach((s,i)=>{const center=L.plotX+i*L.plotW/4;const x=Math.max(L.plotX+4,Math.min(L.plotX+L.plotW-s.length*TEXT_W-4,center-s.length*TEXT_W/2));const ty = L.xAxisY + (L.xAxisH - TEXT_H)/2; text(ctx,s,x,ty,"rgba(77,208,225,0.95)")});
  ctx.lineWidth=2; ctx.lineCap="round"; ctx.lineJoin="round";
  for(const [color,dy,alpha] of [[COLORS.greenDim,-1,0.0],[COLORS.greenDim,1,0.0],[COLORS.green,0,1.0]]){
    if(alpha===0) continue;
