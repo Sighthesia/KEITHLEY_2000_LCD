@@ -10,8 +10,8 @@ vm.runInContext(fonts+"\n"+source+"\nconst inkBottom=(bm,bpr)=>{let row=0;for(le
 const e=sandbox.EXPORTS;
 check("layout width",e.UI_W===960);check("layout height",e.UI_H===320);
 check("four regions total (status+infoBar+reading+trend)",e.L.statusH+e.L.infoBarH+e.L.readingH+e.L.trendH===320);
-check("reading starts 44 (v2 top bar)",e.L.readingY===44&&e.L.readingH===148);check("trend starts 192",e.L.trendY===192);
-check("top info bar geometry",e.L.infoBarY===18&&e.L.infoBarH===26&&e.L.infoBarW===928&&e.L.infoBarX===12);
+check("reading starts 50 (v2.2 top bar)",e.L.readingY===50&&e.L.readingH===142);check("trend starts 192",e.L.trendY===192);
+check("top info bar geometry",e.L.infoBarY===24&&e.L.infoBarH===26&&e.L.infoBarW===928&&e.L.infoBarX===12);
 check("reverse x labels",JSON.stringify(Array.from(e.X_LABELS))===JSON.stringify(["10.00s","7.50s","5.00s","2.50s","0.00s"]));
 const data=e.traceData();check("240 projected columns",data.length===240);check("deterministic non-flat trace",Math.max(...data)>Math.min(...data));
 check("authentic labels",["REM","TALK","LSTN","SRQ","TRIG"].every(x=>e.STATUS.includes(x)));

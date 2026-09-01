@@ -3612,26 +3612,28 @@ static bool reading_only_render_info_panel(void)
                 bx += (uint16_t)(strlen(s_frame.rate) * FONT_TEXT_WIDTH + 28u);
                 (void)ui_fill_rect(bx - 16u, MAIN_DISPLAY_INFO_BAR_Y + 8u, 1u, MAIN_DISPLAY_INFO_BAR_H - 16u, MAIN_DISPLAY_COLOR_GRID);
             }
-        } else if (idx >= 9u && idx <= 11u) {
+        } else if (idx >= 9u && idx <= 14u) {
             static const char *const lamps[3] = {"FILT","REL","MATH"};
             static const uint8_t bits[3] = {7u,6u,11u};
-            uint8_t lamp = (uint8_t)(idx - 9u);
+            uint8_t lamp = (uint8_t)((idx - 9u) / 2u);
+            bool is_fill = ((idx - 9u) % 2u) == 0u;
             uint16_t pad = 6u, tw = (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH), bw = tw + pad*2u, bh = 14u;
             uint16_t by = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - bh)/2u);
-            uint16_t col = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED;
-            uint16_t bg = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN_DIM : MAIN_DISPLAY_COLOR_BAR_ALT;
-            if (ui_fill_rect(bx, by, bw, bh, bg) != LT7680_OK) ok = false;
-            else ok = ui_draw_text((uint16_t)(bx + pad), (uint16_t)(by + (bh - FONT_TEXT_HEIGHT)/2u), lamps[lamp], col);
-            if (ok) {
-                if (s_frame.status_active[bits[lamp]]) {
+            if (is_fill) {
+                uint16_t bg = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN_DIM : MAIN_DISPLAY_COLOR_BAR_ALT;
+                ok = ui_fill_rect(bx, by, bw, bh, bg) == LT7680_OK;
+            } else {
+                uint16_t col = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED;
+                ok = ui_draw_text((uint16_t)(bx + pad), (uint16_t)(by + (bh - FONT_TEXT_HEIGHT)/2u), lamps[lamp], col);
+                if (ok && s_frame.status_active[bits[lamp]]) {
                     (void)ui_fill_rect(bx, by+bh-1u, bw, 1u, MAIN_DISPLAY_COLOR_GREEN);
                 }
-                bx += (uint16_t)(bw + 8u);
+                if (ok) bx += (uint16_t)(bw + 8u);
             }
         }
         if (!ok) return false;
         idx++;
-        if (idx < 12u) return false;
+        if (idx < 15u) return false;
         // cache page
         s_reading_only_page_info_valid[s_render_page] = true;
         strncpy(s_reading_only_page_impedance[s_render_page], s_frame.impedance, sizeof(s_reading_only_page_impedance[0])-1u);
@@ -3704,19 +3706,11 @@ static bool reading_only_render_trend_background(void)
         {
             uint8_t i = (uint8_t)(idx - 1u);
             size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
-            uint16_t label_x = label_width + 6u <= MAIN_DISPLAY_Y_AXIS_W
-                                   ? (uint16_t)(MAIN_DISPLAY_Y_AXIS_W - 6u - (uint16_t)label_width)
-                                   : 2u;
-            uint16_t ty = trend_y_label_y(i);
-            uint16_t bg = (i % 2u == 0u) ? MAIN_DISPLAY_COLOR_BAR : MAIN_DISPLAY_COLOR_BAR_ALT;
-            if (ui_fill_rect(2u, (uint16_t)(ty - 2u), MAIN_DISPLAY_Y_AXIS_W - 4u,
-                             FONT_TEXT_HEIGHT + 4u, bg) != LT7680_OK)
-            {
-                if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
-                return false;
-            }
+            uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                                   ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - (uint16_t)label_width)
+                                   : 0u;
             if (s_frame.y_labels[i][0] != '\0' &&
-                !ui_draw_text(label_x, ty, s_frame.y_labels[i],
+                !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
                               MAIN_DISPLAY_COLOR_CYAN))
             {
                 if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
@@ -3855,21 +3849,11 @@ static bool reading_only_render_trend_background(void)
     {
         uint8_t i = (uint8_t)(idx - 11u);
         size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
-        uint16_t label_x = label_width + 6u <= MAIN_DISPLAY_Y_AXIS_W
-                               ? (uint16_t)(MAIN_DISPLAY_Y_AXIS_W - 6u - (uint16_t)label_width)
-                               : 2u;
-        uint16_t ty = trend_y_label_y(i);
-        // v2.1 gutter cell background to avoid floating
-        uint16_t bg = (i % 2u == 0u) ? MAIN_DISPLAY_COLOR_BAR : MAIN_DISPLAY_COLOR_BAR_ALT;
-        if (ui_fill_rect(2u, (uint16_t)(ty - 2u), MAIN_DISPLAY_Y_AXIS_W - 4u,
-                         FONT_TEXT_HEIGHT + 4u, bg) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        // vertical separator already drawn, keep cyan text
+        uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
+                               ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - (uint16_t)label_width)
+                               : 0u;
         if (s_frame.y_labels[i][0] != '\0' &&
-            !ui_draw_text(label_x, ty, s_frame.y_labels[i],
+            !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
                           MAIN_DISPLAY_COLOR_CYAN))
         {
             if (s_reading_only_io_error) idx = 0u;
