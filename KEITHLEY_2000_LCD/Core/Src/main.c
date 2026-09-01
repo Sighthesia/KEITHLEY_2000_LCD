@@ -366,9 +366,10 @@ static void reading_only_invalidate_trend_pages(void)
                sizeof(s_reading_only_page_trend_unit[page]));
         memset(s_reading_only_page_y_labels[page], 0,
                sizeof(s_reading_only_page_y_labels[page]));
-        memset(s_reading_only_page_trend_stats[page], 0,
-               sizeof(s_reading_only_page_trend_stats[page]));
-        s_reading_only_page_trend_stats_valid[page] = false;
+        /* Keep last MAX/MIN/AVG visible through the empty window.
+         * Clearing both pages here plus the full-panel BAR fill in
+         * reading_only_render_trend_background() produced the
+         * "all three disappear until rebuild" flash. */
         memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
         memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
         memset(s_drawn_trend_occupied[page], 0,
@@ -3690,8 +3691,14 @@ static bool reading_only_render_trend_background(void)
 
     if (idx == 0u)
     {
+        /* The full-panel BAR fill previously erased the MAX/MIN/AVG
+         * cells (712..960) which are part of the TREND band. During
+         * the 19-step rebuild the stats renderer is starved
+         * (background_was_ready==false), so the hidden page flipped
+         * blank. Keep the stat strip intact; its own BAR/BAR_ALT
+         * fills are owned by reading_only_render_trend_stats(). */
         if (ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_CHART_PANEL_H,
+                         MAIN_DISPLAY_TREND_STATS_X, MAIN_DISPLAY_CHART_PANEL_H,
                          MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
@@ -3817,7 +3824,26 @@ static bool reading_only_render_trend_stats(void)
         return true;
     if (s_reading_only_page_trend_stats_valid[page] &&
         (uint32_t)(now - last_update_tick[page]) < 2000u)
-        return true;
+    {
+        /* Throttle only when all three rows already match; a gear
+         * change makes MAX/MIN/AVG all mismatch at once and must
+         * bypass the 2 s window, otherwise the new unit is blanked
+         * for up to 2 s. */
+        bool all_match = true;
+        for (uint8_t i = 0u; i < 3u; i++)
+        {
+            const char *v = i == 0u ? s_frame.trend_stat_maximum_text
+                          : i == 1u ? s_frame.trend_stat_minimum_text
+                                    : s_frame.trend_stat_average_text;
+            if (strcmp(s_reading_only_page_trend_stats[page][i], v) != 0)
+            {
+                all_match = false;
+                break;
+            }
+        }
+        if (all_match)
+            return true;
+    }
 
     /* Batch the three rows atomically within one TREND stage. The previous
      * per-row cursor (one row per TREND visit) caused a visible 3-frame
