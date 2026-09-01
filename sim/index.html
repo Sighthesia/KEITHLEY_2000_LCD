@@ -19,7 +19,7 @@ html,body{margin:0;background:#111;color:#bbb;font:13px monospace}body{display:f
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
-const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:720,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:840,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:840,xAxisY:296,xAxisH:24};
+ const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:600,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:600,xAxisY:296,xAxisH:24,statsX:760,statsW:180,statsNameW:72,statsRowH:30,statsRangeY:196,statsMaxY:226,statsMinY:256,statsAvgY:286};
 const COLORS={bg:"#000",bar:"#182126",bar2:"#263238",green:"#00ff33",greenDim:"#006c25",cyan:"#00d9ff",white:"#fff",muted:"#5d666b",grid:"#263238",red:"#f22"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -60,8 +60,10 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH);
   ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotBgY,L.plotW,L.plotBgH);
   ctx.fillStyle=COLORS.bar2;ctx.fillRect(L.plotX,L.plotDividerY,L.plotW,L.plotDividerH);ctx.fillRect(L.plotX,L.plotY,L.plotW,1);ctx.fillRect(L.plotX+L.plotW-1,L.plotY,1,L.plotH);
-  ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
-  const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
+   ctx.strokeStyle=COLORS.grid;ctx.setLineDash([3,4]);for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}ctx.setLineDash([]);
+   // 统计栏悬浮样式（与读数区信息栏同款，64px 隔趋势图，Range 灰色同 Zin）
+   {const sx=L.statsX,sw=L.statsW,sn=L.statsNameW,sv=sx+sn,vw=sw-sn,sh=L.statsRowH,ys=[L.statsRangeY,L.statsMaxY,L.statsMinY,L.statsAvgY],names=["Range","MAX","MIN","AVG"],vals=[demo.on?demo.rangeVal:"AUTO","1.20V","0.90V","1.10V"];for(let i=0;i<4;i++){ctx.fillStyle=COLORS.bar;ctx.fillRect(sx,ys[i],sn,sh);ctx.fillStyle=COLORS.bar2;ctx.fillRect(sv,ys[i],vw,sh);text(ctx,names[i],sx,ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white);text(ctx,vals[i],sv,ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white)}}
+   const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
   const axisUnit=demo.on?demoAxisUnit():"V";
   /* Demo samples are already in the displayed unit; target samples are
      normalized internally before the shared formatter applies this scale. */

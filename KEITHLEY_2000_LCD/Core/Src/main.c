@@ -333,7 +333,7 @@ static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static char s_reading_only_page_y_labels[2][MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
 static bool s_reading_only_page_trend_stats_valid[2];
-static char s_reading_only_page_trend_stats[2][3][MAIN_DISPLAY_AXIS_LABEL_MAX];
+static char s_reading_only_page_trend_stats[2][4][MAIN_DISPLAY_AXIS_LABEL_MAX];
 static uint16_t s_reading_only_trend_column;
 static bool s_reading_only_trend_bg_failed;
 static uint32_t s_trend_scroll_ms;
@@ -3810,8 +3810,9 @@ static bool reading_only_render_trend_stats(void)
 {
     static uint8_t row[2];
     static uint32_t last_update_tick[2];
-    static const char *const names[3] = {"MAX", "MIN", "AVG"};
-    static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
+    static const char *const names[4] = {"Range", "MAX", "MIN", "AVG"};
+    static const uint16_t ys[4] = {MAIN_DISPLAY_TREND_STATS_RANGE_Y,
+                                   MAIN_DISPLAY_TREND_STATS_MAX_Y,
                                    MAIN_DISPLAY_TREND_STATS_MIN_Y,
                                    MAIN_DISPLAY_TREND_STATS_AVG_Y};
     uint32_t now = HAL_GetTick();
@@ -3825,15 +3826,15 @@ static bool reading_only_render_trend_stats(void)
     if (s_reading_only_page_trend_stats_valid[page] &&
         (uint32_t)(now - last_update_tick[page]) < 2000u)
     {
-        /* Throttle only when all three rows already match; a gear
-         * change makes MAX/MIN/AVG all mismatch at once and must
-         * bypass the 2 s window, otherwise the new unit is blanked
-         * for up to 2 s. */
+        /* Throttle only when all rows already match; a gear
+         * change makes Range/MAX/MIN/AVG mismatch at once and must
+         * bypass the 2 s window. */
         bool all_match = true;
-        for (uint8_t i = 0u; i < 3u; i++)
+        for (uint8_t i = 0u; i < 4u; i++)
         {
-            const char *v = i == 0u ? s_frame.trend_stat_maximum_text
-                          : i == 1u ? s_frame.trend_stat_minimum_text
+            const char *v = i == 0u ? s_frame.range
+                          : i == 1u ? s_frame.trend_stat_maximum_text
+                          : i == 2u ? s_frame.trend_stat_minimum_text
                                     : s_frame.trend_stat_average_text;
             if (strcmp(s_reading_only_page_trend_stats[page][i], v) != 0)
             {
@@ -3845,18 +3846,17 @@ static bool reading_only_render_trend_stats(void)
             return true;
     }
 
-    /* Batch the three rows atomically within one TREND stage. The previous
-     * per-row cursor (one row per TREND visit) caused a visible 3-frame
-     * stagger on gear changes where MAX/MIN/AVG all change unit together.
-     * We now iterate the remaining rows in this call; a budget-exhausted
-     * ui_draw_bitmap_slice returns false and resumes at the same row next
-     * invocation, but the common case (256-run budget) finishes all 3 rows
-     * before the hidden-page present, so the band sync is single-shot. */
-    for (; row[page] < 3u; row[page]++)
+    /* Batch the four rows atomically within one TREND stage, floating
+     * like the reading-area info panel (X=760,W=180, gap 64px from plot).
+     * Range uses Zin-muted grey, the three stats stay white. */
+    for (; row[page] < 4u; row[page]++)
     {
-        const char *value = row[page] == 0u ? s_frame.trend_stat_maximum_text
-                            : row[page] == 1u ? s_frame.trend_stat_minimum_text
+        const char *value = row[page] == 0u ? s_frame.range
+                            : row[page] == 1u ? s_frame.trend_stat_maximum_text
+                            : row[page] == 2u ? s_frame.trend_stat_minimum_text
                                               : s_frame.trend_stat_average_text;
+        uint16_t title_color = row[page] == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
+        uint16_t value_color = row[page] == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
         if (s_reading_only_page_trend_stats_valid[page] &&
             strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
             continue;
@@ -3882,7 +3882,7 @@ static bool reading_only_render_trend_stats(void)
 
                 if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X,
                                           ty, names[row[page]],
-                                          MAIN_DISPLAY_COLOR_WHITE, 3u))
+                                          title_color, 3u))
                     return false;
             }
             while (*op != '\0' || *np != '\0')
@@ -3911,7 +3911,7 @@ static bool reading_only_render_trend_stats(void)
                         token[0] = np[0];
                         if (na > 1u) token[1] = np[1];
                         if (!ui_draw_bitmap_slice(&value_job, gx, ty, token,
-                                                  MAIN_DISPLAY_COLOR_WHITE, 3u))
+                                                  value_color, 3u))
                             return false;
                     }
                 }
