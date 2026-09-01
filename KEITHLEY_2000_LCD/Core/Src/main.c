@@ -3807,104 +3807,100 @@ static bool reading_only_render_trend_stats(void)
     static const uint16_t ys[3] = {MAIN_DISPLAY_TREND_STATS_MAX_Y,
                                    MAIN_DISPLAY_TREND_STATS_MIN_Y,
                                    MAIN_DISPLAY_TREND_STATS_AVG_Y};
-    const char *value;
     uint32_t now = HAL_GetTick();
     uint8_t page = s_render_page;
-    uint16_t vx;
-    uint16_t ty;
 
     /* A unit change briefly resets the 10 s buffer. Keep the last valid
      * statistics visible through that empty transition instead of clearing
      * the cells and publishing blank/zero-looking text. */
     if (!s_frame.trend_has_data)
         return true;
-
-    value = row[page] == 0u ? s_frame.trend_stat_maximum_text
-                            : row[page] == 1u ? s_frame.trend_stat_minimum_text
-                                              : s_frame.trend_stat_average_text;
     if (s_reading_only_page_trend_stats_valid[page] &&
         (uint32_t)(now - last_update_tick[page]) < 2000u)
         return true;
-    if (s_reading_only_page_trend_stats_valid[page] &&
-        strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
-    {
-        row[page]++;
-        if (row[page] >= 3u)
-        {
-            row[page] = 0u;
-            last_update_tick[page] = now;
-        }
-        return row[page] == 0u;
-    }
-    vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
-                    MAIN_DISPLAY_TREND_STATS_NAME_W);
-    ty = (uint16_t)(ys[row[page]] +
-                    (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
-    {
-        const char *old = s_reading_only_page_trend_stats[page][row[page]];
-        const char *op = old;
-        const char *np = value;
-        uint8_t glyph = 0u;
-        bool first = !s_reading_only_page_trend_stats_valid[page];
 
-        if (first && ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
-                                  MAIN_DISPLAY_TREND_STATS_W,
-                                  MAIN_DISPLAY_TREND_STATS_ROW_H,
-                                  MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
-            return false;
-        if (first)
+    /* Batch the three rows atomically within one TREND stage. The previous
+     * per-row cursor (one row per TREND visit) caused a visible 3-frame
+     * stagger on gear changes where MAX/MIN/AVG all change unit together.
+     * We now iterate the remaining rows in this call; a budget-exhausted
+     * ui_draw_bitmap_slice returns false and resumes at the same row next
+     * invocation, but the common case (256-run budget) finishes all 3 rows
+     * before the hidden-page present, so the band sync is single-shot. */
+    for (; row[page] < 3u; row[page]++)
+    {
+        const char *value = row[page] == 0u ? s_frame.trend_stat_maximum_text
+                            : row[page] == 1u ? s_frame.trend_stat_minimum_text
+                                              : s_frame.trend_stat_average_text;
+        if (s_reading_only_page_trend_stats_valid[page] &&
+            strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
+            continue;
         {
-            bitmap_job_t title_job = {0};
+            uint16_t vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
+                                     MAIN_DISPLAY_TREND_STATS_NAME_W);
+            uint16_t ty = (uint16_t)(ys[row[page]] +
+                         (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
+            const char *old = s_reading_only_page_trend_stats[page][row[page]];
+            const char *op = old;
+            const char *np = value;
+            uint8_t glyph = 0u;
+            bool first = !s_reading_only_page_trend_stats_valid[page];
 
-            if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X,
-                                      ty, names[row[page]],
-                                      MAIN_DISPLAY_COLOR_WHITE, 3u))
+            if (first && ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
+                                      MAIN_DISPLAY_TREND_STATS_W,
+                                      MAIN_DISPLAY_TREND_STATS_ROW_H,
+                                      MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
                 return false;
-        }
-        while (*op != '\0' || *np != '\0')
-        {
-            uint8_t oa = 1u;
-            uint8_t na = 1u;
-            bool same;
-            char token[3] = {0};
-            bitmap_job_t value_job = {0};
-
-            if (*op != '\0')
-                (void)text_glyph(op, &oa);
-            if (*np != '\0')
-                (void)text_glyph(np, &na);
-            same = oa == na && oa != 0u && memcmp(op, np, oa) == 0;
-            if (!same)
+            if (first)
             {
-                uint16_t gx = (uint16_t)(vx + glyph * FONT_TEXT_WIDTH);
+                bitmap_job_t title_job = {0};
 
-                if (ui_fill_rect(gx, ys[row[page]], FONT_TEXT_WIDTH,
-                                 MAIN_DISPLAY_TREND_STATS_ROW_H,
-                                 MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
+                if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X,
+                                          ty, names[row[page]],
+                                          MAIN_DISPLAY_COLOR_WHITE, 3u))
                     return false;
-                if (*np != '\0')
-                {
-                    token[0] = np[0];
-                    if (na > 1u) token[1] = np[1];
-                    if (!ui_draw_bitmap_slice(&value_job, gx, ty, token,
-                                              MAIN_DISPLAY_COLOR_WHITE, 3u))
-                        return false;
-                }
             }
-            if (*op != '\0') op += oa;
-            if (*np != '\0') np += na;
-            glyph++;
-            if (glyph >= MAIN_DISPLAY_TREND_STATS_VALUE_W / FONT_TEXT_WIDTH)
-                break;
+            while (*op != '\0' || *np != '\0')
+            {
+                uint8_t oa = 1u;
+                uint8_t na = 1u;
+                bool same;
+                char token[3] = {0};
+                bitmap_job_t value_job = {0};
+
+                if (*op != '\0')
+                    (void)text_glyph(op, &oa);
+                if (*np != '\0')
+                    (void)text_glyph(np, &na);
+                same = oa == na && oa != 0u && memcmp(op, np, oa) == 0;
+                if (!same)
+                {
+                    uint16_t gx = (uint16_t)(vx + glyph * FONT_TEXT_WIDTH);
+
+                    if (ui_fill_rect(gx, ys[row[page]], FONT_TEXT_WIDTH,
+                                     MAIN_DISPLAY_TREND_STATS_ROW_H,
+                                     MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
+                        return false;
+                    if (*np != '\0')
+                    {
+                        token[0] = np[0];
+                        if (na > 1u) token[1] = np[1];
+                        if (!ui_draw_bitmap_slice(&value_job, gx, ty, token,
+                                                  MAIN_DISPLAY_COLOR_WHITE, 3u))
+                            return false;
+                    }
+                }
+                if (*op != '\0') op += oa;
+                if (*np != '\0') np += na;
+                glyph++;
+                if (glyph >= MAIN_DISPLAY_TREND_STATS_VALUE_W / FONT_TEXT_WIDTH)
+                    break;
+            }
         }
+        strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
+                MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
+        s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
+        s_trend_stats_changed = true;
     }
-    strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
-            MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
-    s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
-    row[page]++;
-    s_trend_stats_changed = true;
-    if (row[page] < 3u)
-        return false;
     row[page] = 0u;
     last_update_tick[page] = now;
     s_reading_only_page_trend_stats_valid[page] = true;
