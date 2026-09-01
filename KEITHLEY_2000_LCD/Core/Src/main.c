@@ -3575,8 +3575,13 @@ static bool reading_only_render_info_panel(void)
     static uint8_t idx;
     static uint16_t bx; // x cursor for horizontal layout
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
-    if (idx < 12u) {
+    if (idx < 15u) {
         bool ok = true;
+        // Skip large bar clears when page already valid to avoid flicker (bar already BAR)
+        if (idx < 3u && s_reading_only_page_info_valid[s_render_page]) {
+            idx = 3u;
+            return false;
+        }
         uint16_t ty = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT)/2u);
         if (idx == 0u) {
             ok = ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H, MAIN_DISPLAY_COLOR_BAR) == LT7680_OK;
