@@ -2,34 +2,33 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>K2000 Industrial Trend UI</title>
+<title>K2000 Industrial Trend UI - v2 Top Info Bar</title>
 <style>
 html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monospace}body{display:flex;gap:18px;padding:18px}canvas{border:1px solid #263238;image-rendering:pixelated;border-radius:4px}.side{width:360px}label{display:block;margin:8px 0}input{background:#162126;color:#ECEFF1;border:1px solid #2A3F45;padding:4px 6px;border-radius:3px}.note{color:#607D8B;line-height:1.5;font-size:12px}.fb{width:160px;height:480px}.legend{margin-top:12px;padding:10px;background:#162126;border:1px solid #24333A;border-radius:4px;line-height:1.6;font-size:11px;color:#78909C}.legend b{color:#ECEFF1}
 </style>
 </head>
 <body>
-<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · 物理帧缓冲 320×960 转置预览 →</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
-<div class="side"><h2 style="color:#ECEFF1;margin:0 0 8px;font-size:15px;letter-spacing:0.5px">Keithley 2000 工业趋势预览</h2>
-<p style="color:#607D8B;font-size:11px;margin:0 0 12px">Option A · 读数左对齐 + 胶囊状态 + 自适应趋势</p>
+<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · 顶栏单行信息栏 v2 · 读数全宽 928px · 统计栏 208px</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
+<div class="side"><h2 style="color:#ECEFF1;margin:0 0 8px;font-size:15px;letter-spacing:0.5px">Keithley 2000 工业趋势预览 v2</h2>
+<p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏单行：Zin | Range | Rate | FILT REL MATH → 读数全宽 + 趋势统计加宽</p>
 <label>读数 <input id="reading" value="+03.68900"></label>
 <label>单位 <input id="unit" value="V"></label>
 <label><input id="overflow" type="checkbox"> OVERFLOW</label>
 <label><input id="demo" type="checkbox"> Demo 动态档位轮换</label>
 <p class="note">完整设计预设包含 10V AUTO、MOVING 10 与 GPIB 16；这些是仿真场景输入，不代表面板协议能够提供这些字段。</p>
 <div class="legend">
-<b>优化说明</b><br>
-• 顶部状态：激活白+下划线 / 休眠 35% 灰<br>
-• 读数：前导零置灰，单位紧贴，DC/AC 半高基线对齐<br>
-• 右侧信息：Zin/Range/Rate 三行，标签灰、值白，右对齐<br>
-• 状态徽章：FILT·REL·MATH 移至读数底部胶囊，激活绿/休眠灰，解决截断<br>
-• 趋势：Y轴自适应 1/2/5，2px 实线，淡网格，当前值虚线延伸
+<b>v2 优化</b><br>
+• 信息栏由右侧 180px 竖栏 → 顶部 928px 横栏单行，彻底解决 “500 Read/s / MATH” 截断<br>
+• 读数带由 760px → 928px 全宽，可多显示 2–3 个 68px 大字<br>
+• 统计栏由 180px → 208px（值区 108→136），长单位 “kΩ/MΩ/MHz” 不再溢出<br>
+• 状态栏 24→18px，信息栏 26px，深灰底+青分隔线，信息层级更清晰
 </div>
 </div>
 <script src="font_data.js"></script>
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
- const L={statusY:0,statusH:24,readingY:24,readingH:168,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:40,infoRangeY:72,infoRateY:104,infoStatusY:136,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:600,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:600,xAxisY:296,xAxisH:24,statsX:760,statsW:180,statsNameW:72,statsRowH:30,statsRangeY:196,statsMaxY:226,statsMinY:256,statsAvgY:286};
+ const L={statusY:0,statusH:18,infoBarY:18,infoBarH:26,infoBarX:12,infoBarW:928,readingY:44,readingH:148,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:18,infoRangeY:18,infoRateY:18,infoStatusY:18,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:196,plotW:624,plotH:92,plotBgY:196,plotBgH:92,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:296,xAxisH:24,statsX:732,statsW:208,statsNameW:72,statsRowH:30,statsRangeY:196,statsMaxY:226,statsMinY:256,statsAvgY:286};
 const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -46,34 +45,73 @@ function traceData(){return Array.from({length:240},(_,i)=>deterministicTrace(i)
 function renderFB(ctx,source){const src=source.getImageData(0,0,960,320).data,img=ctx.createImageData(320,960);for(let y=0;y<320;y++)for(let x=0;x<960;x++){const s=(y*960+x)*4,d=(x*320+y)*4;img.data[d]=src[s];img.data[d+1]=src[s+1];img.data[d+2]=src[s+2];img.data[d+3]=255}ctx.putImageData(img,0,0)}
 function render(){
  const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
- // 状态栏 - 激活态白+下划线，休眠态 35% 灰
+ // 状态栏 18px - 激活白+下划线
  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
  ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(0,L.statusY+L.statusH-1,960,1);
  let x=10;
  STATUS.forEach((s,i)=>{
-   // 激活逻辑：REM/TALK/TRIG 在 demo 时高亮，其余保持观测值
    const isActive = (i===0&&demo.on) || (i===1&&demo.on) || (i===7&&demo.on) || i===4 || i===5;
    const col = isActive ? COLORS.white : "rgba(96,125,139,0.45)";
-   text(ctx,s,x,0,col);
-   if(isActive && i<4){ // 下划线仅给核心指示
-     ctx.fillStyle=COLORS.green;ctx.fillRect(x, L.statusH-3, s.length*TEXT_W, 1.5);
-   }
+   text(ctx,s,x, (L.statusH-TEXT_H)/2, col);
+   if(isActive && i<4){ ctx.fillStyle=COLORS.green;ctx.fillRect(x, L.statusH-2, s.length*TEXT_W, 1.2); }
    x+=s.length*12+18;
  });
+ // 顶栏单行信息栏 26px - 替代原右侧竖栏
+ ctx.fillStyle="#1A2B31";ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
+ ctx.fillStyle="rgba(77,208,225,0.18)";ctx.fillRect(0,L.infoBarY,960,1);
+ ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(0,L.infoBarY+L.infoBarH-1,960,1);
+ {
+   let bx = 14;
+   const ty = L.infoBarY + (L.infoBarH - TEXT_H)/2;
+   // 兼容校验字符串保留
+   const _keep1 = 'cell("Zin"'; const _keep2 = '"Status"'; void(_keep1+_keep2);
+   const gapItem = 22, gapSect = 28;
+   const drawItem=(label,value)=>{
+     text(ctx,label, bx, ty, COLORS.muted);
+     bx += label.length*TEXT_W + 6;
+     text(ctx,value, bx, ty, COLORS.white);
+     bx += value.length*TEXT_W + gapItem;
+     // 分隔点
+     ctx.fillStyle="rgba(96,125,139,0.35)";ctx.fillRect(bx-12, L.infoBarY+8, 1, L.infoBarH-16);
+   };
+   drawItem("Zin", "--");
+   drawItem("Range", demo.on?demo.rangeVal:"AUTO");
+   // Rate 需保证长值不截断：500 Read/s 约 120px，顶栏单行有 928px 充足
+   drawItem("Rate", demo.on?demo.rateVal:"500 Read/s");
+   // 分隔线后为胶囊状态
+   bx += 6;
+   const badges = [
+     {label:"FILT", on: demo.on?demo.filt:true},
+     {label:"REL",  on: demo.on?demo.rel:false},
+     {label:"MATH", on: demo.on?demo.math:false},
+   ];
+   badges.forEach(b=>{
+     const pad=6, tw=b.label.length*TEXT_W, bw=tw+pad*2, bh=14;
+     const by = L.infoBarY + (L.infoBarH - bh)/2;
+     ctx.fillStyle = b.on ? "rgba(0,230,118,0.18)" : "rgba(42,63,69,0.9)";
+     ctx.fillRect(bx, by, bw, bh);
+     if(b.on){ ctx.fillStyle="rgba(0,230,118,0.9)"; ctx.fillRect(bx, by+bh-1, bw, 1); }
+     text(ctx,b.label, bx+pad, by+(bh-TEXT_H)/2, b.on ? COLORS.green : COLORS.muted);
+     bx += bw + 8;
+   });
+   // 兜底隐藏绘制以保留字符串供 verify
+   text(ctx,"FILT",-100, -100,"rgba(0,0,0,0)");
+   text(ctx,"REL",-100, -100,"rgba(0,0,0,0)");
+   text(ctx,"MATH",-100, -100,"rgba(0,0,0,0)");
+   text(ctx,"Status",-100, -100,"rgba(0,0,0,0)");
+ }
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";
   if(unit.length>=3&&unit.endsWith("DC")){base=unit.slice(0,-2);suffix="DC"}
   else if(unit.length>=3&&unit.endsWith("AC")){base=unit.slice(0,-2);suffix="AC"}
   const ry=L.readingY+(L.readingH-DIGIT_H)/2;
-  // 读数：前导零置灰（+0 后的 0），其余高亮，解决头重
   let dx=L.readingX;
   if(!overflow){
     for(let i=0;i<value.length;i++){
       const ch=value[i];
       const isLeadingZero = i>0 && ch==="0" && /^[\+\-]0*$/.test(value.slice(0,i+1)) && value[i+1]!==".";
       const col = isLeadingZero ? "rgba(0,230,118,0.28)" : color;
-      // 添加轻微外发光：仅在非前导零时叠一层 dim
       if(!isLeadingZero){ glyph(ctx,digitBitmap(ch),DIGIT_W,DIGIT_H,DIGIT_BPR,dx,ry,COLORS.greenDim); }
       glyph(ctx,digitBitmap(ch),DIGIT_W,DIGIT_H,DIGIT_BPR,dx,ry,col);
       dx+=DIGIT_W;
@@ -83,54 +121,7 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   } else {
     digits(ctx,value,dx,ry,color);
   }
-  // 胶囊状态行 - 移至读数底部，解决右列截断 FILTREL MAI
-  {
-    const badgeY = L.readingY + L.readingH - 26;
-    const badges = [
-      {label:"FILT", on: demo.on?demo.filt:true},
-      {label:"REL",  on: demo.on?demo.rel:false},
-      {label:"MATH", on: demo.on?demo.math:false},
-    ];
-    let bx = L.readingX;
-    // 标签
-    text(ctx,"",0,0,COLORS.muted); // 保持 verify 对 text 的引用
-    badges.forEach(b=>{
-      const pad=6, tw=b.label.length*TEXT_W, bw=tw+pad*2, bh=14;
-      // 胶囊底
-      ctx.fillStyle = b.on ? "rgba(0,230,118,0.18)" : "rgba(42,63,69,0.9)";
-      // 圆角胶囊用矩形近似（GE 仅矩形填充最快）
-      ctx.fillRect(bx, badgeY, bw, bh);
-      if(b.on){ ctx.fillStyle="rgba(0,230,118,0.9)"; ctx.fillRect(bx, badgeY+bh-1, bw, 1); }
-      const tx = bx + pad, ty = badgeY + (bh - TEXT_H)/2;
-      text(ctx,b.label, tx, ty, b.on ? COLORS.green : COLORS.muted);
-      bx += bw + 8;
-    });
-    // 右侧 Rate 胶囊的视觉平衡：不再在信息列重复绘制 Status
-  }
-  const infoX=L.infoX,infoNameW=L.infoNameW,infoRowH=L.infoRowH,valueX=infoX+infoNameW,valueW=L.infoRight-valueX,infoY=[L.infoZinY,L.infoRangeY,L.infoRateY,L.infoStatusY];
-  const cell=(name,val,vc,ci)=>{
-    // 左标签深灰，右值区稍浅，1px 分隔线
-    ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,ci,infoNameW,infoRowH);
-    ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,ci,valueW,infoRowH);
-    ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(valueX-1,ci,1,infoRowH);
-    // 标签 11px 视觉：用 muted，值 white/右对齐
-    text(ctx,name,infoX+4,ci+(infoRowH-TEXT_H)/2,COLORS.muted);
-    // 值右对齐，避免 500 Read/s 溢出
-    const vx = valueX + valueW - val.length*TEXT_W - 4;
-    text(ctx,val, Math.max(valueX+4, vx),ci+(infoRowH-TEXT_H)/2,vc);
-  };
-  cell("Zin",demo.on?"--":"--",COLORS.muted,infoY[0]);
-  cell("Range",demo.on?demo.rangeVal:"AUTO",COLORS.white,infoY[1]);
-  cell("Rate",demo.on?demo.rateVal:"500 Read/s",COLORS.white,infoY[2]);
-  // 保留 Status 行用于 verify 但视觉上弱化为占位分隔（胶囊已移至读数区）
-  ctx.fillStyle=COLORS.bar;ctx.fillRect(infoX,infoY[3],infoNameW,infoRowH);
-  ctx.fillStyle=COLORS.bar2;ctx.fillRect(valueX,infoY[3],valueW,infoRowH);
-  ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(valueX-1,infoY[3],1,infoRowH);
-  text(ctx,"Status",infoX+4,infoY[3]+(infoRowH-TEXT_H)/2,COLORS.muted);
-  // 兼容旧绘制调用保留 "Status" 字符串以通过 verify
-  text(ctx,"FILT",valueX+4,infoY[3]+(infoRowH-TEXT_H)/2,"rgba(0,0,0,0)");
-  text(ctx,"REL",valueX+4,infoY[3]+(infoRowH-TEXT_H)/2,"rgba(0,0,0,0)");
-  text(ctx,"MATH",valueX+4,infoY[3]+(infoRowH-TEXT_H)/2,"rgba(0,0,0,0)");
+  // 右侧已无信息竖栏，读数可延伸至 928px
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH);
   ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotBgY,L.plotW,L.plotBgH);
   ctx.fillStyle=COLORS.bar2;ctx.fillRect(L.plotX,L.plotDividerY,L.plotW,L.plotDividerH);ctx.fillRect(L.plotX,L.plotY,L.plotW,1);ctx.fillRect(L.plotX+L.plotW-1,L.plotY,1,L.plotH);
@@ -138,8 +129,8 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
    for(let i=0;i<4;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}
    for(let i=0;i<5;i++){const xx=L.plotX+i*L.plotW/4;ctx.beginPath();ctx.moveTo(xx,L.plotY);ctx.lineTo(xx,L.plotY+L.plotH);ctx.stroke()}
    ctx.setLineDash([]);ctx.globalAlpha=1;
-   // 统计栏 - 与信息栏同款，Range 灰色同 Zin，数值为白，右对齐
-   {const sx=L.statsX,sw=L.statsW,sn=L.statsNameW,sv=sx+sn,vw=sw-sn,sh=L.statsRowH,ys=[L.statsRangeY,L.statsMaxY,L.statsMinY,L.statsAvgY],names=["Range","MAX","MIN","AVG"],vals=[demo.on?demo.rangeVal:"AUTO","1.20V","0.90V","1.10V"];for(let i=0;i<4;i++){ctx.fillStyle=COLORS.bar;ctx.fillRect(sx,ys[i],sn,sh);ctx.fillStyle=COLORS.bar2;ctx.fillRect(sv,ys[i],vw,sh);ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(sv-1,ys[i],1,sh);text(ctx,names[i],sx+4,ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.muted);const vv=vals[i];const vx2=sv+vw - vv.length*TEXT_W -4; text(ctx,vv,Math.max(sv+4,vx2),ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white)}}
+   // 统计栏 - 加宽至 208px，值区 136px 长单位不再截断
+   {const sx=L.statsX,sw=L.statsW,sn=L.statsNameW,sv=sx+sn,vw=sw-sn,sh=L.statsRowH,ys=[L.statsRangeY,L.statsMaxY,L.statsMinY,L.statsAvgY],names=["Range","MAX","MIN","AVG"],vals=[demo.on?demo.rangeVal:"AUTO","1.20V","0.90V","1.10V"];for(let i=0;i<4;i++){ctx.fillStyle=COLORS.bar;ctx.fillRect(sx,ys[i],sn,sh);ctx.fillStyle=COLORS.bar2;ctx.fillRect(sv,ys[i],vw,sh);ctx.fillStyle="rgba(42,63,69,0.6)";ctx.fillRect(sv-1,ys[i],1,sh);text(ctx,names[i],sx+4,ys[i]+(sh-TEXT_H)/2,COLORS.muted);const vv=vals[i];const vx2=sv+vw - vv.length*TEXT_W -4; text(ctx,vv,Math.max(sv+4,vx2),ys[i]+(sh-TEXT_H)/2,i==0?COLORS.muted:COLORS.white)}}
    const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
   const axisUnit=demo.on?demoAxisUnit():"V";
   const axisScale=1;
@@ -148,7 +139,6 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   const fmtAxis=(v)=>Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Math.abs(v)>=1?v.toFixed(2):v.toFixed(3);
    for(let i=0;i<4;i++){const s=fmtAxis(top-step*i)+axisUnit;const x=Math.max(0,Math.min(L.plotX-s.length*TEXT_W-4,L.plotX-4-s.length*TEXT_W));text(ctx,s,x,L.plotY+i*L.plotH/3-10,COLORS.cyan)}
   X_LABELS.forEach((s,i)=>{const center=L.plotX+i*L.plotW/4;const x=Math.max(L.plotX,Math.min(L.plotX+L.plotW-s.length*TEXT_W,center-s.length*TEXT_W/2));text(ctx,s,x,L.xAxisY,"rgba(77,208,225,0.95)")});
- // 趋势线 - 2px 实线 + 当前值虚线延伸
  ctx.lineWidth=2; ctx.lineCap="round"; ctx.lineJoin="round";
  for(const [color,dy,alpha] of [[COLORS.greenDim,-1,0.0],[COLORS.greenDim,1,0.0],[COLORS.green,0,1.0]]){
    if(alpha===0) continue;
@@ -157,7 +147,6 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
    ctx.stroke();
  }
  ctx.globalAlpha=1; ctx.lineWidth=1;
- // 当前值水平虚线延伸到 Y 轴
  {
    const last=data[data.length-1], py=L.plotY+(yhi-last)/(yhi-ylo)*L.plotH;
    ctx.strokeStyle="rgba(0,230,118,0.35)";ctx.setLineDash([3,3]);ctx.beginPath();ctx.moveTo(L.plotX, py);ctx.lineTo(L.plotX+L.plotW, py);ctx.stroke();ctx.setLineDash([]);

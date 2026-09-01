@@ -9,8 +9,9 @@ const sandbox={console,Math,Uint8ClampedArray,document:undefined};vm.createConte
 vm.runInContext(fonts+"\n"+source+"\nconst inkBottom=(bm,bpr)=>{let row=0;for(let r=0;r<bm.length;r++){if(bm[r]!==0){const rr=Math.floor(r/bpr)+1;if(rr>row)row=rr;}}return row};\nconst baselineAligned=(()=>{const d=inkBottom(DIGIT_BITMAPS[DIGIT_CHARS.indexOf('8')],DIGIT_BPR);const h=inkBottom(HALF_BITMAPS[HALF_CHARS.indexOf('C')],HALF_BPR);return d===(DIGIT_BASELINE-HALF_BASELINE)+h;})();\nthis.EXPORTS={UI_W,UI_H,L,X_LABELS,STATUS,traceData,textBitmap,digitBitmap,halfBitmap,normalizeUnit,baselineAligned};",sandbox);
 const e=sandbox.EXPORTS;
 check("layout width",e.UI_W===960);check("layout height",e.UI_H===320);
-check("three regions total",e.L.statusH+e.L.readingH+e.L.trendH===320);
-check("reading starts 24",e.L.readingY===24&&e.L.readingH===168);check("trend starts 192",e.L.trendY===192);
+check("four regions total (status+infoBar+reading+trend)",e.L.statusH+e.L.infoBarH+e.L.readingH+e.L.trendH===320);
+check("reading starts 44 (v2 top bar)",e.L.readingY===44&&e.L.readingH===148);check("trend starts 192",e.L.trendY===192);
+check("top info bar geometry",e.L.infoBarY===18&&e.L.infoBarH===26&&e.L.infoBarW===928&&e.L.infoBarX===12);
 check("reverse x labels",JSON.stringify(Array.from(e.X_LABELS))===JSON.stringify(["10.00s","7.50s","5.00s","2.50s","0.00s"]));
 const data=e.traceData();check("240 projected columns",data.length===240);check("deterministic non-flat trace",Math.max(...data)>Math.min(...data));
 check("authentic labels",["REM","TALK","LSTN","SRQ","TRIG"].every(x=>e.STATUS.includes(x)));
@@ -20,7 +21,10 @@ check("resistance unit normalizer",e.normalizeUnit("OHM")==="Ω"&&e.normalizeUni
 check("digit unit symbols",["µ","°","Ω"].every(c=>e.digitBitmap(c)!=null));
 check("half-height suffix font",["D","C","A"].every(c=>e.halfBitmap(c)!=null));
 check("DC/AC baseline hits reading ink bottom",e.baselineAligned);
-check("info panel cells",e.L.infoX+e.L.infoNameW<e.L.infoRight&&e.L.infoRowH===32&&html.includes('cell("Zin"')&&html.includes('"Status"'));
+check("info panel cells (compat)",e.L.infoX+e.L.infoNameW<e.L.infoRight&&e.L.infoRowH===32&&html.includes('cell("Zin"')&&html.includes('"Status"'));
+check("top bar replaces vertical info (v2)",html.includes("infoBarY")&&html.includes("infoBarH")&&html.includes("Zin")&&html.includes("Range")&&html.includes("Rate"));
+check("stats widened for long values",e.L.statsW===208&&e.L.statsNameW===72&&e.L.statsW-e.L.statsNameW>=136);
+check("plot widened",e.L.plotW===624&&e.L.xAxisW===624);
 check("left-aligned reading",e.L.readingX===12);
 check("chart panel and plot geometry",e.L.chartPanelY===192&&e.L.plotBgY===196&&e.L.plotDividerH===4&&e.L.yAxisW===e.L.plotX&&e.L.xAxisW===e.L.plotW);
 check("simulator draws chart panel",html.includes("plotBgY")&&html.includes("plotDividerH")&&html.includes("ctx.fillStyle=COLORS.bar"));

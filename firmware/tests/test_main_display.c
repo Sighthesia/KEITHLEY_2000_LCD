@@ -52,8 +52,8 @@ int main(void)
     main_display_layout_t layout;
     trend_buffer_t trend;
 
-    assert(MAIN_DISPLAY_STATUS_H + MAIN_DISPLAY_READING_H +
-           MAIN_DISPLAY_TREND_H == 320u);
+    assert(MAIN_DISPLAY_STATUS_H + MAIN_DISPLAY_INFO_BAR_H +
+           MAIN_DISPLAY_READING_H + MAIN_DISPLAY_TREND_H == 320u);
     /* Left-aligned value: 6 chars start at x=12 and advance by 64 each. */
     layout = main_display_layout_value(6u, 12u, 10u);
     assert(layout.valid && layout.start_x == 12u &&

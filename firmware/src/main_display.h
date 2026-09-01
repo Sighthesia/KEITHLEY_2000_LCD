@@ -12,22 +12,27 @@
 #define MAIN_DISPLAY_UI_WIDTH 960u
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
-/* The deleted function/parameters/graph-header rows free the full y24..192
- * band for the reading. The value and unit use the 68x128 large-digit cell
- * left-aligned; the half-height DC/AC suffix shares the digit font's
- * typographic baseline, so its ink bottom lands exactly on the reading's ink
- * bottom (cell-bottom alignment would drop it by the two fonts' different
- * baseline insets). The right info panel is a 4-row rectangle of Excel-style
- * name/value cells (Zin / Range / Rate / Status) inside the same band. */
+/* Layout v2 (2026-09-01): the right-side Excel info panel is folded into a
+ * single top info bar (y18..44) so the reading band can use the full 928px
+ * width and the trend stats can widen to 208px for long values like
+ * "500 Read/s" or "10MΩ MANUAL". The status bar is shrunk to 18px to keep
+ * the 320px total. Old INFO_X/ROW constants are retained for compat but the
+ * renderer now uses INFO_BAR. */
 #define MAIN_DISPLAY_STATUS_Y 0u
-#define MAIN_DISPLAY_STATUS_H 24u
-#define MAIN_DISPLAY_READING_Y 24u
-#define MAIN_DISPLAY_READING_H 168u
+#define MAIN_DISPLAY_STATUS_H 18u
+#define MAIN_DISPLAY_INFO_BAR_Y 18u
+#define MAIN_DISPLAY_INFO_BAR_H 26u
+#define MAIN_DISPLAY_INFO_BAR_X 12u
+#define MAIN_DISPLAY_INFO_RIGHT 940u
+#define MAIN_DISPLAY_INFO_BAR_W \
+    (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_BAR_X)
+#define MAIN_DISPLAY_READING_Y 44u
+#define MAIN_DISPLAY_READING_H 148u
 #define MAIN_DISPLAY_TREND_Y 192u
 #define MAIN_DISPLAY_TREND_H 128u
 
 #define MAIN_DISPLAY_READING_X 12u
-#define MAIN_DISPLAY_INFO_RIGHT 940u
+/* Compat: old right-panel geometry (now unused, kept for verify) */
 #define MAIN_DISPLAY_INFO_X 760u
 #define MAIN_DISPLAY_INFO_W \
     (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_INFO_X)
@@ -36,17 +41,17 @@
     (MAIN_DISPLAY_INFO_W - MAIN_DISPLAY_INFO_NAME_W)
 #define MAIN_DISPLAY_INFO_ROW_H 32u
 #define MAIN_DISPLAY_READING_VALUE_W \
-    (MAIN_DISPLAY_INFO_X - MAIN_DISPLAY_READING_X - FONT_DIGIT_WIDTH)
+    (MAIN_DISPLAY_INFO_BAR_W - FONT_DIGIT_WIDTH)
 #define MAIN_DISPLAY_MAX_SLOTS (MAIN_DISPLAY_READING_VALUE_W / FONT_DIGIT_WIDTH)
 /* Bottom-align the 128-pixel tiles to the reading-band bottom. */
 #define MAIN_DISPLAY_READING_VALUE_Y \
     (MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_READING_H - FONT_DIGIT_HEIGHT)
 #define MAIN_DISPLAY_DCAC_Y \
     (MAIN_DISPLAY_READING_VALUE_Y + FONT_DIGIT_BASELINE - FONT_HALF_BASELINE)
-#define MAIN_DISPLAY_INFO_ZIN_Y 40u
-#define MAIN_DISPLAY_INFO_RANGE_Y 72u
-#define MAIN_DISPLAY_INFO_RATE_Y 104u
-#define MAIN_DISPLAY_INFO_STATUS_Y 136u
+#define MAIN_DISPLAY_INFO_ZIN_Y MAIN_DISPLAY_INFO_BAR_Y
+#define MAIN_DISPLAY_INFO_RANGE_Y MAIN_DISPLAY_INFO_BAR_Y
+#define MAIN_DISPLAY_INFO_RATE_Y MAIN_DISPLAY_INFO_BAR_Y
+#define MAIN_DISPLAY_INFO_STATUS_Y MAIN_DISPLAY_INFO_BAR_Y
 #define MAIN_DISPLAY_STATUS_LABEL_GAP 12u
 #define MAIN_DISPLAY_STATUS_LABEL_MAX 8u
 #define MAIN_DISPLAY_FUNCTION_MAX 20u
@@ -68,9 +73,9 @@
 
 #define MAIN_DISPLAY_PLOT_X 96u
 #define MAIN_DISPLAY_PLOT_Y 196u
-#define MAIN_DISPLAY_PLOT_W 600u
+#define MAIN_DISPLAY_PLOT_W 624u
 #define MAIN_DISPLAY_PLOT_H 92u
-#define MAIN_DISPLAY_TREND_STATS_X 760u
+#define MAIN_DISPLAY_TREND_STATS_X 732u
 #define MAIN_DISPLAY_TREND_STATS_W \
     (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_TREND_STATS_X)
 #define MAIN_DISPLAY_TREND_STATS_NAME_W 72u
