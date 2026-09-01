@@ -1,4 +1,6 @@
 #include <string.h>
+#include <stdio.h>
+#include <limits.h>
 
 #include "main_display.h"
 
@@ -15,6 +17,66 @@ static void append_text(char *out, uint8_t size, const char *text)
     uint8_t n = (uint8_t)strlen(out), i = 0u;
     while (text != 0 && text[i] != '\0' && n + 1u < size) out[n++] = text[i++];
     out[n] = '\0';
+}
+
+static void format_runtime_text(char *temperature, uint8_t temperature_size,
+                                char *uptime, uint8_t uptime_size,
+                                int16_t temperature_tenths_c,
+                                uint32_t uptime_ms)
+{
+    uint32_t seconds = uptime_ms / 1000u;
+    uint32_t hours = seconds / 3600u;
+    uint8_t minutes = (uint8_t)((seconds / 60u) % 60u);
+    uint8_t secs = (uint8_t)(seconds % 60u);
+    uint16_t magnitude;
+    char sign = '+';
+
+    if (temperature_tenths_c < 0) {
+        sign = '-';
+        magnitude = (uint16_t)(-temperature_tenths_c);
+    } else {
+        magnitude = (uint16_t)temperature_tenths_c;
+    }
+    if (temperature_tenths_c == INT16_MIN) {
+        copy_text(temperature, temperature_size, "--.-\xC2\xB0" "C");
+    } else {
+        (void)snprintf(temperature, temperature_size, "%c%u.%u\xC2\xB0" "C",
+                       sign, magnitude / 10u, magnitude % 10u);
+    }
+    (void)snprintf(uptime, uptime_size, "%02lu:%02u:%02u",
+                   (unsigned long)(hours > 99u ? 99u : hours), minutes, secs);
+}
+
+static void format_active_status(const main_display_frame_t *frame,
+                                 char *out, uint8_t size)
+{
+    uint8_t i;
+    bool first = true;
+    out[0] = '\0';
+    for (i = 0u; i < frame->status_count; i++) {
+        if (!frame->status_active[i]) continue;
+        if (!first) append_text(out, size, " ");
+        append_text(out, size, frame->status_text[i]);
+        first = false;
+    }
+}
+
+static void split_function_name(const char *function, char *line1, uint8_t line1_size,
+                                char *line2, uint8_t line2_size)
+{
+    const char *space = function != 0 ? strchr(function, ' ') : 0;
+    if (space == 0) {
+        copy_text(line1, line1_size, function);
+        line2[0] = '\0';
+        return;
+    }
+    {
+        uint8_t n = (uint8_t)(space - function);
+        if (n >= line1_size) n = (uint8_t)(line1_size - 1u);
+        memcpy(line1, function, n);
+        line1[n] = '\0';
+    }
+    copy_text(line2, line2_size, space + 1);
 }
 
 main_display_layout_t main_display_layout_value(uint8_t value_len,
@@ -248,6 +310,10 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     frame->start_x = layout.start_x; frame->end_x = layout.end_x;
     copy_text(frame->function, sizeof(frame->function),
               main_display_function_text(model->function_id));
+    copy_text(frame->brand, sizeof(frame->brand), "KEITHLEY 2000");
+    split_function_name(frame->function, frame->function_line1,
+                        sizeof(frame->function_line1), frame->function_line2,
+                        sizeof(frame->function_line2));
     format_impedance(model, frame->impedance, sizeof(frame->impedance));
     copy_text(frame->range, sizeof(frame->range), model->auto_range ? "AUTO" : "MANUAL");
     copy_text(frame->filter, sizeof(frame->filter), model->filter_on ? "Filter: ON" : "Filter: OFF");
@@ -265,6 +331,19 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
             status_bar_active(&model->status, indicator->tag, indicator->bit);
         frame->status_count++;
     }
+    format_active_status(frame, frame->active_status, sizeof(frame->active_status));
+    format_runtime_text(frame->temperature, sizeof(frame->temperature),
+                        frame->uptime, sizeof(frame->uptime), INT16_MIN, 0u);
+}
+
+void main_display_format_runtime(main_display_frame_t *frame,
+                                 int16_t temperature_tenths_c,
+                                 uint32_t uptime_ms)
+{
+    if (frame == 0) return;
+    format_runtime_text(frame->temperature, sizeof(frame->temperature),
+                        frame->uptime, sizeof(frame->uptime),
+                        temperature_tenths_c, uptime_ms);
 }
 
 void main_display_get_trend_axis(const main_display_frame_t *frame,

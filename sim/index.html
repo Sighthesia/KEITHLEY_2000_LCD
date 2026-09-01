@@ -2,15 +2,15 @@
 <html lang="zh">
 <head>
 <meta charset="utf-8">
-<title>K2000 Industrial Trend UI - v2 Top Info Bar</title>
+<title>K2000 Industrial Trend UI - header redesign</title>
 <style>
 html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monospace}body{display:flex;gap:18px;padding:18px}canvas{border:1px solid #263238;image-rendering:pixelated;border-radius:4px}.side{width:360px}label{display:block;margin:8px 0}input{background:#162126;color:#ECEFF1;border:1px solid #2A3F45;padding:4px 6px;border-radius:3px}.note{color:#607D8B;line-height:1.5;font-size:12px}.fb{width:160px;height:480px}.legend{margin-top:12px;padding:10px;background:#162126;border:1px solid #24333A;border-radius:4px;line-height:1.6;font-size:11px;color:#78909C}.legend b{color:#ECEFF1}
 </style>
 </head>
 <body>
-<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · v2.1 顶栏单行 · 绘图内边距 + 轴沟槽底板 · 统计 7位</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
+<div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · 品牌/运行信息顶栏 · 两行档位 · 趋势轴沟槽</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
 <div class="side"><h2 style="color:#ECEFF1;margin:0 0 8px;font-size:15px;letter-spacing:0.5px">Keithley 2000 工业趋势预览 v2</h2>
-<p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏单行：Zin | Range | Rate | FILT REL MATH → 读数全宽 + 趋势统计加宽</p>
+<p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏显示品牌、激活状态、内部温度与运行时间；第二行显示当前档位</p>
 <label>读数 <input id="reading" value="+03.68900"></label>
 <label>单位 <input id="unit" value="V"></label>
 <label><input id="overflow" type="checkbox"> OVERFLOW</label>
@@ -28,7 +28,7 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
- const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:202,plotW:624,plotH:84,plotBgY:202,plotBgH:84,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288};
+ const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,rangeLine1Y:25,rangeLine2Y:37,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:202,plotW:624,plotH:84,plotBgY:202,plotBgH:84,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288};
 const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -42,64 +42,24 @@ function digits(ctx,s,x,y,color){for(const c of s){glyph(ctx,digitBitmap(c),DIGI
 function half(ctx,s,x,y,color){for(const c of s){glyph(ctx,halfBitmap(c),HALF_W,HALF_H,HALF_BPR,x,y,color);x+=HALF_W}}
 function deterministicTrace(i){const t=i/239;const rc=3.35+0.42*(1-Math.exp(-t*5));const saw=((i%48)/48-.5)*.065;return rc+saw}
 function traceData(){return Array.from({length:240},(_,i)=>deterministicTrace(i))}
+const simStartedAt=Date.now();
+function demoUptime(){const s=Math.floor((Date.now()-simStartedAt)/1000);return [Math.floor(s/3600),Math.floor(s/60)%60,s%60].map(v=>String(v).padStart(2,"0")).join(":")}
 function renderFB(ctx,source){const src=source.getImageData(0,0,960,320).data,img=ctx.createImageData(320,960);for(let y=0;y<320;y++)for(let x=0;x<960;x++){const s=(y*960+x)*4,d=(x*320+y)*4;img.data[d]=src[s];img.data[d+1]=src[s+1];img.data[d+2]=src[s+2];img.data[d+3]=255}ctx.putImageData(img,0,0)}
 function render(){
- const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
- // 状态栏 18px - 激活白+下划线
- ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
- ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(0,L.statusY+L.statusH-1,960,1);
- let x=10;
- STATUS.forEach((s,i)=>{
-   const isActive = (i===0&&demo.on) || (i===1&&demo.on) || (i===7&&demo.on) || i===4 || i===5;
-   const col = isActive ? COLORS.white : "rgba(96,125,139,0.45)";
-   text(ctx,s,x, (L.statusH-TEXT_H)/2, col);
-   if(isActive && i<4){ ctx.fillStyle=COLORS.green;ctx.fillRect(x, L.statusH-2, s.length*TEXT_W, 1.2); }
-   x+=s.length*12+18;
- });
- // 顶栏单行信息栏 26px - 替代原右侧竖栏
- ctx.fillStyle="#1A2B31";ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
- ctx.fillStyle="rgba(77,208,225,0.18)";ctx.fillRect(0,L.infoBarY,960,1);
- ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(0,L.infoBarY+L.infoBarH-1,960,1);
- {
-   let bx = 14;
-   const ty = L.infoBarY + (L.infoBarH - TEXT_H)/2;
-   // 兼容校验字符串保留
-   const _keep1 = 'cell("Zin"'; const _keep2 = '"Status"'; void(_keep1+_keep2);
-   const gapItem = 22, gapSect = 28;
-   const drawItem=(label,value)=>{
-     text(ctx,label, bx, ty, COLORS.muted);
-     bx += label.length*TEXT_W + 6;
-     text(ctx,value, bx, ty, COLORS.white);
-     bx += value.length*TEXT_W + gapItem;
-     // 分隔点
-     ctx.fillStyle="rgba(96,125,139,0.35)";ctx.fillRect(bx-12, L.infoBarY+8, 1, L.infoBarH-16);
-   };
-   drawItem("Zin", "--");
-   drawItem("Range", demo.on?demo.rangeVal:"AUTO");
-   // Rate 需保证长值不截断：500 Read/s 约 120px，顶栏单行有 928px 充足
-   drawItem("Rate", demo.on?demo.rateVal:"500 Read/s");
-   // 分隔线后为胶囊状态
-   bx += 6;
-   const badges = [
-     {label:"FILT", on: demo.on?demo.filt:true},
-     {label:"REL",  on: demo.on?demo.rel:false},
-     {label:"MATH", on: demo.on?demo.math:false},
-   ];
-   badges.forEach(b=>{
-     const pad=6, tw=b.label.length*TEXT_W, bw=tw+pad*2, bh=14;
-     const by = L.infoBarY + (L.infoBarH - bh)/2;
-     ctx.fillStyle = b.on ? "rgba(0,230,118,0.18)" : "rgba(42,63,69,0.9)";
-     ctx.fillRect(bx, by, bw, bh);
-     if(b.on){ ctx.fillStyle="rgba(0,230,118,0.9)"; ctx.fillRect(bx, by+bh-1, bw, 1); }
-     text(ctx,b.label, bx+pad, by+(bh-TEXT_H)/2, b.on ? COLORS.green : COLORS.muted);
-     bx += bw + 8;
-   });
-   // 兜底隐藏绘制以保留字符串供 verify
-   text(ctx,"FILT",-100, -100,"rgba(0,0,0,0)");
-   text(ctx,"REL",-100, -100,"rgba(0,0,0,0)");
-   text(ctx,"MATH",-100, -100,"rgba(0,0,0,0)");
-   text(ctx,"Status",-100, -100,"rgba(0,0,0,0)");
- }
+  const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
+  // 第一行：品牌、激活状态、温度和运行时间
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
+  text(ctx,"KEITHLEY 2000",12,0,COLORS.white);
+  const active=demo.on?["REM","TALK","TRIG"].join(" "):"";
+  if(active)text(ctx,active,(960-active.length*TEXT_W)/2,0,COLORS.green);
+  const runtime="+25.0°C  "+demoUptime();
+  text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
+  // 第二行：无描边，两行垂直居中的当前档位名称
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
+  const range=demo.on?demo.rangeVal:"DC VOLTAGE";
+  const split=range.indexOf(" ");
+  text(ctx,split<0?range:range.slice(0,split),12,L.rangeLine1Y,COLORS.white);
+  if(split>=0)text(ctx,range.slice(split+1),12,L.rangeLine2Y,COLORS.white);
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";

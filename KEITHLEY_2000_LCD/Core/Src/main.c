@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <string.h>
+#include <limits.h>
+#include <stdio.h>
 #include "hal_board.h"
 #include "font_digits.h"
 #include "font_half.h"
@@ -196,6 +198,9 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
+static int16_t internal_temperature_read(void);
+static void internal_temperature_init(void);
+static void refresh_runtime_snapshot(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -221,6 +226,8 @@ static uint8_t s_frame_text_generation;
 static bool s_frame_has_trend_update;
 static bool s_render_status_regions;
 static uint8_t s_status_info_dirty_rows;
+static int16_t s_internal_temperature_tenths = INT16_MIN;
+static uint32_t s_temperature_tick;
 
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
@@ -258,6 +265,17 @@ static bool READING_ONLY_LEGACY s_trend_full_repaint;
  * chart-panel background fill (~300 ms of GE fills) and just relabel. */
 static bool READING_ONLY_LEGACY s_trend_relabel_only;
 static main_display_frame_t s_frame;
+
+static void refresh_runtime_snapshot(void)
+{
+    uint32_t now = HAL_GetTick();
+    if ((uint32_t)(now - s_temperature_tick) >= 1000u ||
+        s_internal_temperature_tenths == INT16_MIN) {
+        s_internal_temperature_tenths = internal_temperature_read();
+        s_temperature_tick = now;
+    }
+    main_display_format_runtime(&s_frame, s_internal_temperature_tenths, now);
+}
 static uint32_t s_text_refresh_tick;
 static uint32_t READING_ONLY_LEGACY s_trend_refresh_tick;
 static uint32_t s_display_due_tick;
@@ -325,9 +343,11 @@ static uint8_t s_reading_only_value_index;
 static bool s_reading_only_page_status_valid[2];
 static uint8_t s_reading_only_page_status_lamps[2];
 static bool s_reading_only_page_info_valid[2];
+static char s_reading_only_page_active_status[2][MAIN_DISPLAY_META_MAX];
+static char s_reading_only_page_temperature[2][12];
+static char s_reading_only_page_uptime[2][12];
 static char s_reading_only_page_impedance[2][32];
 static char s_reading_only_page_range[2][32];
-static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
@@ -1522,7 +1542,7 @@ static bool ui_draw_bitmap_slice(bitmap_job_t *job, uint16_t x, uint16_t y,
     /* A GE rectangle is a blocking SPI transaction.  Keep this small enough
      * that the main loop can return to the RX ISR/keypad between calls; a
      * large glyph may therefore span several cooperative calls. */
-    uint16_t budget = mode == 3u ? 256u : 64u;
+    uint16_t budget = (mode == 3u || mode == 4u) ? 256u : 64u;
     if (!job->active)
     {
         job->text = text;
@@ -1571,8 +1591,8 @@ static bool ui_draw_bitmap_slice(bitmap_job_t *job, uint16_t x, uint16_t y,
                        (bits[job->col >> 3] & (uint8_t)(0x80u >> (job->col & 7u))) != 0u)
                     job->col++;
                 if (ui_fill_rect(
-                        (uint16_t)(job->cx + start),
-                        (uint16_t)(job->y + job->row),
+                         (uint16_t)(job->cx + start),
+                         (uint16_t)(job->y + (mode == 4u ? job->row / 2u : job->row)),
                         (uint16_t)(job->col - start), 1u,
                         job->color) != LT7680_OK)
                 {
@@ -1602,6 +1622,12 @@ static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
     return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 0u);
+}
+
+static bool ui_draw_compact_text(uint16_t x, uint16_t y, const char *text,
+                                 uint16_t color)
+{
+    return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 4u);
 }
 
 static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
@@ -3547,113 +3573,90 @@ static bool READING_ONLY_LEGACY trend_yield_to_regions(void)
 #if K2000_READING_ONLY_BASELINE
 static bool reading_only_render_status_bar(void)
 {
-    static const char *const labels[5] = {"REM", "TALK", "LSTN", "SRQ", "TRIG"};
-    static const uint8_t bits[5] = {0u, 1u, 2u, 3u, 5u};
+    static const uint8_t status_bits[5] = {0u, 1u, 2u, 3u, 5u};
     static uint8_t idx;
     if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
     if (idx == 0u) {
-        if (ui_fill_rect(0u, MAIN_DISPLAY_STATUS_Y, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-    }
-    while (idx < 5u) {
-        if (!ui_draw_text((uint16_t)(8u + idx * 116u), 0u, labels[idx], s_frame.status_active[bits[idx]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED)) return false;
+        if (ui_fill_rect(0u, MAIN_DISPLAY_STATUS_Y, MAIN_DISPLAY_UI_WIDTH,
+                         MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
         idx++;
+        return true;
+    }
+    if (idx == 1u) {
+        if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        idx++;
+        return true;
+    }
+    if (idx == 2u && s_frame.active_status[0] != '\0') {
+        uint16_t status_w = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
+        uint16_t status_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH - status_w) / 2u);
+        if (!ui_draw_text(status_x, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
+        idx++;
+        return true;
+    }
+    if (idx == 2u) idx++;
+    if (idx == 3u) {
+        uint16_t right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+        uint16_t right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - right_w - 12u);
+        if (!ui_draw_text(right_x, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
+        idx++;
+        return true;
+    }
+    if (idx == 4u) {
+        uint16_t right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+        uint16_t right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - right_w - 12u);
+        if (!ui_draw_text((uint16_t)(right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u),
+                          0u, s_frame.uptime, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        idx++;
+        return true;
     }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
+    strncpy(s_reading_only_page_active_status[s_render_page], s_frame.active_status,
+            sizeof(s_reading_only_page_active_status[0]) - 1u);
+    s_reading_only_page_active_status[s_render_page]
+        [sizeof(s_reading_only_page_active_status[0]) - 1u] = '\0';
+    strncpy(s_reading_only_page_temperature[s_render_page], s_frame.temperature,
+            sizeof(s_reading_only_page_temperature[0]) - 1u);
+    strncpy(s_reading_only_page_uptime[s_render_page], s_frame.uptime,
+            sizeof(s_reading_only_page_uptime[0]) - 1u);
     {
         uint8_t cur = 0u;
-        for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[bits[i]]) cur |= (1u<<i);
+    for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[status_bits[i]]) cur |= (1u<<i);
         s_reading_only_page_status_lamps[s_render_page] = cur;
     }
     return true;
 }
 static bool reading_only_render_info_panel(void)
 {
-    // v2.1 top single-row info bar: Zin | Range | Rate | FILT REL MATH capsules
-    // Replaces the old 4-row vertical Excel panel (760,180). Now INFO_BAR 928px
-    // at y18 h26 spans full width, value zone supports long strings.
     static uint8_t idx;
-    static uint16_t bx; // x cursor for horizontal layout
+    const uint16_t line_gap = 0u;
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
-    // Avoid flicker/overlap: if page already shows correct top bar, skip entirely
+    /* The range row is intentionally borderless; it is a quiet continuation
+     * of the header rather than a second boxed information panel. */
     if (s_reading_only_page_info_valid[s_render_page] &&
-        strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) == 0 &&
-        strcmp(s_reading_only_page_range[s_render_page], s_frame.range) == 0 &&
-        strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) == 0 &&
-        s_reading_only_page_info_lamps[s_render_page] == (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) | (s_frame.status_active[6u] ? 2u : 0u) | (s_frame.status_active[11u] ? 4u : 0u))) {
+        strcmp(s_reading_only_page_impedance[s_render_page], s_frame.function_line1) == 0 &&
+        strcmp(s_reading_only_page_range[s_render_page], s_frame.function_line2) == 0) {
         return true;
     }
-    if (idx < 15u) {
-        bool ok = true;
-        uint16_t ty = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT)/2u);
-        if (idx == 0u) {
-            ok = ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H, MAIN_DISPLAY_COLOR_BAR) == LT7680_OK;
-        } else if (idx == 1u) {
-            ok = ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y, MAIN_DISPLAY_UI_WIDTH, 1u, MAIN_DISPLAY_COLOR_GRID) == LT7680_OK;
-        } else if (idx == 2u) {
-            ok = ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y + MAIN_DISPLAY_INFO_BAR_H - 1u, MAIN_DISPLAY_UI_WIDTH, 1u, MAIN_DISPLAY_COLOR_GRID) == LT7680_OK;
-        } else if (idx == 3u) {
-            bx = 14u;
-            ok = ui_draw_text(bx, ty, "Zin", MAIN_DISPLAY_COLOR_MUTED);
-            if (ok) bx += (uint16_t)(3u * FONT_TEXT_WIDTH + 6u);
-        } else if (idx == 4u) {
-            ok = ui_draw_text(bx, ty, s_frame.impedance, MAIN_DISPLAY_COLOR_MUTED);
-            if (ok) {
-                bx += (uint16_t)(strlen(s_frame.impedance) * FONT_TEXT_WIDTH + 22u);
-                (void)ui_fill_rect(bx - 12u, MAIN_DISPLAY_INFO_BAR_Y + 8u, 1u, MAIN_DISPLAY_INFO_BAR_H - 16u, MAIN_DISPLAY_COLOR_GRID);
-            }
-        } else if (idx == 5u) {
-            ok = ui_draw_text(bx, ty, "Range", MAIN_DISPLAY_COLOR_MUTED);
-            if (ok) bx += (uint16_t)(5u * FONT_TEXT_WIDTH + 6u);
-        } else if (idx == 6u) {
-            ok = ui_draw_text(bx, ty, s_frame.range, MAIN_DISPLAY_COLOR_WHITE);
-            if (ok) {
-                bx += (uint16_t)(strlen(s_frame.range) * FONT_TEXT_WIDTH + 22u);
-                (void)ui_fill_rect(bx - 12u, MAIN_DISPLAY_INFO_BAR_Y + 8u, 1u, MAIN_DISPLAY_INFO_BAR_H - 16u, MAIN_DISPLAY_COLOR_GRID);
-            }
-        } else if (idx == 7u) {
-            ok = ui_draw_text(bx, ty, "Rate", MAIN_DISPLAY_COLOR_MUTED);
-            if (ok) bx += (uint16_t)(4u * FONT_TEXT_WIDTH + 6u);
-        } else if (idx == 8u) {
-            ok = ui_draw_text(bx, ty, s_frame.rate, MAIN_DISPLAY_COLOR_WHITE);
-            if (ok) {
-                bx += (uint16_t)(strlen(s_frame.rate) * FONT_TEXT_WIDTH + 28u);
-                (void)ui_fill_rect(bx - 16u, MAIN_DISPLAY_INFO_BAR_Y + 8u, 1u, MAIN_DISPLAY_INFO_BAR_H - 16u, MAIN_DISPLAY_COLOR_GRID);
-            }
-        } else if (idx >= 9u && idx <= 14u) {
-            static const char *const lamps[3] = {"FILT","REL","MATH"};
-            static const uint8_t bits[3] = {7u,6u,11u};
-            uint8_t lamp = (uint8_t)((idx - 9u) / 2u);
-            bool is_fill = ((idx - 9u) % 2u) == 0u;
-            uint16_t pad = 6u, tw = (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH), bw = tw + pad*2u, bh = 14u;
-            uint16_t by = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - bh)/2u);
-            if (is_fill) {
-                uint16_t bg = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN_DIM : MAIN_DISPLAY_COLOR_BAR_ALT;
-                ok = ui_fill_rect(bx, by, bw, bh, bg) == LT7680_OK;
-            } else {
-                uint16_t col = s_frame.status_active[bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED;
-                ok = ui_draw_text((uint16_t)(bx + pad), (uint16_t)(by + (bh - FONT_TEXT_HEIGHT)/2u), lamps[lamp], col);
-                if (ok && s_frame.status_active[bits[lamp]]) {
-                    (void)ui_fill_rect(bx, by+bh-1u, bw, 1u, MAIN_DISPLAY_COLOR_GREEN);
-                }
-                if (ok) bx += (uint16_t)(bw + 8u);
-            }
-        }
-        if (!ok) return false;
-        idx++;
-        if (idx < 15u) return false;
-        // cache page
-        s_reading_only_page_info_valid[s_render_page] = true;
-        strncpy(s_reading_only_page_impedance[s_render_page], s_frame.impedance, sizeof(s_reading_only_page_impedance[0])-1u);
-        strncpy(s_reading_only_page_range[s_render_page], s_frame.range, sizeof(s_reading_only_page_range[0])-1u);
-        strncpy(s_reading_only_page_rate[s_render_page], s_frame.rate, sizeof(s_reading_only_page_rate[0])-1u);
-        s_reading_only_page_impedance[s_render_page][sizeof(s_reading_only_page_impedance[0])-1u]='\0';
-        s_reading_only_page_range[s_render_page][sizeof(s_reading_only_page_range[0])-1u]='\0';
-        s_reading_only_page_rate[s_render_page][sizeof(s_reading_only_page_rate[0])-1u]='\0';
-        s_reading_only_page_info_lamps[s_render_page] = (s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u);
-        idx = 0u;
-        return true;
+    if (idx == 0u && ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y,
+                                  MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H,
+                                  MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+    {
+        uint16_t y1 = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + 1u);
+        uint16_t y2 = (uint16_t)(y1 + FONT_TEXT_HEIGHT / 2u + line_gap);
+        if (s_frame.function_line1[0] != '\0' &&
+            !ui_draw_compact_text(MAIN_DISPLAY_READING_X, y1, s_frame.function_line1, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        if (s_frame.function_line2[0] != '\0' &&
+            !ui_draw_compact_text(MAIN_DISPLAY_READING_X, y2, s_frame.function_line2, MAIN_DISPLAY_COLOR_WHITE)) return false;
     }
+    strncpy(s_reading_only_page_impedance[s_render_page], s_frame.function_line1, sizeof(s_reading_only_page_impedance[0])-1u);
+    strncpy(s_reading_only_page_range[s_render_page], s_frame.function_line2, sizeof(s_reading_only_page_range[0])-1u);
+    s_reading_only_page_impedance[s_render_page][sizeof(s_reading_only_page_impedance[0])-1u] = '\0';
+    s_reading_only_page_range[s_render_page][sizeof(s_reading_only_page_range[0])-1u] = '\0';
+    s_reading_only_page_info_valid[s_render_page] = true;
+    s_reading_only_page_info_lamps[s_render_page] = 0u;
+    idx = 0u;
     return true;
 }
 
@@ -4092,6 +4095,38 @@ static void keithley_trend_axis_range(const char *unit, float peak,
     *maximum = full_scale;
 }
 
+static void internal_temperature_init(void)
+{
+    __HAL_RCC_ADC1_CLK_ENABLE();
+    ADC1->CR2 = ADC_CR2_TSVREFE;
+    ADC1->SMPR1 = (7u << 18u) | (7u << 21u);
+    ADC1->SQR1 = 0u;
+    ADC1->SQR3 = 16u;
+    ADC1->CR2 |= ADC_CR2_ADON;
+    HAL_Delay(1u);
+    ADC1->CR2 |= ADC_CR2_RSTCAL;
+    while ((ADC1->CR2 & ADC_CR2_RSTCAL) != 0u) {}
+    ADC1->CR2 |= ADC_CR2_CAL;
+    while ((ADC1->CR2 & ADC_CR2_CAL) != 0u) {}
+}
+
+static int16_t internal_temperature_read(void)
+{
+    uint32_t raw;
+    uint16_t ts_cal1 = *(const uint16_t *)0x1FFFF7B8u;
+    uint16_t ts_cal2 = *(const uint16_t *)0x1FFFF7C2u;
+
+    ADC1->SQR3 = 16u;
+    ADC1->CR2 |= ADC_CR2_ADON;
+    ADC1->CR2 |= ADC_CR2_SWSTART;
+    while ((ADC1->SR & ADC_SR_EOC) == 0u) {}
+    raw = ADC1->DR;
+    if (raw == 0u || ts_cal2 <= ts_cal1)
+        return INT16_MIN;
+    return (int16_t)(300 + ((int32_t)raw - (int32_t)ts_cal1) * 800 /
+                     ((int32_t)ts_cal2 - (int32_t)ts_cal1));
+}
+
 static void reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
@@ -4105,11 +4140,9 @@ static void reading_only_render(void)
             return;
         }
         {
-            bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
-                             strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance)!=0 ||
-                             strcmp(s_reading_only_page_range[s_render_page], s_frame.range)!=0 ||
-                             strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate)!=0 ||
-                             s_reading_only_page_info_lamps[s_render_page] != (uint8_t)((s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u));
+             bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+                              strcmp(s_reading_only_page_impedance[s_render_page], s_frame.function_line1)!=0 ||
+                              strcmp(s_reading_only_page_range[s_render_page], s_frame.function_line2)!=0;
             s_reading_only_stage = info_need ? READING_ONLY_INFO : READING_ONLY_CLEAR;
         }
         return;
@@ -4154,6 +4187,7 @@ static void reading_only_render(void)
         s_prev_suffix_color = 0u;
 #endif
         main_display_format(&s_ui, &s_frame);
+        refresh_runtime_snapshot();
         s_reading_only_frame_generation = s_reading_only_generation;
         s_reading_only_value_index = 0u;
         s_reading_only_io_error = false;
@@ -4162,13 +4196,16 @@ static void reading_only_render(void)
         {
             uint8_t cur_status = 0u;
             for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[(uint8_t[]){0u,1u,2u,3u,5u}[i]]) cur_status |= (1u<<i);
-            uint8_t cur_info_lamps = (uint8_t)((s_frame.status_active[7u]?1u:0u)|(s_frame.status_active[6u]?2u:0u)|(s_frame.status_active[11u]?4u:0u));
-            bool status_need = !s_reading_only_page_status_valid[s_render_page] || s_reading_only_page_status_lamps[s_render_page] != cur_status;
-            bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
-                             strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance)!=0 ||
-                             strcmp(s_reading_only_page_range[s_render_page], s_frame.range)!=0 ||
-                             strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate)!=0 ||
-                             s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps;
+             bool status_need = !s_reading_only_page_status_valid[s_render_page] ||
+                                s_reading_only_page_status_lamps[s_render_page] != cur_status ||
+                                strcmp(s_reading_only_page_active_status[s_render_page], s_frame.active_status) != 0 ||
+                                strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0 ||
+                                strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
+             bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+                              strcmp(s_reading_only_page_impedance[s_render_page], s_frame.function_line1)!=0 ||
+                              strcmp(s_reading_only_page_range[s_render_page], s_frame.function_line2)!=0 ||
+                              strcmp(s_reading_only_page_active_status[s_render_page],
+                                     s_frame.active_status) != 0;
             if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
             else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
             else s_reading_only_stage = READING_ONLY_CLEAR;
@@ -5234,6 +5271,7 @@ int main(void)
     HAL_Init();
 
     /* USER CODE BEGIN Init */
+    internal_temperature_init();
 
     /* USER CODE END Init */
 
@@ -5536,6 +5574,8 @@ int main(void)
             s_loop_last_tick = now_loop;
         }
         update_blink();
+        if ((uint32_t)(HAL_GetTick() - s_temperature_tick) >= 1000u)
+            s_ui_dirty_regions |= RENDER_DIRTY_STATUS;
         scene_mgr_render();
         /* USER CODE END WHILE */
 

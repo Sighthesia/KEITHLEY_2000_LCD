@@ -21,8 +21,9 @@ check("resistance unit normalizer",e.normalizeUnit("OHM")==="Ω"&&e.normalizeUni
 check("digit unit symbols",["µ","°","Ω"].every(c=>e.digitBitmap(c)!=null));
 check("half-height suffix font",["D","C","A"].every(c=>e.halfBitmap(c)!=null));
 check("DC/AC baseline hits reading ink bottom",e.baselineAligned);
-check("info panel cells (compat)",e.L.infoX+e.L.infoNameW<e.L.infoRight&&e.L.infoRowH===32&&html.includes('cell("Zin"')&&html.includes('"Status"'));
-check("top bar replaces vertical info (v2)",html.includes("infoBarY")&&html.includes("infoBarH")&&html.includes("Zin")&&html.includes("Range")&&html.includes("Rate"));
+check("header brand and runtime",html.includes("KEITHLEY 2000")&&html.includes("demoUptime")&&html.includes("+25.0°C"));
+check("borderless range row",html.includes("rangeLine1Y")&&html.includes("rangeLine2Y")&&!html.includes("L.infoBarY,1")&&!html.includes("L.infoBarY+L.infoBarH-1"));
+check("active status only",html.includes("const active=demo.on?")&&!html.includes("STATUS.forEach"));
 check("stats widened for 7-digit (v2.1)",e.L.statsW===208&&e.L.statsNameW===60&&e.L.statsW-e.L.statsNameW>=148);
 check("plot widened with inset",e.L.plotW===624&&e.L.xAxisW===624&&e.L.plotY===202&&e.L.plotH===84);
 check("left-aligned reading",e.L.readingX===12);

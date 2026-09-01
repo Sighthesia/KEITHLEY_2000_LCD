@@ -79,6 +79,9 @@ int main(void)
     assert(frame.unit_len == 1u);
     assert(frame.reading_y == MAIN_DISPLAY_READING_VALUE_Y);
     assert(strcmp(frame.function, "DC VOLTAGE") == 0);
+    assert(strcmp(frame.function_line1, "DC") == 0);
+    assert(strcmp(frame.function_line2, "VOLTAGE") == 0);
+    assert(strcmp(frame.brand, "KEITHLEY 2000") == 0);
     assert(strcmp(frame.impedance, "--") == 0);
     assert(strcmp(frame.range, "AUTO") == 0);
     assert(strcmp(frame.filter, "Filter: ON") == 0);
@@ -91,6 +94,11 @@ int main(void)
            frame.status_active[7] && frame.status_active[8] &&
            frame.status_active[10] && frame.status_active[11] &&
            frame.status_active[12]);
+    assert(strstr(frame.active_status, "REM") != 0);
+    assert(strstr(frame.active_status, "TALK") != 0);
+    main_display_format_runtime(&frame, 250, 62000u);
+    assert(strcmp(frame.temperature, "+25.0\xC2\xB0" "C") == 0);
+    assert(strcmp(frame.uptime, "00:01:02") == 0);
     assert(strcmp(frame.x_labels[0], "10.00s") == 0);
     assert(strcmp(frame.x_labels[4], "0.00s") == 0);
 

@@ -12,8 +12,7 @@
 #define MAIN_DISPLAY_UI_WIDTH 960u
 #define MAIN_DISPLAY_UI_HEIGHT 320u
 
-/* Layout v2.2 (2026-09-02): top info bar 26px at y24, status 24px keeps
- * 24px text height intact (18px clipped REM). Reading 142px keeps total 320. */
+/* Layout v2.3: the first two rows are a compact instrument header. */
 #define MAIN_DISPLAY_STATUS_Y 0u
 #define MAIN_DISPLAY_STATUS_H 24u
 #define MAIN_DISPLAY_INFO_BAR_Y 24u
@@ -121,6 +120,12 @@ typedef struct {
     uint16_t end_x;
     uint16_t reading_y;
     char function[MAIN_DISPLAY_FUNCTION_MAX];
+    char function_line1[MAIN_DISPLAY_FUNCTION_MAX];
+    char function_line2[MAIN_DISPLAY_FUNCTION_MAX];
+    char brand[20];
+    char temperature[12];
+    char uptime[12];
+    char active_status[MAIN_DISPLAY_META_MAX];
     char impedance[MAIN_DISPLAY_META_MAX];
     char range[MAIN_DISPLAY_META_MAX];
     char filter[MAIN_DISPLAY_META_MAX];
@@ -169,6 +174,9 @@ uint16_t main_display_special_color(uint8_t special);
 const char *main_display_rate_text(ui_rate_t rate);
 const char *main_display_function_text(ui_function_t function);
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
+void main_display_format_runtime(main_display_frame_t *frame,
+                                  int16_t temperature_tenths_c,
+                                  uint32_t uptime_ms);
 /* Extracts the axis identity a frame was rendered with, for use as the
  * resident axis of the next frame. */
 void main_display_get_trend_axis(const main_display_frame_t *frame,
