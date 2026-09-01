@@ -3575,13 +3575,16 @@ static bool reading_only_render_info_panel(void)
     static uint8_t idx;
     static uint16_t bx; // x cursor for horizontal layout
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
+    // Avoid flicker/overlap: if page already shows correct top bar, skip entirely
+    if (s_reading_only_page_info_valid[s_render_page] &&
+        strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) == 0 &&
+        strcmp(s_reading_only_page_range[s_render_page], s_frame.range) == 0 &&
+        strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) == 0 &&
+        s_reading_only_page_info_lamps[s_render_page] == (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) | (s_frame.status_active[6u] ? 2u : 0u) | (s_frame.status_active[11u] ? 4u : 0u))) {
+        return true;
+    }
     if (idx < 15u) {
         bool ok = true;
-        // Skip large bar clears when page already valid to avoid flicker (bar already BAR)
-        if (idx < 3u && s_reading_only_page_info_valid[s_render_page]) {
-            idx = 3u;
-            return false;
-        }
         uint16_t ty = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT)/2u);
         if (idx == 0u) {
             ok = ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H, MAIN_DISPLAY_COLOR_BAR) == LT7680_OK;
