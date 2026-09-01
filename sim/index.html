@@ -57,9 +57,10 @@ function render(){
   // 第二行：无描边，两行垂直居中的当前档位名称
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
   const range=demo.on?demo.rangeVal:"DC VOLTAGE";
-  const split=range.indexOf(" ");
-  text(ctx,split<0?range:range.slice(0,split),12,L.rangeLine1Y,COLORS.white);
-  if(split>=0)text(ctx,range.slice(split+1),12,L.rangeLine2Y,COLORS.white);
+  text(ctx,range,12,L.rangeLine1Y,COLORS.green);
+  let bx=240;
+  const meta=["Zin --","Range "+(demo.on?demo.rangeVal:"AUTO"),"Rate "+(demo.on?demo.rateVal:"500 Read/s"),"FILT","REL","MATH"];
+  for(const s of meta){text(ctx,s,bx,L.rangeLine1Y,s.startsWith("FILT")||s.startsWith("REL")||s.startsWith("MATH")?COLORS.green:COLORS.white);bx+=s.length*TEXT_W+18}
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";

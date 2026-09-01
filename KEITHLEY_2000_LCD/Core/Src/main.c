@@ -348,6 +348,7 @@ static char s_reading_only_page_temperature[2][12];
 static char s_reading_only_page_uptime[2][12];
 static char s_reading_only_page_impedance[2][32];
 static char s_reading_only_page_range[2][32];
+static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
@@ -1622,12 +1623,6 @@ static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
     return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 0u);
-}
-
-static bool ui_draw_compact_text(uint16_t x, uint16_t y, const char *text,
-                                 uint16_t color)
-{
-    return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 4u);
 }
 
 static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
@@ -3630,30 +3625,63 @@ static bool reading_only_render_status_bar(void)
 static bool reading_only_render_info_panel(void)
 {
     static uint8_t idx;
-    const uint16_t line_gap = 0u;
+    static uint16_t bx;
+    static const char *const lamps[3] = {"FILT", "REL", "MATH"};
+    static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
-    /* The range row is intentionally borderless; it is a quiet continuation
-     * of the header rather than a second boxed information panel. */
+    /* The second row keeps the original metadata, but removes its borders. */
     if (s_reading_only_page_info_valid[s_render_page] &&
         strcmp(s_reading_only_page_impedance[s_render_page], s_frame.function_line1) == 0 &&
-        strcmp(s_reading_only_page_range[s_render_page], s_frame.function_line2) == 0) {
+        strcmp(s_reading_only_page_range[s_render_page], s_frame.function_line2) == 0 &&
+        strcmp(s_reading_only_page_rate[s_render_page], s_frame.active_status) == 0) {
         return true;
     }
     if (idx == 0u && ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y,
                                   MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H,
                                   MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-    {
-        uint16_t y1 = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + 1u);
-        uint16_t y2 = (uint16_t)(y1 + FONT_TEXT_HEIGHT / 2u + line_gap);
-        if (s_frame.function_line1[0] != '\0' &&
-            !ui_draw_compact_text(MAIN_DISPLAY_READING_X, y1, s_frame.function_line1, MAIN_DISPLAY_COLOR_WHITE)) return false;
-        if (s_frame.function_line2[0] != '\0' &&
-            !ui_draw_compact_text(MAIN_DISPLAY_READING_X, y2, s_frame.function_line2, MAIN_DISPLAY_COLOR_WHITE)) return false;
+    if (idx == 0u) { idx++; return true; }
+    if (idx == 1u) {
+        if (!ui_draw_text(MAIN_DISPLAY_READING_X, MAIN_DISPLAY_INFO_BAR_Y,
+                          s_frame.function, MAIN_DISPLAY_COLOR_GREEN)) return false;
+        bx = 240u; idx++; return true;
+    }
+    if (idx == 2u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Zin", MAIN_DISPLAY_COLOR_MUTED)) return false;
+        bx += 4u * FONT_TEXT_WIDTH; idx++; return true;
+    }
+    if (idx == 3u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.impedance, MAIN_DISPLAY_COLOR_MUTED)) return false;
+        bx += (uint16_t)(strlen(s_frame.impedance) * FONT_TEXT_WIDTH + 18u); idx++; return true;
+    }
+    if (idx == 4u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Range", MAIN_DISPLAY_COLOR_MUTED)) return false;
+        bx += 6u * FONT_TEXT_WIDTH; idx++; return true;
+    }
+    if (idx == 5u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.range, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        bx += (uint16_t)(strlen(s_frame.range) * FONT_TEXT_WIDTH + 18u); idx++; return true;
+    }
+    if (idx == 6u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Rate", MAIN_DISPLAY_COLOR_MUTED)) return false;
+        bx += 5u * FONT_TEXT_WIDTH; idx++; return true;
+    }
+    if (idx == 7u) {
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.rate, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        bx += (uint16_t)(strlen(s_frame.rate) * FONT_TEXT_WIDTH + 18u); idx++; return true;
+    }
+    if (idx >= 8u && idx <= 10u) {
+        uint8_t lamp = (uint8_t)(idx - 8u);
+        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, lamps[lamp],
+                          s_frame.status_active[lamp_bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED)) return false;
+        bx += (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH + 12u);
+        idx++; return true;
     }
     strncpy(s_reading_only_page_impedance[s_render_page], s_frame.function_line1, sizeof(s_reading_only_page_impedance[0])-1u);
     strncpy(s_reading_only_page_range[s_render_page], s_frame.function_line2, sizeof(s_reading_only_page_range[0])-1u);
+    strncpy(s_reading_only_page_rate[s_render_page], s_frame.active_status, sizeof(s_reading_only_page_rate[0])-1u);
     s_reading_only_page_impedance[s_render_page][sizeof(s_reading_only_page_impedance[0])-1u] = '\0';
     s_reading_only_page_range[s_render_page][sizeof(s_reading_only_page_range[0])-1u] = '\0';
+    s_reading_only_page_rate[s_render_page][sizeof(s_reading_only_page_rate[0])-1u] = '\0';
     s_reading_only_page_info_valid[s_render_page] = true;
     s_reading_only_page_info_lamps[s_render_page] = 0u;
     idx = 0u;
@@ -4168,12 +4196,8 @@ static void reading_only_render(void)
         s_render_page = READING_ONLY_PAGE_FLIP
                             ? (uint8_t)(s_visible_page ^ 1u)
                             : s_visible_page;
-        /* Throttled trend frames have no plot mutation to copy to the sibling
-         * page. Keep the reading update on the currently visible page so a
-         * commit cannot alternate between two different curve positions. */
-        if (READING_ONLY_PAGE_FLIP && s_trend_scroll_ms != 0u &&
-            (uint32_t)(now - s_trend_scroll_ms) < 100u)
-            s_render_page = s_visible_page;
+        /* Never repaint the scanned page: doing so makes the header flash
+         * during trend updates. */
         s_renderer.phase = RENDER_PHASE_UPDATE_READING;
         s_frame_rendering = true;
         s_render_full_page = false;
