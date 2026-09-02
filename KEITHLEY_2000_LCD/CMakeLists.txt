@@ -66,6 +66,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/trend_buffer.c
     Core/Src/uart_rx_queue.c
     Core/Src/ui_model.c
+    Core/Src/ui_layout.c
 )
 
 # Add include paths

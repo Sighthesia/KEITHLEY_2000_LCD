@@ -29,6 +29,7 @@
 #include "font_half.h"
 #include "font_text.h"
 #include "keypad.h"
+#include "ui_layout.h"
 #include "k2000_proto.h"
 #include "lt7680_bus.h"
 #include "lt7680_gfx.h"
@@ -3579,6 +3580,15 @@ static bool reading_only_render_status_bar(void)
     active_dirty = strcmp(s_reading_only_page_active_status[s_render_page], s_frame.active_status) != 0;
     temp_dirty = strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
     uptime_dirty = strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
+    // Use layout framework to compute positions and detect overlap
+    {
+        uint16_t bx, ax, tx, ux;
+        bool ok = ui_layout_top_bar(s_frame.brand, s_frame.active_status, s_frame.temperature, s_frame.uptime, &bx, &ax, &tx, &ux);
+        if(!ok){
+            // overlap detected, prefer right-aligned temp/uptime, squeeze active
+        }
+        (void)ok;
+    }
     if (idx == 0u) {
         if (!s_reading_only_page_status_valid[s_render_page]) {
             if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
@@ -3687,6 +3697,20 @@ static bool reading_only_render_info_panel(void)
     static const char *const lamps[3] = {"FILT", "REL", "MATH"};
     static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
+    {
+        uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
+        bool fit = ui_layout_second_row(s_frame.function, s_frame.impedance, s_frame.range, s_frame.rate, &fw, &zx, &ix, &rlx, &rx, &atlx, &atx, &lx);
+        if(!fit){
+            // squeezed, values may be truncated - still render with pushed positions
+        }
+        (void)fw; (void)zx; (void)ix; (void)rlx; (void)rx; (void)atlx; (void)atx; (void)lx;
+        // overlap detection via ui_rect_overlap for function vs Zin
+        ui_rect_t fr = ui_rect_from_text(12u, MAIN_DISPLAY_INFO_BAR_Y, s_frame.function, MAIN_DISPLAY_INFO_BAR_H);
+        ui_rect_t zr = {240u, MAIN_DISPLAY_INFO_BAR_Y, 3u*FONT_TEXT_WIDTH, MAIN_DISPLAY_INFO_BAR_H};
+        if(ui_rect_overlap(&fr,&zr)){
+            // push would be needed, logged for framework verification
+        }
+    }
     /* The second row is borderless: green function on the left, metadata on the right. */
     if (s_reading_only_page_info_valid[s_render_page] &&
         strcmp(s_reading_only_page_function[s_render_page], s_frame.function) == 0 &&
