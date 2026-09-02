@@ -346,6 +346,7 @@ static bool s_reading_only_page_info_valid[2];
 static char s_reading_only_page_active_status[2][MAIN_DISPLAY_META_MAX];
 static char s_reading_only_page_temperature[2][12];
 static char s_reading_only_page_uptime[2][12];
+static char s_reading_only_page_brand[2][20];
 static char s_reading_only_page_function[2][MAIN_DISPLAY_FUNCTION_MAX];
 static char s_reading_only_page_impedance[2][32];
 static char s_reading_only_page_range[2][32];
@@ -3571,43 +3572,77 @@ static bool reading_only_render_status_bar(void)
 {
     static const uint8_t status_bits[5] = {0u, 1u, 2u, 3u, 5u};
     static uint8_t idx;
+    bool brand_dirty, active_dirty, temp_dirty, uptime_dirty;
     if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
+    brand_dirty = !s_reading_only_page_status_valid[s_render_page] ||
+                  strcmp(s_reading_only_page_brand[s_render_page], s_frame.brand) != 0;
+    active_dirty = strcmp(s_reading_only_page_active_status[s_render_page], s_frame.active_status) != 0;
+    temp_dirty = strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
+    uptime_dirty = strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
     if (idx == 0u) {
-        if (ui_fill_rect(0u, MAIN_DISPLAY_STATUS_Y, MAIN_DISPLAY_UI_WIDTH,
-                         MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-        idx++;
-        return false;
+        if (!brand_dirty) { idx++; } else {
+            uint16_t w = (uint16_t)(strlen(s_frame.brand) * FONT_TEXT_WIDTH);
+            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
+            uint16_t fw = w > ow ? w : ow;
+            if (ui_fill_rect(12u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            idx++;
+            return false;
+        }
     }
     if (idx == 1u) {
-        if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
-        idx++;
-        return false;
+        if (!active_dirty) { idx++; } else {
+            uint16_t nw = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
+            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_active_status[s_render_page]) * FONT_TEXT_WIDTH);
+            uint16_t nx = nw ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw) / 2u) : 0u;
+            uint16_t ox = ow ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - ow) / 2u) : 0u;
+            uint16_t fx = nw && ow ? (nx < ox ? nx : ox) : (nw ? nx : ox);
+            uint16_t fw = 0u;
+            if (nw || ow) {
+                uint16_t nxe = nw ? (uint16_t)(nx + nw) : 0u;
+                uint16_t oxe = ow ? (uint16_t)(ox + ow) : 0u;
+                uint16_t xe = nxe > oxe ? nxe : oxe;
+                fw = (uint16_t)(xe - fx);
+                if (ui_fill_rect(fx, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            }
+            if (nw && !ui_draw_text(nx, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
+            idx++;
+            return false;
+        }
     }
-    if (idx == 2u && s_frame.active_status[0] != '\0') {
-        uint16_t status_w = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
-        uint16_t status_x = (uint16_t)((MAIN_DISPLAY_UI_WIDTH - status_w) / 2u);
-        if (!ui_draw_text(status_x, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
-        idx++;
-        return false;
+    if (idx == 2u) {
+        if (!temp_dirty) { idx++; } else {
+            uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
+            uint16_t nw = (uint16_t)(strlen(s_frame.temperature) * FONT_TEXT_WIDTH);
+            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_temperature[s_render_page]) * FONT_TEXT_WIDTH);
+            uint16_t fw = nw > ow ? nw : ow;
+            if (ui_fill_rect(n_right_x, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (!ui_draw_text(n_right_x, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
+            idx++;
+            return false;
+        }
     }
-    if (idx == 2u) idx++;
     if (idx == 3u) {
-        uint16_t right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
-        uint16_t right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - right_w - 12u);
-        if (!ui_draw_text(right_x, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
-        idx++;
-        return false;
+        if (!uptime_dirty) { idx++; } else {
+            uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
+            uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
+            uint16_t nw = (uint16_t)(strlen(s_frame.uptime) * FONT_TEXT_WIDTH);
+            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_uptime[s_render_page]) * FONT_TEXT_WIDTH);
+            uint16_t fw = nw > ow ? nw : ow;
+            if (ui_fill_rect(ux, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (!ui_draw_text(ux, 0u, s_frame.uptime, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            idx++;
+            return false;
+        }
     }
-    if (idx == 4u) {
-        uint16_t right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
-        uint16_t right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - right_w - 12u);
-        if (!ui_draw_text((uint16_t)(right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u),
-                          0u, s_frame.uptime, MAIN_DISPLAY_COLOR_WHITE)) return false;
-        idx++;
-        return false;
-    }
+    if (idx == 4u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
+    strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
+            sizeof(s_reading_only_page_brand[0]) - 1u);
+    s_reading_only_page_brand[s_render_page][sizeof(s_reading_only_page_brand[0]) - 1u] = '\0';
     strncpy(s_reading_only_page_active_status[s_render_page], s_frame.active_status,
             sizeof(s_reading_only_page_active_status[0]) - 1u);
     s_reading_only_page_active_status[s_render_page]
