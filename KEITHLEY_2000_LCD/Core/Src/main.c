@@ -229,6 +229,7 @@ static bool s_render_status_regions;
 static uint8_t s_status_info_dirty_rows;
 static int16_t s_internal_temperature_tenths = INT16_MIN;
 static uint32_t s_temperature_tick;
+static bool s_is_header_only;
 
 static uint8_t s_ui_dirty_regions;
 static bool s_blink_visible = true;
@@ -4259,16 +4260,22 @@ static void reading_only_render(void)
                 s_reading_only_stage = READING_ONLY_CLEAR;
             return;
         }
+        if (s_is_header_only) {
+            // Header-only via hidden page: keep reading band synced, present after header
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            s_is_header_only = false;
+            return;
+        }
         {
               uint8_t cur_info_lamps = (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) |
                                                  (s_frame.status_active[6u] ? 2u : 0u) |
                                                  (s_frame.status_active[11u] ? 4u : 0u));
-              bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
-                               strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
-                               strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
-                               strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
-                               strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
-                               s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps;
+               bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+                                strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
+                                strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
+                                strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
+                                strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
+                                s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps;
             s_reading_only_stage = info_need ? READING_ONLY_INFO : READING_ONLY_CLEAR;
         }
         return;
@@ -4289,8 +4296,9 @@ static void reading_only_render(void)
                            (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
         if (!reading_due && !header_due)
             return;
-        /* Header-only frames must not trigger a full reading-band redraw. */
+        /* Header-only: still use hidden page + present to avoid visible tear, but copy reading band. */
         bool header_only = header_due && !reading_due;
+        s_is_header_only = header_only;
 
         /* A/B: the direct-DMA diagnostic holds the selected page to determine
          * whether the variable black region is stale content exposed at a page
