@@ -3752,7 +3752,6 @@ static bool reading_only_render_info_panel(void)
                   (s_frame.status_active[lamp_bits[1]] ? 2u : 0u) |
                   (s_frame.status_active[lamp_bits[2]] ? 4u : 0u));
     s_reading_only_page_info_valid[s_render_page] = true;
-    s_reading_only_page_info_lamps[s_render_page] = 0u;
     idx = 0u;
     return true;
 }
@@ -4261,9 +4260,13 @@ static void reading_only_render(void)
     }
     if (s_reading_only_stage == READING_ONLY_IDLE)
     {
-        if (!s_reading_only_dirty ||
-            (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
+        bool header_due = (uint32_t)(now - s_temperature_tick) >= 1000u;
+        bool reading_due = s_reading_only_dirty &&
+                           (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
+        if (!reading_due && !header_due)
             return;
+        /* Header-only frames must not trigger a full reading-band redraw. */
+        bool header_only = header_due && !reading_due;
 
         /* A/B: the direct-DMA diagnostic holds the selected page to determine
          * whether the variable black region is stale content exposed at a page
@@ -4271,27 +4274,40 @@ static void reading_only_render(void)
         s_render_page = READING_ONLY_PAGE_FLIP
                             ? (uint8_t)(s_visible_page ^ 1u)
                             : s_visible_page;
+        if (header_only) {
+            lt7680_rect_t sync_rect;
+            panel_transform_ui_rect_to_fb(0u, MAIN_DISPLAY_READING_Y,
+                                          MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_READING_H,
+                                          &sync_rect.x, &sync_rect.y, &sync_rect.w, &sync_rect.h);
+            (void)lt7680_gfx_copy_rect(s_visible_page, s_render_page, &sync_rect);
+        }
         /* Never repaint the scanned page: doing so makes the header flash
          * during trend updates. */
         s_renderer.phase = RENDER_PHASE_UPDATE_READING;
         s_frame_rendering = true;
         s_render_full_page = false;
 #if RIF_BTE_RENDERER
-        s_reading_diff = false;
-        s_cell_count = 0u;
-        s_prev_reading_color = 0xFFFFu;
-        s_prev_reading_nodata = 0xFFu;
-        s_prev_suffix[0] = '\0';
-        s_prev_suffix_x = 0u;
-        s_prev_suffix_color = 0u;
+        if (!header_only) {
+            s_reading_diff = false;
+            s_cell_count = 0u;
+            s_prev_reading_color = 0xFFFFu;
+            s_prev_reading_nodata = 0xFFu;
+            s_prev_suffix[0] = '\0';
+            s_prev_suffix_x = 0u;
+            s_prev_suffix_color = 0u;
+        }
 #endif
         main_display_format(&s_ui, &s_frame);
         refresh_runtime_snapshot();
-        s_reading_only_frame_generation = s_reading_only_generation;
-        s_reading_only_value_index = 0u;
+        if (!header_only) {
+            s_reading_only_frame_generation = s_reading_only_generation;
+            s_reading_only_value_index = 0u;
+        } else {
+            s_reading_only_value_index = s_frame.value_len;
+        }
         s_reading_only_io_error = false;
         s_perf_frame_start_tick = now;
-        s_display_due_tick = now;
+        if (!header_only) s_display_due_tick = now;
         {
             uint8_t cur_status = 0u;
             for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[(uint8_t[]){0u,1u,2u,3u,5u}[i]]) cur_status |= (1u<<i);
@@ -5677,9 +5693,6 @@ int main(void)
             s_loop_last_tick = now_loop;
         }
         update_blink();
-        if ((uint32_t)(HAL_GetTick() - s_temperature_tick) >= 1000u) {
-            s_reading_only_dirty = true;
-        }
         scene_mgr_render();
         /* USER CODE END WHILE */
 
