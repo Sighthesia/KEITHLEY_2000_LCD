@@ -3580,64 +3580,86 @@ static bool reading_only_render_status_bar(void)
     temp_dirty = strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
     uptime_dirty = strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
     if (idx == 0u) {
+        if (!s_reading_only_page_status_valid[s_render_page]) {
+            if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            idx++;
+            return false;
+        } else { idx++; }
+    }
+    if (idx == 1u) {
         if (!brand_dirty) { idx++; } else {
-            uint16_t w = (uint16_t)(strlen(s_frame.brand) * FONT_TEXT_WIDTH);
-            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t fw = w > ow ? w : ow;
-            if (ui_fill_rect(12u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (!s_bitmap_job.active) {
+                uint16_t w = (uint16_t)(strlen(s_frame.brand) * FONT_TEXT_WIDTH);
+                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
+                uint16_t fw = w > ow ? w : ow;
+                if (ui_fill_rect(12u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            }
             if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
             idx++;
             return false;
         }
     }
-    if (idx == 1u) {
-        if (!active_dirty) { idx++; } else {
-            uint16_t nw = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
-            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_active_status[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t nx = nw ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw) / 2u) : 0u;
-            uint16_t ox = ow ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - ow) / 2u) : 0u;
-            uint16_t fx = nw && ow ? (nx < ox ? nx : ox) : (nw ? nx : ox);
-            uint16_t fw = 0u;
-            if (nw || ow) {
-                uint16_t nxe = nw ? (uint16_t)(nx + nw) : 0u;
-                uint16_t oxe = ow ? (uint16_t)(ox + ow) : 0u;
-                uint16_t xe = nxe > oxe ? nxe : oxe;
-                fw = (uint16_t)(xe - fx);
-                if (ui_fill_rect(fx, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-            }
-            if (nw && !ui_draw_text(nx, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
-            idx++;
-            return false;
-        }
-    }
     if (idx == 2u) {
-        if (!temp_dirty) { idx++; } else {
-            uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
-            uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
-            uint16_t nw = (uint16_t)(strlen(s_frame.temperature) * FONT_TEXT_WIDTH);
-            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_temperature[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t fw = nw > ow ? nw : ow;
-            if (ui_fill_rect(n_right_x, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-            if (!ui_draw_text(n_right_x, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
+        if (!active_dirty) { idx++; } else {
+            if (!s_bitmap_job.active) {
+                uint16_t nw = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
+                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_active_status[s_render_page]) * FONT_TEXT_WIDTH);
+                uint16_t nx = nw ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw) / 2u) : 0u;
+                uint16_t ox = ow ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - ow) / 2u) : 0u;
+                uint16_t fx = nw && ow ? (nx < ox ? nx : ox) : (nw ? nx : ox);
+                uint16_t fw = 0u;
+                if (nw || ow) {
+                    uint16_t nxe = nw ? (uint16_t)(nx + nw) : 0u;
+                    uint16_t oxe = ow ? (uint16_t)(ox + ow) : 0u;
+                    uint16_t xe = nxe > oxe ? nxe : oxe;
+                    fw = (uint16_t)(xe - fx);
+                    if (ui_fill_rect(fx, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+                }
+            }
+            uint16_t nw2 = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
+            uint16_t nx2 = nw2 ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw2) / 2u) : 0u;
+            if (nw2 && !ui_draw_text(nx2, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
             idx++;
             return false;
         }
     }
     if (idx == 3u) {
-        if (!uptime_dirty) { idx++; } else {
-            uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
-            uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
-            uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
-            uint16_t nw = (uint16_t)(strlen(s_frame.uptime) * FONT_TEXT_WIDTH);
-            uint16_t ow = (uint16_t)(strlen(s_reading_only_page_uptime[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t fw = nw > ow ? nw : ow;
-            if (ui_fill_rect(ux, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-            if (!ui_draw_text(ux, 0u, s_frame.uptime, MAIN_DISPLAY_COLOR_WHITE)) return false;
+        if (!temp_dirty) { idx++; } else {
+            if (!s_bitmap_job.active) {
+                uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+                uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
+                uint16_t nw = (uint16_t)(strlen(s_frame.temperature) * FONT_TEXT_WIDTH);
+                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_temperature[s_render_page]) * FONT_TEXT_WIDTH);
+                uint16_t fw = nw > ow ? nw : ow;
+                if (ui_fill_rect(n_right_x, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            }
+            uint16_t n_right_w2 = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t n_right_x2 = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w2 - 12u);
+            if (!ui_draw_text(n_right_x2, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
             idx++;
             return false;
         }
     }
-    if (idx == 4u) { idx++; }
+    if (idx == 4u) {
+        if (!uptime_dirty) { idx++; } else {
+            if (!s_bitmap_job.active) {
+                uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+                uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
+                uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
+                uint16_t nw = (uint16_t)(strlen(s_frame.uptime) * FONT_TEXT_WIDTH);
+                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_uptime[s_render_page]) * FONT_TEXT_WIDTH);
+                uint16_t fw = nw > ow ? nw : ow;
+                if (ui_fill_rect(ux, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            }
+            uint16_t n_right_w3 = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t n_right_x3 = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w3 - 12u);
+            uint16_t ux2 = (uint16_t)(n_right_x3 + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
+            if (!ui_draw_text(ux2, 0u, s_frame.uptime, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 5u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
     strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
