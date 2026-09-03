@@ -47,11 +47,12 @@ function demoUptime(){const s=Math.floor((Date.now()-simStartedAt)/1000);return 
 function renderFB(ctx,source){const src=source.getImageData(0,0,960,320).data,img=ctx.createImageData(320,960);for(let y=0;y<320;y++)for(let x=0;x<960;x++){const s=(y*960+x)*4,d=(x*320+y)*4;img.data[d]=src[s];img.data[d+1]=src[s+1];img.data[d+2]=src[s+2];img.data[d+3]=255}ctx.putImageData(img,0,0)}
 function render(){
   const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
-  // 第一行：品牌 + 浅色半高分隔线 + 去重左对齐状态（去掉 AUTO/FILT/REL，ADR-0004）
+  // 第一行：红色品牌 Badge（反色黑字，同档位标签语言）+ 半高分隔线 + 去重左对齐状态
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
   const brand="KEITHLEY 2000";
-  text(ctx,brand,12,0,COLORS.white);
-  const brandEnd=12+brand.length*TEXT_W;
+  const brandEnd=12+brand.length*TEXT_W+10;
+  ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,brandEnd,L.statusH);
+  text(ctx,brand,12,0,"#000000");
   ctx.fillStyle=COLORS.grid;ctx.fillRect(brandEnd+10,Math.floor((L.statusH-12)/2),1,12);
   const activeAll=demo.on?["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]:[];
   const row1x=brandEnd+10+1+10;
@@ -70,23 +71,25 @@ function render(){
    const trigX=trigDotX-8-7*TEXT_W, trigSepX=trigX-10;
    let bx=L.badgeX+badgeW+18;
    const cells=[["Zin","--",COLORS.muted],["Range",demo.on?demo.rangeVal:"AUTO",COLORS.white],["Rate",demo.on?demo.rateVal:"500 Read/s",COLORS.white]];
-   for(const [nm,val,vc] of cells){
+   cells.forEach(([nm,val,vc],bi)=>{
      const nw=nm.length*TEXT_W+8, vw=val.length*TEXT_W+8;
      ctx.fillStyle=COLORS.bar2;ctx.fillRect(bx+nw,L.infoBarY,vw,L.infoBarH);
      text(ctx,nm,bx+4,cellY,COLORS.muted);
      text(ctx,val,bx+nw+4,cellY,vc);
-     ctx.fillStyle=COLORS.grid;ctx.fillRect(bx+nw+vw,L.infoBarY,1,L.infoBarH);
-     bx+=nw+vw+1+8;
-   }
+     if(bi<2){ctx.fillStyle=COLORS.grid;ctx.fillRect(bx+nw+vw,L.infoBarY,1,L.infoBarH);bx+=nw+vw+1+8;}
+     else{bx+=nw+vw;}
+   });
+   // RATE 值后的半高分节短线（与行1品牌分隔线同语言）
+   ctx.fillStyle=COLORS.grid;ctx.fillRect(bx,L.infoBarY+Math.floor((L.infoBarH-12)/2),1,12);
+   bx+=1+8;
    const lamps2=[demo.filt&&"FILT",demo.rel&&"REL",demo.math&&"MATH"].filter(Boolean);
    for(const s of lamps2){if(bx+s.length*TEXT_W>trigSepX)break;text(ctx,s,bx,cellY,COLORS.green);bx+=s.length*TEXT_W+12;}
+   // TRIGGER 常显（激活绿/失活灰），圆点仅 TRIG 有效时闪烁
    const trigOn=demo.on;
-   if(trigOn){
-     ctx.fillStyle=COLORS.grid;ctx.fillRect(trigSepX,L.infoBarY,1,L.infoBarH);
-     text(ctx,"TRIGGER",trigX,cellY,COLORS.green);
-     const dotOn=(Date.now()/250|0)%2===0;
-     ctx.fillStyle=dotOn?COLORS.green:COLORS.bar;ctx.fillRect(trigDotX,trigDotY,8,8);
-   }
+   ctx.fillStyle=COLORS.grid;ctx.fillRect(trigSepX,L.infoBarY,1,L.infoBarH);
+   text(ctx,"TRIGGER",trigX,cellY,trigOn?COLORS.green:COLORS.muted);
+   const dotOn=trigOn&&(Date.now()/250|0)%2===0;
+   ctx.fillStyle=trigOn?(dotOn?COLORS.green:COLORS.bar):COLORS.bar;ctx.fillRect(trigDotX,trigDotY,8,8);
    // 单条绿色分隔线（与固件一致：仅InfoBar下沿；屏底禁止，见ADR-0003）
    ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.infoBarY+L.infoBarH,960,L.yellowLineH);
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);

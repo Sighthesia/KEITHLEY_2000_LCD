@@ -3606,9 +3606,11 @@ static void row1_status_text(char *out, uint8_t size)
     }
 }
 
+/* Red badge rect end (brand text + right pad), text itself stays at x12. */
 static uint16_t row1_brand_end_x(void)
 {
-    return (uint16_t)(12u + strlen(s_frame.brand) * FONT_TEXT_WIDTH);
+    return (uint16_t)(12u + strlen(s_frame.brand) * FONT_TEXT_WIDTH +
+                      MAIN_DISPLAY_BADGE_PAD_X);
 }
 
 static uint16_t row1_info_x(void)
@@ -3649,18 +3651,32 @@ static bool reading_only_render_status_bar(void)
         } else { idx++; }
     }
     if (idx == 1u) {
+        /* Red brand badge (ADR-0004): solid red rect + black text, same
+         * inverse language as the function badge. */
+        if (!brand_dirty) { idx = 4u; } else {
+            uint16_t w = row1_brand_end_x();
+            uint16_t ow = (uint16_t)(12u + strlen(s_reading_only_page_brand[s_render_page]) *
+                                     FONT_TEXT_WIDTH + MAIN_DISPLAY_BADGE_PAD_X);
+            uint16_t fw = w > ow ? w : ow;
+            /* Clear covers badge + separator + gap so a narrower brand
+             * cannot leave stale pixels behind. */
+            fw = (uint16_t)(fw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                            MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+            if (ui_fill_rect(0u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 2u) {
         if (!brand_dirty) { idx++; } else {
-            if (!s_bitmap_job.active) {
-                uint16_t w = (uint16_t)(strlen(s_frame.brand) * FONT_TEXT_WIDTH);
-                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
-                uint16_t fw = w > ow ? w : ow;
-                /* Clear covers brand + separator + gap so a narrower brand
-                 * cannot leave a stale separator behind. */
-                fw = (uint16_t)(fw + MAIN_DISPLAY_ROW1_SEP_GAP +
-                                MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
-                if (ui_fill_rect(12u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-            }
-            if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_BRAND_TEXT)) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 3u) {
+        if (!brand_dirty) { idx++; } else {
             if (ui_fill_rect((uint16_t)(row1_brand_end_x() + MAIN_DISPLAY_ROW1_SEP_GAP),
                              (uint16_t)((MAIN_DISPLAY_STATUS_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
                              MAIN_DISPLAY_ROW1_SEP_W, MAIN_DISPLAY_ROW1_SEP_H,
@@ -3669,7 +3685,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 2u) {
+    if (idx == 4u) {
         /* Left-aligned de-duplicated lamps (ADR-0004): single string keeps the
          * resumable bitmap job safe (one job, one string per step). */
         char cur[MAIN_DISPLAY_META_MAX];
@@ -3684,7 +3700,8 @@ static bool reading_only_render_status_bar(void)
         if (ow > 0u)
         {
             uint16_t old_bw = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t oo = (uint16_t)(12u + old_bw + MAIN_DISPLAY_ROW1_SEP_GAP +
+            uint16_t oo = (uint16_t)(12u + old_bw + MAIN_DISPLAY_BADGE_PAD_X +
+                                     MAIN_DISPLAY_ROW1_SEP_GAP +
                                      MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
             if (oo < ox) ox = oo;
         }
@@ -3702,7 +3719,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 3u) {
+    if (idx == 5u) {
         if (!temp_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
@@ -3719,7 +3736,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 4u) {
+    if (idx == 6u) {
         if (!uptime_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
@@ -3738,7 +3755,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 5u) { idx++; }
+    if (idx == 7u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
     strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
@@ -3897,43 +3914,69 @@ static bool reading_only_render_info_panel(void)
                               row2_text_y(), val, val_color)) return false;
             idx++; return false;
         }
+        if (b == 2u) {
+            /* Rate block: no full-height sep here; the section divider
+             * between the RATE value and the lamp group is a half-height
+             * short line (idx 15), same language as the row-1 brand sep. */
+            bx = (uint16_t)(bx + name_w + val_w);
+            idx++; return false;
+        }
         if (ui_fill_rect((uint16_t)(bx + name_w + val_w), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
         bx = (uint16_t)(bx + name_w + val_w + 1u + MAIN_DISPLAY_ROW2_BLOCK_GAP);
         idx++; return false;
     }
-    if (idx >= 15u && idx <= 17u) {
+    if (idx == 15u) {
+        if (ui_fill_rect(bx,
+                         (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
+                                    (MAIN_DISPLAY_INFO_BAR_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
+                         1u, MAIN_DISPLAY_ROW1_SEP_H,
+                         MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
+        bx = (uint16_t)(bx + 1u + MAIN_DISPLAY_ROW2_BLOCK_GAP);
+        idx++; return false;
+    }
+    if (idx >= 16u && idx <= 18u) {
         /* Active-only right statuses: inactive lamps vanish (no muted text),
          * and must never cross the trigger separator. */
-        while (idx <= 17u && !s_frame.status_active[lamp_bits[idx - 15u]]) idx++;
-        if (idx > 17u) return false;
+        while (idx <= 18u && !s_frame.status_active[lamp_bits[idx - 16u]]) idx++;
+        if (idx > 18u) return false;
         {
-            uint8_t lamp = (uint8_t)(idx - 15u);
+            uint8_t lamp = (uint8_t)(idx - 16u);
             uint16_t end_x = (uint16_t)(bx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
-            if (end_x > row2_trig_sep_x()) { idx = 18u; return false; }
+            if (end_x > row2_trig_sep_x()) { idx = 19u; return false; }
             if (!ui_draw_text(bx, row2_text_y(), lamps[lamp],
                               MAIN_DISPLAY_COLOR_GREEN)) return false;
             bx = (uint16_t)(end_x + 12u);
             idx++; return false;
         }
     }
-    if (idx == 18u) {
-        /* TRIGGER block is right-aligned; without TRIG the whole block
-         * (incl. dot area) was already cleared by the row BAR fill. */
-        if (!s_frame.status_active[5u]) { idx = 21u; return false; }
+    if (idx == 19u) {
+        /* TRIGGER block is always present; only its color/dot follow state. */
         if (ui_fill_rect(row2_trig_sep_x(), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
         idx++; return false;
     }
-    if (idx == 19u) {
+    if (idx == 20u) {
+        bool trig = s_frame.status_active[5u];
         if (!ui_draw_text(row2_trig_text_x(), row2_text_y(), "TRIGGER",
-                          MAIN_DISPLAY_COLOR_GREEN)) return false;
+                          trig ? MAIN_DISPLAY_COLOR_GREEN :
+                                 MAIN_DISPLAY_COLOR_MUTED)) return false;
         idx++; return false;
     }
-    if (idx == 20u) {
-        bool dot_on = s_trig_dot_phase;
+    if (idx == 21u) {
+        bool trig = s_frame.status_active[5u];
+        bool dot_on = trig && s_trig_dot_phase;
+        if (!trig)
+        {
+            /* Keep the dot area erased while TRIG is off. */
+            if (ui_fill_rect(row2_trig_dot_x(), row2_trig_dot_y(),
+                             MAIN_DISPLAY_TRIG_DOT_SIZE, MAIN_DISPLAY_TRIG_DOT_SIZE,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            s_reading_only_page_trig_dot[s_render_page] = (int8_t)-1;
+            idx++; return false;
+        }
         if (ui_fill_rect(row2_trig_dot_x(), row2_trig_dot_y(),
                          MAIN_DISPLAY_TRIG_DOT_SIZE, MAIN_DISPLAY_TRIG_DOT_SIZE,
                          dot_on ? MAIN_DISPLAY_COLOR_GREEN :
@@ -3941,7 +3984,7 @@ static bool reading_only_render_info_panel(void)
         s_reading_only_page_trig_dot[s_render_page] = dot_on ? (int8_t)1 : (int8_t)0;
         idx++; return false;
     }
-    if (idx == 21u) {
+    if (idx == 22u) {
         if (ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y + MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
                          MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK) return false;
