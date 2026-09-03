@@ -363,9 +363,7 @@ static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
-static char s_reading_only_page_y_labels[2][MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
-static bool s_reading_only_page_trend_stats_valid[2];
-static char s_reading_only_page_trend_stats[2][4][MAIN_DISPLAY_AXIS_LABEL_MAX];
+
 static uint16_t s_reading_only_trend_column;
 static bool s_reading_only_trend_bg_failed;
 static uint32_t s_trend_scroll_ms;
@@ -396,12 +394,6 @@ static void reading_only_invalidate_trend_pages(void)
         s_reading_only_page_trend_curve_valid[page] = false;
         memset(s_reading_only_page_trend_unit[page], 0,
                sizeof(s_reading_only_page_trend_unit[page]));
-        memset(s_reading_only_page_y_labels[page], 0,
-               sizeof(s_reading_only_page_y_labels[page]));
-        /* Keep last MAX/MIN/AVG visible through the empty window.
-         * Clearing both pages here plus the full-panel BAR fill in
-         * reading_only_render_trend_background() produced the
-         * "all three disappear until rebuild" flash. */
         memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
         memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
         memset(s_drawn_trend_occupied[page], 0,
@@ -1247,9 +1239,6 @@ static bool hidden_page_sync_regions(void)
             memcpy(s_reading_only_page_trend_unit[s_render_page],
                    s_reading_only_page_trend_unit[s_visible_page],
                    sizeof(s_reading_only_page_trend_unit[0]));
-            memcpy(s_reading_only_page_y_labels[s_render_page],
-                   s_reading_only_page_y_labels[s_visible_page],
-                   sizeof(s_reading_only_page_y_labels[0]));
 #endif
         }
         s_frame_regions &= (uint8_t)~bands[i].region;
@@ -1266,7 +1255,6 @@ static bool hidden_page_sync_regions(void)
  * the sibling page without the trace and every page flip visibly
  * flickers. While the sweep draws, dual-page writes are forced. */
 static bool s_trend_sweep_drawing;
-static bool s_trend_stats_changed;
 static bool ui_runtime_single_page(void)
 {
     return !s_trend_sweep_drawing && s_frame_rendering &&
@@ -2809,7 +2797,8 @@ static void trend_restore_grid(uint16_t x0, uint16_t x1,
     }
 }
 
-static uint16_t trend_y_label_y(uint8_t index)
+/* ADR-0006: baseline draws no axis labels; kept for the legacy renderer. */
+static uint16_t READING_ONLY_LEGACY trend_y_label_y(uint8_t index)
 {
     uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                  index * MAIN_DISPLAY_PLOT_H / 2u);
@@ -2825,15 +2814,6 @@ static uint16_t trend_y_label_y(uint8_t index)
      * remain inside the resident trend region. Otherwise a periodic axis
      * refresh erases the bottom of the reading band at y=188..191. */
     return label_y < MAIN_DISPLAY_TREND_Y ? MAIN_DISPLAY_TREND_Y : label_y;
-}
-
-static bool trend_y_labels_match(uint8_t page)
-{
-    uint8_t i;
-    for (i = 0u; i < MAIN_DISPLAY_Y_LABEL_COUNT; i++)
-        if (strcmp(s_reading_only_page_y_labels[page][i], s_frame.y_labels[i]) != 0)
-            return false;
-    return true;
 }
 
 static bool READING_ONLY_LEGACY trend_draw_column(uint16_t column, bool erase_previous)
@@ -2923,8 +2903,6 @@ static bool READING_ONLY_LEGACY trend_join_column(uint16_t column)
            LT7680_OK;
 }
 
-static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1);
-
 /* Sweep renderer (2026-08-30). This die's BTE blit corrupts pixels and its
  * PIP windows never composite, so hardware "scroll" is unavailable. Classic
  * oscilloscope sweep instead: absolute time maps to fixed screen columns,
@@ -2946,8 +2924,8 @@ static uint32_t s_sweep_cycle; /* completed 500-bucket cycles at last render */
 /* One-shot wipe when the sweep wraps: the previous cycle's trace would
  * otherwise linger on the right of the cursor for a full 10 s window.
  * Classic scope behavior is to clear the plot at the start of a new
- * sweep, so erase the plot area and forget per-slot bookkeeping (the
- * chart background and axis labels stay). */
+ * sweep, so erase the plot area and forget per-slot bookkeeping.
+ * ADR-0006: no grid to restore — the plot is bare black. */
 static void trend_sweep_wipe_cycle(void)
 {
     uint8_t page;
@@ -2955,10 +2933,6 @@ static void trend_sweep_wipe_cycle(void)
     (void)ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_Y,
                        MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_H,
                        MAIN_DISPLAY_COLOR_BG);
-    trend_restore_grid(MAIN_DISPLAY_PLOT_X,
-                       (uint16_t)(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W),
-                       MAIN_DISPLAY_PLOT_Y,
-                       (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H));
     for (page = 0u; page < 2u; page++)
     {
         memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
@@ -3136,10 +3110,7 @@ static bool trend_sweep_render_slot(uint16_t slot, uint32_t ref_bucket)
                          (uint16_t)(old_y1 - old_y0 + 1u),
                          MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
             return false;
-        /* Put the horizontal grid lines back inside the strip before the
-         * new trace is drawn so the trace stays on top. */
-        if (!trend_restore_horizontal_grid(x0, (uint16_t)(x1 + 1u)))
-            return false;
+        /* ADR-0006: bare plot, no grid to restore inside the strip. */
     }
     if (occ)
     {
@@ -3375,26 +3346,6 @@ static bool READING_ONLY_LEGACY reading_only_scroll_trend(uint32_t now, uint16_t
     return true;
 }
 
-static bool trend_restore_horizontal_grid(uint16_t x0, uint16_t x1)
-{
-    uint8_t row;
-
-    if (x0 < MAIN_DISPLAY_PLOT_X)
-        x0 = MAIN_DISPLAY_PLOT_X;
-    if (x1 > MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W)
-        x1 = MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W;
-    if (x0 >= x1)
-        return true;
-    for (row = 0u; row < MAIN_DISPLAY_Y_LABEL_COUNT; row++)
-    {
-        uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                row * MAIN_DISPLAY_PLOT_H / 2u);
-        if (ui_draw_line(x0, y, x1, y, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-            return false;
-    }
-    return true;
-}
-
 static void trend_draw_background(void)
 {
     (void)ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
@@ -3408,7 +3359,8 @@ static void trend_draw_background(void)
                        MAIN_DISPLAY_COLOR_BAR_ALT);
 }
 
-static uint16_t trend_x_label_x(uint16_t center, const char *label)
+/* ADR-0006: baseline draws no axis labels; kept for the legacy renderer. */
+static uint16_t READING_ONLY_LEGACY trend_x_label_x(uint16_t center, const char *label)
 {
     size_t width = strlen(label) * FONT_TEXT_WIDTH;
     if (center == MAIN_DISPLAY_PLOT_X && width <= MAIN_DISPLAY_PLOT_W)
@@ -4053,25 +4005,24 @@ static bool reading_only_render_info_panel(void)
     return true;
 }
 
+/* Plot-only bottom band (ADR-0006): the whole y192..319 strip is one black
+ * canvas plus the sweep curve. No gutters, grid, labels or stats. */
 static bool reading_only_render_trend_background(void)
 {
     static uint8_t idx;
     static uint8_t last_page = 0xFFu;
-    static bool y_labels_only;
     static char pending_unit[TREND_UNIT_ID_MAX];
     const char *unit = trend_buffer_display_unit(&s_trend);
 
     if (last_page != s_render_page)
     {
         idx = 0u;
-        y_labels_only = false;
         pending_unit[0] = '\0';
         last_page = s_render_page;
     }
     if (strcmp(pending_unit, unit) != 0)
     {
         idx = 0u;
-        y_labels_only = false;
         strncpy(pending_unit, unit, TREND_UNIT_ID_MAX - 1u);
         pending_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
     }
@@ -4082,65 +4033,14 @@ static bool reading_only_render_trend_background(void)
     if (s_reading_only_page_trend_bg_valid[s_render_page] &&
         strcmp(s_reading_only_page_trend_unit[s_render_page], unit) == 0)
     {
-        if (trend_y_labels_match(s_render_page))
-            return true;
-        y_labels_only = true;
-    }
-    else if (y_labels_only)
-    {
-        idx = 0u;
-        y_labels_only = false;
-    }
-
-    if (y_labels_only)
-    {
-        if (idx == 0u)
-        {
-            if (ui_fill_rect(0u, MAIN_DISPLAY_Y_AXIS_Y, MAIN_DISPLAY_Y_AXIS_W,
-                             MAIN_DISPLAY_Y_AXIS_H, MAIN_DISPLAY_COLOR_BAR) !=
-                LT7680_OK)
-            {
-                if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
-                return false;
-            }
-            idx = 1u;
-            return false;
-        }
-        if (idx < 5u)
-        {
-            uint8_t i = (uint8_t)(idx - 1u);
-            size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
-            uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
-                                   ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - (uint16_t)label_width)
-                                   : 0u;
-            if (s_frame.y_labels[i][0] != '\0' &&
-                !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
-                              MAIN_DISPLAY_COLOR_CYAN))
-            {
-                if (s_reading_only_io_error) { idx = 0u; y_labels_only = false; }
-                return false;
-            }
-            idx++;
-            return false;
-        }
-        memcpy(s_reading_only_page_y_labels[s_render_page], s_frame.y_labels,
-               sizeof(s_reading_only_page_y_labels[0]));
-        idx = 0u;
-        y_labels_only = false;
         return true;
     }
 
     if (idx == 0u)
     {
-        /* The full-panel BAR fill previously erased the MAX/MIN/AVG
-         * cells (712..960) which are part of the TREND band. During
-         * the 19-step rebuild the stats renderer is starved
-         * (background_was_ready==false), so the hidden page flipped
-         * blank. Keep the stat strip intact; its own BAR/BAR_ALT
-         * fills are owned by reading_only_render_trend_stats(). */
-        if (ui_fill_rect(0u, MAIN_DISPLAY_CHART_PANEL_Y,
-                         MAIN_DISPLAY_TREND_STATS_X, MAIN_DISPLAY_CHART_PANEL_H,
-                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_H,
+                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
@@ -4148,106 +4048,9 @@ static bool reading_only_render_trend_background(void)
         idx = 1u;
         return false;
     }
-    if (idx == 1u)
-    {
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_BG_Y,
-                         MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_BG_H,
-                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx = 2u;
-        return false;
-    }
-    if (idx == 2u)
-    {
-        /* Single-layer background (ADR-0005): the panel BAR fill (idx 0) is
-         * the only backdrop; the divider strip, the X-gutter shade and the
-         * plot inner border are gone. Only two 1px hairlines stay to seat
-         * the Y labels against the plot and the plot against the X labels. */
-        if (ui_fill_rect(MAIN_DISPLAY_Y_AXIS_W - 1u, MAIN_DISPLAY_Y_AXIS_Y, 1u,
-                         MAIN_DISPLAY_Y_AXIS_H, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        if (ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
-                         MAIN_DISPLAY_X_AXIS_W, 1u, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx = 3u;
-        return false;
-    }
-    if (idx < 6u)
-    {
-        uint8_t i = (uint8_t)(idx - 3u);
-        uint16_t y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
-                                i * MAIN_DISPLAY_PLOT_H / 2u);
-        if (ui_draw_line(MAIN_DISPLAY_PLOT_X, y,
-                         MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W, y,
-                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx++;
-        return false;
-    }
-    if (idx < 11u)
-    {
-        uint8_t i = (uint8_t)(idx - 6u);
-        uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                i * MAIN_DISPLAY_PLOT_W / 4u);
-        if (ui_draw_line(x, MAIN_DISPLAY_PLOT_Y, x,
-                         MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H,
-                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx++;
-        return false;
-    }
-    if (idx < 14u)
-    {
-        uint8_t i = (uint8_t)(idx - 11u);
-        size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
-        uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_PLOT_X
-                               ? (uint16_t)(MAIN_DISPLAY_PLOT_X - 4u - (uint16_t)label_width)
-                               : 0u;
-        if (s_frame.y_labels[i][0] != '\0' &&
-            !ui_draw_text(label_x, trend_y_label_y(i), s_frame.y_labels[i],
-                          MAIN_DISPLAY_COLOR_CYAN))
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx++;
-        return false;
-    }
-    if (idx < 19u)
-    {
-        uint8_t i = (uint8_t)(idx - 14u);
-        uint16_t x = (uint16_t)(MAIN_DISPLAY_PLOT_X +
-                                i * MAIN_DISPLAY_PLOT_W / 4u);
-        if (!ui_draw_text(trend_x_label_x(x, s_frame.x_labels[i]),
-                          MAIN_DISPLAY_X_LABEL_Y, s_frame.x_labels[i],
-                          MAIN_DISPLAY_COLOR_CYAN))
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        idx++;
-        return false;
-    }
     strncpy(s_reading_only_page_trend_unit[s_render_page], unit,
             TREND_UNIT_ID_MAX - 1u);
     s_reading_only_page_trend_unit[s_render_page][TREND_UNIT_ID_MAX - 1u] = '\0';
-    memcpy(s_reading_only_page_y_labels[s_render_page], s_frame.y_labels,
-           sizeof(s_reading_only_page_y_labels[0]));
     memset(s_drawn_trend_occupied[s_render_page], 0,
            sizeof(s_drawn_trend_occupied[0]));
     s_reading_only_page_trend_curve_valid[s_render_page] = false;
@@ -4256,132 +4059,7 @@ static bool reading_only_render_trend_background(void)
     return true;
 }
 
-static bool reading_only_render_trend_stats(void)
-{
-    static uint8_t row[2];
-    static uint32_t last_update_tick[2];
-    static const char *const names[4] = {"Range", "MAX", "MIN", "AVG"};
-    static const uint16_t ys[4] = {MAIN_DISPLAY_TREND_STATS_RANGE_Y,
-                                   MAIN_DISPLAY_TREND_STATS_MAX_Y,
-                                   MAIN_DISPLAY_TREND_STATS_MIN_Y,
-                                   MAIN_DISPLAY_TREND_STATS_AVG_Y};
-    uint32_t now = HAL_GetTick();
-    uint8_t page = s_render_page;
-
-    /* A unit change briefly resets the 10 s buffer. Keep the last valid
-     * statistics visible through that empty transition instead of clearing
-     * the cells and publishing blank/zero-looking text. */
-    if (!s_frame.trend_has_data)
-        return true;
-    if (s_reading_only_page_trend_stats_valid[page] &&
-        (uint32_t)(now - last_update_tick[page]) < 2000u)
-    {
-        /* Throttle only when all rows already match; a gear
-         * change makes Range/MAX/MIN/AVG mismatch at once and must
-         * bypass the 2 s window. */
-        bool all_match = true;
-        for (uint8_t i = 0u; i < 4u; i++)
-        {
-            const char *v = i == 0u ? s_frame.range
-                          : i == 1u ? s_frame.trend_stat_maximum_text
-                          : i == 2u ? s_frame.trend_stat_minimum_text
-                                    : s_frame.trend_stat_average_text;
-            if (strcmp(s_reading_only_page_trend_stats[page][i], v) != 0)
-            {
-                all_match = false;
-                break;
-            }
-        }
-        if (all_match)
-            return true;
-    }
-
-    /* Batch the four rows atomically within one TREND stage, floating
-     * like the reading-area info panel (X=760,W=180, gap 64px from plot).
-     * Range uses Zin-muted grey, the three stats stay white. */
-    for (; row[page] < 4u; row[page]++)
-    {
-        const char *value = row[page] == 0u ? s_frame.range
-                            : row[page] == 1u ? s_frame.trend_stat_maximum_text
-                            : row[page] == 2u ? s_frame.trend_stat_minimum_text
-                                              : s_frame.trend_stat_average_text;
-        uint16_t title_color = row[page] == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
-        uint16_t value_color = row[page] == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
-        if (s_reading_only_page_trend_stats_valid[page] &&
-            strcmp(s_reading_only_page_trend_stats[page][row[page]], value) == 0)
-            continue;
-        {
-            uint16_t vx = (uint16_t)(MAIN_DISPLAY_TREND_STATS_X +
-                                     MAIN_DISPLAY_TREND_STATS_NAME_W);
-            uint16_t ty = (uint16_t)(ys[row[page]] +
-                         (MAIN_DISPLAY_TREND_STATS_ROW_H - FONT_TEXT_HEIGHT) / 2u);
-            const char *old = s_reading_only_page_trend_stats[page][row[page]];
-            const char *op = old;
-            const char *np = value;
-            uint8_t glyph = 0u;
-            bool first = !s_reading_only_page_trend_stats_valid[page];
-
-            if (first && ui_fill_rect(MAIN_DISPLAY_TREND_STATS_X, ys[row[page]],
-                                      MAIN_DISPLAY_TREND_STATS_W,
-                                      MAIN_DISPLAY_TREND_STATS_ROW_H,
-                                      MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
-                return false;
-            if (first)
-            {
-                bitmap_job_t title_job = {0};
-
-                if (!ui_draw_bitmap_slice(&title_job, MAIN_DISPLAY_TREND_STATS_X,
-                                          ty, names[row[page]],
-                                          title_color, 3u))
-                    return false;
-            }
-            while (*op != '\0' || *np != '\0')
-            {
-                uint8_t oa = 1u;
-                uint8_t na = 1u;
-                bool same;
-                char token[3] = {0};
-                bitmap_job_t value_job = {0};
-
-                if (*op != '\0')
-                    (void)text_glyph(op, &oa);
-                if (*np != '\0')
-                    (void)text_glyph(np, &na);
-                same = oa == na && oa != 0u && memcmp(op, np, oa) == 0;
-                if (!same)
-                {
-                    uint16_t gx = (uint16_t)(vx + glyph * FONT_TEXT_WIDTH);
-
-                    if (ui_fill_rect(gx, ys[row[page]], FONT_TEXT_WIDTH,
-                                     MAIN_DISPLAY_TREND_STATS_ROW_H,
-                                     MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
-                        return false;
-                    if (*np != '\0')
-                    {
-                        token[0] = np[0];
-                        if (na > 1u) token[1] = np[1];
-                        if (!ui_draw_bitmap_slice(&value_job, gx, ty, token,
-                                                  value_color, 3u))
-                            return false;
-                    }
-                }
-                if (*op != '\0') op += oa;
-                if (*np != '\0') np += na;
-                glyph++;
-                if (glyph >= MAIN_DISPLAY_TREND_STATS_VALUE_W / FONT_TEXT_WIDTH)
-                    break;
-            }
-        }
-        strncpy(s_reading_only_page_trend_stats[page][row[page]], value,
-                MAIN_DISPLAY_AXIS_LABEL_MAX - 1u);
-        s_reading_only_page_trend_stats[page][row[page]][MAIN_DISPLAY_AXIS_LABEL_MAX - 1u] = '\0';
-        s_trend_stats_changed = true;
-    }
-    row[page] = 0u;
-    last_update_tick[page] = now;
-    s_reading_only_page_trend_stats_valid[page] = true;
-    return true;
-}
+/* ADR-0006: trend stats column removed with the plot-only bottom band. */
 
 static void keithley_trend_axis_range(const char *unit, float peak,
                                       float *minimum, float *maximum)
@@ -4782,12 +4460,6 @@ static void reading_only_render(void)
         {
             s_frame.trend_minimum = s_trend_axis_min;
             s_frame.trend_maximum = s_trend_axis_max;
-            if (s_reading_only_page_y_labels[s_render_page][0][0] != '\0')
-                memcpy(s_frame.y_labels,
-                       s_reading_only_page_y_labels[s_render_page],
-                       sizeof(s_frame.y_labels));
-            else
-                main_display_format_linear_trend_labels(&s_frame);
         }
         else if (s_frame.trend_has_data)
         {
@@ -4826,19 +4498,17 @@ static void reading_only_render(void)
             s_frame.trend_maximum = s_trend_axis_max;
             strncpy(s_trend_axis_unit, trend_unit, TREND_UNIT_ID_MAX - 1u);
             s_trend_axis_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
-            main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
             {
-                /* Clean background + labels; the sweep's own axis-move
-                 * detector restarts a live-window rescan at the new
-                 * scale (no per-slot cursor reset needed here). */
+                /* Clean background; the sweep's own axis-move detector
+                 * restarts a live-window rescan at the new scale (no
+                 * per-slot cursor reset needed here). */
                 reading_only_invalidate_trend_pages();
             }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
                            strcmp(s_reading_only_page_trend_unit[s_render_page],
-                                  trend_buffer_display_unit(&s_trend)) == 0 &&
-                           trend_y_labels_match(s_render_page);
+                                  trend_buffer_display_unit(&s_trend)) == 0;
         bool background_was_ready = background_ready;
         if (!reading_only_render_trend_background())
         {
@@ -4861,16 +4531,8 @@ static void reading_only_render(void)
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
-        /* Statistics are low-priority. Their page-local bitmap job may span
-         * several calls, but it must never hold the frame commit hostage. */
-        (void)reading_only_render_trend_stats();
-        if (s_trend_stats_changed)
-        {
-            /* The stats are rendered on the hidden page only. Synchronize
-             * the complete trend band before the next page flip. */
-            s_frame_regions |= FRAME_REGION_TREND;
-            s_trend_stats_changed = false;
-        }
+        /* ADR-0006: plot-only band — the sweep dual-page-writes every pixel,
+         * so no region flag is needed before the flip. */
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
         s_reading_only_page_trend_curve_valid[s_render_page] = true;

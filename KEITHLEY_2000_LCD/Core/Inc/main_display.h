@@ -95,10 +95,13 @@
 #define MAIN_DISPLAY_TRIG_DOT_SIZE 8u
 #define MAIN_DISPLAY_TRIG_DOT_GAP 8u
 
-#define MAIN_DISPLAY_PLOT_X 96u
-#define MAIN_DISPLAY_PLOT_Y 202u
-#define MAIN_DISPLAY_PLOT_W 624u
-#define MAIN_DISPLAY_PLOT_H 84u
+/* Plot owns the whole bottom band (ADR-0006): no gutters, labels or stats.
+ * Legacy-only geometry below (DIVIDER/BG/AXIS/STATS/X_LABEL) is kept for the
+ * dormant non-baseline renderer and verify compat. */
+#define MAIN_DISPLAY_PLOT_X 0u
+#define MAIN_DISPLAY_PLOT_Y MAIN_DISPLAY_TREND_Y
+#define MAIN_DISPLAY_PLOT_W MAIN_DISPLAY_UI_WIDTH
+#define MAIN_DISPLAY_PLOT_H MAIN_DISPLAY_TREND_H
 #define MAIN_DISPLAY_TREND_STATS_X 732u
 #define MAIN_DISPLAY_TREND_STATS_W \
     (MAIN_DISPLAY_INFO_RIGHT - MAIN_DISPLAY_TREND_STATS_X)
