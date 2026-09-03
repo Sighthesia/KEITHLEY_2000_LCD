@@ -53,7 +53,7 @@ function render(){
   const sp=brand.indexOf(" "), head=sp<0?brand:brand.slice(0,sp), tail=sp<0?"":brand.slice(sp+1).trimStart();
   const redEnd=12+head.length*TEXT_W+10;
   ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,redEnd,L.statusH);
-  text(ctx,head,12,0,"#000000");
+  text(ctx,head,12,0,COLORS.white);
   const x2000=redEnd+6;
   text(ctx,tail,x2000,0,COLORS.white);
   const brandEnd=x2000+tail.length*TEXT_W;
