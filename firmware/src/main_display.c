@@ -122,16 +122,16 @@ const char *main_display_rate_text(ui_rate_t rate)
 const char *main_display_function_text(ui_function_t function)
 {
     switch (function) {
-    case UI_FUNCTION_DC_VOLTAGE: return "DC VOLTAGE";
-    case UI_FUNCTION_AC_VOLTAGE: return "AC VOLTAGE";
-    case UI_FUNCTION_DC_CURRENT: return "DC CURRENT";
-    case UI_FUNCTION_AC_CURRENT: return "AC CURRENT";
+    case UI_FUNCTION_DC_VOLTAGE: return "DC Voltage";
+    case UI_FUNCTION_AC_VOLTAGE: return "AC Voltage";
+    case UI_FUNCTION_DC_CURRENT: return "DC Current";
+    case UI_FUNCTION_AC_CURRENT: return "AC Current";
     case UI_FUNCTION_2W_OHM: return "2W \xCE\xA9";
     case UI_FUNCTION_4W_OHM: return "4W \xCE\xA9";
-    case UI_FUNCTION_FREQUENCY: return "FREQUENCY";
-    case UI_FUNCTION_PERIOD: return "PERIOD";
-    case UI_FUNCTION_TEMPERATURE: return "TEMPERATURE";
-    default: return "MEASUREMENT";
+    case UI_FUNCTION_FREQUENCY: return "Frequency";
+    case UI_FUNCTION_PERIOD: return "Period";
+    case UI_FUNCTION_TEMPERATURE: return "Temperature";
+    default: return "Measurement";
     }
 }
 

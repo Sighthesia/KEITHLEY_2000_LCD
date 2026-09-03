@@ -3695,6 +3695,7 @@ static bool reading_only_render_info_panel(void)
 {
     static uint8_t idx;
     static uint16_t bx;
+    static uint16_t badge_w;
     static const char *const lamps[3] = {"FILT", "REL", "MATH"};
     static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
@@ -3712,7 +3713,7 @@ static bool reading_only_render_info_panel(void)
             // push would be needed, logged for framework verification
         }
     }
-    /* The second row is borderless: green function on the left, metadata on the right. */
+    /* Yellow badge档位标识: 黄底黑字(仿图 “DC Voltage” 横条) + 上下黄色描边。 */
     if (s_reading_only_page_info_valid[s_render_page] &&
         strcmp(s_reading_only_page_function[s_render_page], s_frame.function) == 0 &&
         strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) == 0 &&
@@ -3729,39 +3730,63 @@ static bool reading_only_render_info_panel(void)
                                    MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
     if (idx == 0u) { idx++; return false; }
     if (idx == 1u) {
-        if (!ui_draw_text(MAIN_DISPLAY_READING_X, MAIN_DISPLAY_INFO_BAR_Y,
-                          s_frame.function, MAIN_DISPLAY_COLOR_GREEN)) return false;
-        bx = 240u; idx++; return false;
+        uint16_t fw = ui_measure_text(s_frame.function);
+        badge_w = (uint16_t)(fw + 2u * MAIN_DISPLAY_BADGE_PAD_X);
+        if (badge_w < 80u) badge_w = 80u;
+        if (badge_w > 220u) badge_w = 220u;
+        if (ui_fill_rect(MAIN_DISPLAY_BADGE_X, MAIN_DISPLAY_INFO_BAR_Y,
+                         badge_w, MAIN_DISPLAY_INFO_BAR_H,
+                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK) return false;
+        idx++; return false;
     }
     if (idx == 2u) {
+        uint16_t text_x = (uint16_t)(MAIN_DISPLAY_BADGE_X + MAIN_DISPLAY_BADGE_PAD_X);
+        uint16_t text_y = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT)/2u);
+        if (!ui_draw_text(text_x, text_y,
+                          s_frame.function, MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
+        bx = (uint16_t)(MAIN_DISPLAY_BADGE_X + badge_w + 18u); idx++; return false;
+    }
+    if (idx == 3u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Zin", MAIN_DISPLAY_COLOR_MUTED)) return false;
         bx += 4u * FONT_TEXT_WIDTH; idx++; return false;
     }
-    if (idx == 3u) {
+    if (idx == 4u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.impedance, MAIN_DISPLAY_COLOR_MUTED)) return false;
         bx += (uint16_t)(strlen(s_frame.impedance) * FONT_TEXT_WIDTH + 18u); idx++; return false;
     }
-    if (idx == 4u) {
+    if (idx == 5u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Range", MAIN_DISPLAY_COLOR_MUTED)) return false;
         bx += 6u * FONT_TEXT_WIDTH; idx++; return false;
     }
-    if (idx == 5u) {
+    if (idx == 6u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.range, MAIN_DISPLAY_COLOR_WHITE)) return false;
         bx += (uint16_t)(strlen(s_frame.range) * FONT_TEXT_WIDTH + 18u); idx++; return false;
     }
-    if (idx == 6u) {
+    if (idx == 7u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Rate", MAIN_DISPLAY_COLOR_MUTED)) return false;
         bx += 5u * FONT_TEXT_WIDTH; idx++; return false;
     }
-    if (idx == 7u) {
+    if (idx == 8u) {
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.rate, MAIN_DISPLAY_COLOR_WHITE)) return false;
         bx += (uint16_t)(strlen(s_frame.rate) * FONT_TEXT_WIDTH + 18u); idx++; return false;
     }
-    if (idx >= 8u && idx <= 10u) {
-        uint8_t lamp = (uint8_t)(idx - 8u);
+    if (idx >= 9u && idx <= 11u) {
+        uint8_t lamp = (uint8_t)(idx - 9u);
         if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, lamps[lamp],
                           s_frame.status_active[lamp_bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED)) return false;
         bx += (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH + 12u);
+        idx++; return false;
+    }
+    if (idx == 12u) {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y + MAIN_DISPLAY_INFO_BAR_H,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_YELLOW_BORDER) != LT7680_OK) return false;
+        idx++; return false;
+    }
+    if (idx == 13u) {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_UI_HEIGHT - MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_YELLOW_BORDER) != LT7680_OK) return false;
         idx++; return false;
     }
     strncpy(s_reading_only_page_function[s_render_page], s_frame.function, sizeof(s_reading_only_page_function[0]) - 1u);

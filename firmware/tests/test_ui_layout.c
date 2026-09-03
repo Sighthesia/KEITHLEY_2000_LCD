@@ -9,8 +9,8 @@ int main(void){
     assert(!ui_rect_overlap(&a,&c));
     assert(!ui_rect_overlap(&b,&c) || true); // b 50-150, c 200-250 no overlap
     uint16_t fw, zx,ix,rlx,rx,atlx,atx,lx;
-    bool fit = ui_layout_second_row("DC VOLTAGE","--","AUTO","500 Read/s",&fw,&zx,&ix,&rlx,&rx,&atlx,&atx,&lx);
-    assert(fw==10*12); // DC VOLTAGE 11? actually DC VOLTAGE 11 inc space =11*12=132
+    bool fit = ui_layout_second_row("DC Voltage","--","AUTO","500 Read/s",&fw,&zx,&ix,&rlx,&rx,&atlx,&atx,&lx);
+    assert(fw==10*12); // DC Voltage 10 chars =120
     assert(zx==240u);
     uint16_t bx,ax,tx,ux;
     bool ok = ui_layout_top_bar("KEITHLEY 2000","REM","12.5\xC2\xB0" "C","00:01:02",&bx,&ax,&tx,&ux);

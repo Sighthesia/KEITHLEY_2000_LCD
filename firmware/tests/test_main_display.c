@@ -78,9 +78,9 @@ int main(void)
     assert(strcmp(frame.unit_suffix, "DC") == 0);
     assert(frame.unit_len == 1u);
     assert(frame.reading_y == MAIN_DISPLAY_READING_VALUE_Y);
-    assert(strcmp(frame.function, "DC VOLTAGE") == 0);
+    assert(strcmp(frame.function, "DC Voltage") == 0);
     assert(strcmp(frame.function_line1, "DC") == 0);
-    assert(strcmp(frame.function_line2, "VOLTAGE") == 0);
+    assert(strcmp(frame.function_line2, "Voltage") == 0);
     assert(strcmp(frame.brand, "KEITHLEY 2000") == 0);
     assert(strcmp(frame.impedance, "--") == 0);
     assert(strcmp(frame.range, "AUTO") == 0);
@@ -125,11 +125,11 @@ int main(void)
     assert(ui_model_infer_function("Hz") == UI_FUNCTION_FREQUENCY);
     assert(ui_model_infer_function("DEGC") == UI_FUNCTION_TEMPERATURE);
     assert(strcmp(main_display_function_text(UI_FUNCTION_2W_OHM),
-                  "2W \xCE\xA9") == 0);
+                   "2W \xCE\xA9") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_4W_OHM),
-                  "4W \xCE\xA9") == 0);
+                   "4W \xCE\xA9") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_DC_VOLTAGE),
-                  "DC VOLTAGE") == 0);
+                   "DC Voltage") == 0);
 
     /* Resistance units are normalized to the UTF-8 Ohm sign so the display
      * shows Ω / kΩ / MΩ; the function is inferred after normalization. */

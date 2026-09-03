@@ -28,8 +28,8 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
- const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,rangeLine1Y:25,rangeLine2Y:37,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:202,plotW:624,plotH:84,plotBgY:202,plotBgH:84,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288};
-const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A"};
+ const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,rangeLine1Y:25,rangeLine2Y:37,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:202,plotW:624,plotH:84,plotBgY:202,plotBgH:84,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288,badgePadX:10,yellowLineH:2,badgeX:0};
+const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A",yellow:"#FFD600",yellowDim:"#F2C000"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
 function textBitmap(c){const symbols={"µ":0,"Ω":1,"°":2,"±":3};if(Object.hasOwn(symbols,c))return SYMBOL_BITMAPS[symbols[c]];const n=c.charCodeAt(0);return n<TEXT_FIRST||n>TEXT_LAST?null:TEXT_BITMAPS[n-TEXT_FIRST]}
@@ -54,13 +54,19 @@ function render(){
   if(active)text(ctx,active,(960-active.length*TEXT_W)/2,0,COLORS.green);
   const runtime="+25.0°C  "+demoUptime();
   text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
-  // 第二行：无描边，两行垂直居中的当前档位名称
-  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
-  const range=demo.on?demo.rangeVal:"DC VOLTAGE";
-  text(ctx,range,12,L.rangeLine1Y,COLORS.green);
-  let bx=240;
-  const meta=["Zin --","Range "+(demo.on?demo.rangeVal:"AUTO"),"Rate "+(demo.on?demo.rateVal:"500 Read/s"),"FILT","REL","MATH"];
-  for(const s of meta){text(ctx,s,bx,L.rangeLine1Y,s.startsWith("FILT")||s.startsWith("REL")||s.startsWith("MATH")?COLORS.green:COLORS.white);bx+=s.length*TEXT_W+18}
+  // 第二行：黄底黑字档位标识（模仿图示“DC Voltage” Badge）+ 上下黄色描边
+   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
+   const range=demo.on?demo.rangeVal:"DC Voltage";
+   const rangeW=range.length*TEXT_W, badgeW=Math.max(80,Math.min(220, rangeW+2*L.badgePadX));
+   ctx.fillStyle=COLORS.yellow;ctx.fillRect(L.badgeX,L.infoBarY,badgeW,L.infoBarH);
+   const rangeY = L.infoBarY + Math.floor((L.infoBarH - TEXT_H)/2);
+   text(ctx,range,L.badgeX+L.badgePadX,rangeY,"#000000");
+   let bx=L.badgeX+badgeW+18;
+   const meta=["Zin --","Range "+(demo.on?demo.rangeVal:"AUTO"),"Rate "+(demo.on?demo.rateVal:"500 Read/s"),"FILT","REL","MATH"];
+   for(const s of meta){text(ctx,s,bx,L.rangeLine1Y,s.startsWith("FILT")||s.startsWith("REL")||s.startsWith("MATH")?COLORS.green:COLORS.white);bx+=s.length*TEXT_W+18}
+   // 上下黄色描边（与固件一致：InfoBar下沿 + 屏幕底边）
+   ctx.fillStyle=COLORS.yellow;ctx.fillRect(0,L.infoBarY+L.infoBarH,960,L.yellowLineH);
+   ctx.fillRect(0,UI_H-L.yellowLineH,960,L.yellowLineH);
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";
