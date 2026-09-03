@@ -34,7 +34,9 @@ check("stats widened for 7-digit (v2.1)",e.L.statsW===208&&e.L.statsNameW===60&&
 check("plot widened with inset",e.L.plotW===624&&e.L.xAxisW===624&&e.L.plotY===202&&e.L.plotH===84);
 check("left-aligned reading",e.L.readingX===12);
 check("chart panel and plot geometry (v2.1 inset)",e.L.chartPanelY===192&&e.L.plotBgY===202&&e.L.plotDividerH===4&&e.L.yAxisW===e.L.plotX&&e.L.xAxisW===e.L.plotW&&e.L.xAxisH===22);
-check("simulator draws chart panel",html.includes("plotBgY")&&html.includes("plotDividerH")&&html.includes("ctx.fillStyle=COLORS.bar"));
+check("simulator draws chart panel",html.includes("plotBgY")&&html.includes("ctx.fillStyle=COLORS.bar"));
+check("trend single-layer background (ADR-0005)",html.includes("ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH)")&&!html.includes("ctx.fillRect(0,L.plotDividerY")&&!html.includes("L.xAxisW,L.xAxisH")&&!html.includes("strokeRect")&&!html.includes("ty-2, L.yAxisW-4"));
+check("trend hairlines kept",html.includes("L.yAxisW-1, L.yAxisY, 1")&&html.includes("L.xAxisX, L.xAxisY, L.xAxisW,1"));
 check("axis labels are unit-aware and nice",html.includes("axisScale")&&html.includes("niceStep")&&html.includes("demoAxisUnit"));
 check("rightmost x label is clamped",html.includes("Math.min(L.plotX+L.plotW-s.length*TEXT_W"));
 if(failures)process.exit(1);console.log("sim/verify.js: ALL CHECKS PASS");

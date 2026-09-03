@@ -4162,21 +4162,10 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 2u)
     {
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_DIVIDER_Y,
-                         MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_DIVIDER_H,
-                         MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        // v2.1: x gutter background + y/x separators + plot inner border (inset)
-        if (ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
-                         MAIN_DISPLAY_X_AXIS_W, MAIN_DISPLAY_X_AXIS_H,
-                         MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
+        /* Single-layer background (ADR-0005): the panel BAR fill (idx 0) is
+         * the only backdrop; the divider strip, the X-gutter shade and the
+         * plot inner border are gone. Only two 1px hairlines stay to seat
+         * the Y labels against the plot and the plot against the X labels. */
         if (ui_fill_rect(MAIN_DISPLAY_Y_AXIS_W - 1u, MAIN_DISPLAY_Y_AXIS_Y, 1u,
                          MAIN_DISPLAY_Y_AXIS_H, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
         {
@@ -4185,33 +4174,6 @@ static bool reading_only_render_trend_background(void)
         }
         if (ui_fill_rect(MAIN_DISPLAY_X_AXIS_X, MAIN_DISPLAY_X_AXIS_Y,
                          MAIN_DISPLAY_X_AXIS_W, 1u, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        // plot 1px inner border
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_Y,
-                         MAIN_DISPLAY_PLOT_W, 1u, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X,
-                         MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u,
-                         MAIN_DISPLAY_PLOT_W, 1u, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_Y, 1u,
-                         MAIN_DISPLAY_PLOT_H, MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
-        {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
-        }
-        if (ui_fill_rect(MAIN_DISPLAY_PLOT_X + MAIN_DISPLAY_PLOT_W - 1u,
-                         MAIN_DISPLAY_PLOT_Y, 1u, MAIN_DISPLAY_PLOT_H,
-                         MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;

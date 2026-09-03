@@ -118,19 +118,13 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
     digits(ctx,value,dx,ry,color);
   }
   // 右侧已无信息竖栏，读数可延伸至 928px
-  // 趋势面板：增加 6px 顶部呼吸 + 8px 底部呼吸，Y/X 沟槽底板化消除悬浮
+  // 趋势面板（ADR-0005）：只留一层底——面板底 + 绘图黑底 + 两条 1px 发丝线
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.chartPanelY,UI_W,L.chartPanelH);
-  // 顶部 4px 分隔条
-  ctx.fillStyle=COLORS.bar2;ctx.fillRect(0,L.plotDividerY,UI_W,L.plotDividerH);
-  // Y 沟槽底板
-  ctx.fillStyle="#162126";ctx.fillRect(L.yAxisX,L.yAxisY,L.yAxisW,L.yAxisH);
+  // Y 轴与绘图区发丝线 / X 轴顶部发丝线
   ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(L.yAxisW-1, L.yAxisY, 1, L.yAxisH);
-  // X 沟槽底板
-  ctx.fillStyle="#1E2F35";ctx.fillRect(L.xAxisX,L.xAxisY,L.xAxisW,L.xAxisH);
   ctx.fillStyle="rgba(42,63,69,0.9)";ctx.fillRect(L.xAxisX, L.xAxisY, L.xAxisW,1);
-  // 绘图区黑底 + 1px 内框
+  // 绘图区黑底（无内框，靠与面板底的明暗差收边）
   ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotY,L.plotW,L.plotH);
-  ctx.strokeStyle="rgba(42,63,69,0.8)";ctx.lineWidth=1;ctx.strokeRect(L.plotX+0.5,L.plotY+0.5,L.plotW-1,L.plotH-1);
   // 网格（在绘图区内）
    ctx.strokeStyle=COLORS.grid;ctx.lineWidth=1;ctx.setLineDash([4,4]);ctx.globalAlpha=0.85;
    for(let i=1;i<3;i++){const y=L.plotY+i*L.plotH/3;ctx.beginPath();ctx.moveTo(L.plotX,y);ctx.lineTo(L.plotX+L.plotW,y);ctx.stroke()}
@@ -147,11 +141,9 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   const niceStep=(span)=>{let s=span/3,p=1;while(s>=10){s/=10;p*=10}while(s<1){s*=10;p/=10}return (s<=1?p:s<=2?2*p:s<=5?5*p:10*p)};
   const scaledLo=ylo*axisScale,scaledHi=yhi*axisScale,step=niceStep(scaledHi-scaledLo),top=Math.ceil(scaledHi/step)*step;
   const fmtAxis=(v)=>Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Math.abs(v)>=1?v.toFixed(2):v.toFixed(3);
-   // Y 轴标签：沟槽内右对齐带 4px 底板，不再悬浮
+   // Y 轴标签：直接落在面板底上右对齐（无底板，ADR-0005）
    for(let i=0;i<4;i++){const s=fmtAxis(top-step*i)+axisUnit;const ly = L.plotY + i*L.plotH/3; const ty = Math.round(ly - TEXT_H/2); const tx = L.yAxisW - s.length*TEXT_W - 6;
-     // 轻底板（与沟槽同色，仅 2px 内边距避免突兀）
-     ctx.fillStyle = i%2===0 ? "rgba(22,33,38,1)" : "rgba(30,47,53,0.9)"; ctx.fillRect(2, ty-2, L.yAxisW-4, TEXT_H+4);
-     text(ctx,s, Math.max(2,tx), ty, COLORS.cyan)}
+      text(ctx,s, Math.max(2,tx), ty, COLORS.cyan)}
   X_LABELS.forEach((s,i)=>{const center=L.plotX+i*L.plotW/4;const x=Math.max(L.plotX+4,Math.min(L.plotX+L.plotW-s.length*TEXT_W-4,center-s.length*TEXT_W/2));const ty = L.xAxisY + (L.xAxisH - TEXT_H)/2; text(ctx,s,x,ty,"rgba(77,208,225,0.95)")});
  ctx.lineWidth=2; ctx.lineCap="round"; ctx.lineJoin="round";
  for(const [color,dy,alpha] of [[COLORS.greenDim,-1,0.0],[COLORS.greenDim,1,0.0],[COLORS.green,0,1.0]]){
