@@ -47,25 +47,48 @@ function demoUptime(){const s=Math.floor((Date.now()-simStartedAt)/1000);return 
 function renderFB(ctx,source){const src=source.getImageData(0,0,960,320).data,img=ctx.createImageData(320,960);for(let y=0;y<320;y++)for(let x=0;x<960;x++){const s=(y*960+x)*4,d=(x*320+y)*4;img.data[d]=src[s];img.data[d+1]=src[s+1];img.data[d+2]=src[s+2];img.data[d+3]=255}ctx.putImageData(img,0,0)}
 function render(){
   const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
-  // 第一行：品牌、激活状态、温度和运行时间
+  // 第一行：品牌 + 浅色半高分隔线 + 去重左对齐状态（去掉 AUTO/FILT/REL，ADR-0004）
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
-  text(ctx,"KEITHLEY 2000",12,0,COLORS.white);
-  const active=demo.on?["REM","TALK","TRIG"].join(" "):"";
-  if(active)text(ctx,active,(960-active.length*TEXT_W)/2,0,COLORS.green);
+  const brand="KEITHLEY 2000";
+  text(ctx,brand,12,0,COLORS.white);
+  const brandEnd=12+brand.length*TEXT_W;
+  ctx.fillStyle=COLORS.grid;ctx.fillRect(brandEnd+10,Math.floor((L.statusH-12)/2),1,12);
+  const activeAll=demo.on?["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]:[];
+  const row1x=brandEnd+10+1+10;
+  {let ax=row1x;for(const s of activeAll){text(ctx,s,ax,0,COLORS.green);ax+=s.length*TEXT_W+TEXT_W;}}
   const runtime="+25.0°C  "+demoUptime();
   text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
-  // 第二行：黄底黑字档位标识（模仿图示“DC Voltage” Badge）+ InfoBar下沿单条黄色分隔线（ADR-0003：禁止屏底黄线，越界进X轴沟槽）
+  // 第二行：绿底黑字档位 Badge + 统计栏式单元格 + 激活态 + 右对齐 TRIGGER 圆点（ADR-0004）
    ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
    const range=demo.on?demo.rangeVal:"DC Voltage";
    const rangeW=range.length*TEXT_W, badgeW=Math.max(80,Math.min(220, rangeW+2*L.badgePadX));
-   ctx.fillStyle=COLORS.yellow;ctx.fillRect(L.badgeX,L.infoBarY,badgeW,L.infoBarH);
+   ctx.fillStyle=COLORS.green;ctx.fillRect(L.badgeX,L.infoBarY,badgeW,L.infoBarH);
    const rangeY = L.infoBarY + Math.floor((L.infoBarH - TEXT_H)/2);
    text(ctx,range,L.badgeX+L.badgePadX,rangeY,"#000000");
+   const cellY = L.infoBarY + Math.floor((L.infoBarH - TEXT_H)/2);
+   const trigDotX=960-12-8, trigDotY=L.infoBarY+Math.floor((L.infoBarH-8)/2);
+   const trigX=trigDotX-8-7*TEXT_W, trigSepX=trigX-10;
    let bx=L.badgeX+badgeW+18;
-   const meta=["Zin --","Range "+(demo.on?demo.rangeVal:"AUTO"),"Rate "+(demo.on?demo.rateVal:"500 Read/s"),"FILT","REL","MATH"];
-   for(const s of meta){text(ctx,s,bx,L.rangeLine1Y,s.startsWith("FILT")||s.startsWith("REL")||s.startsWith("MATH")?COLORS.green:COLORS.white);bx+=s.length*TEXT_W+18}
-   // 单条黄色分隔线（与固件一致：仅InfoBar下沿；屏底禁止，见ADR-0003）
-   ctx.fillStyle=COLORS.yellow;ctx.fillRect(0,L.infoBarY+L.infoBarH,960,L.yellowLineH);
+   const cells=[["Zin","--",COLORS.muted],["Range",demo.on?demo.rangeVal:"AUTO",COLORS.white],["Rate",demo.on?demo.rateVal:"500 Read/s",COLORS.white]];
+   for(const [nm,val,vc] of cells){
+     const nw=nm.length*TEXT_W+8, vw=val.length*TEXT_W+8;
+     ctx.fillStyle=COLORS.bar2;ctx.fillRect(bx+nw,L.infoBarY,vw,L.infoBarH);
+     text(ctx,nm,bx+4,cellY,COLORS.muted);
+     text(ctx,val,bx+nw+4,cellY,vc);
+     ctx.fillStyle=COLORS.grid;ctx.fillRect(bx+nw+vw,L.infoBarY,1,L.infoBarH);
+     bx+=nw+vw+1+8;
+   }
+   const lamps2=[demo.filt&&"FILT",demo.rel&&"REL",demo.math&&"MATH"].filter(Boolean);
+   for(const s of lamps2){if(bx+s.length*TEXT_W>trigSepX)break;text(ctx,s,bx,cellY,COLORS.green);bx+=s.length*TEXT_W+12;}
+   const trigOn=demo.on;
+   if(trigOn){
+     ctx.fillStyle=COLORS.grid;ctx.fillRect(trigSepX,L.infoBarY,1,L.infoBarH);
+     text(ctx,"TRIGGER",trigX,cellY,COLORS.green);
+     const dotOn=(Date.now()/250|0)%2===0;
+     ctx.fillStyle=dotOn?COLORS.green:COLORS.bar;ctx.fillRect(trigDotX,trigDotY,8,8);
+   }
+   // 单条绿色分隔线（与固件一致：仅InfoBar下沿；屏底禁止，见ADR-0003）
+   ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.infoBarY+L.infoBarH,960,L.yellowLineH);
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";
@@ -180,6 +203,6 @@ function toggleDemo(){
  if(demo.on){demo.timer=setInterval(demoStep,DEMO_FEED_PERIOD_MS);demoStep()}
  else{clearInterval(demo.timer);demo.timer=null;render()}
 }
-if(typeof document!=="undefined"){document.querySelectorAll("input").forEach(e=>e.addEventListener("input",render));document.getElementById("demo").addEventListener("change",toggleDemo);render()}
+if(typeof document!=="undefined"){document.querySelectorAll("input").forEach(e=>e.addEventListener("input",render));document.getElementById("demo").addEventListener("change",toggleDemo);render();setInterval(()=>{if(demo.on)render()},250)}
 </script>
 </body></html>

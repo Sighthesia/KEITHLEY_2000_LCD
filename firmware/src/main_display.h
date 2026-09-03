@@ -67,13 +67,29 @@
 #define MAIN_DISPLAY_COLOR_RED 0xF800u
 #define MAIN_DISPLAY_COLOR_YELLOW 0xFFE0u
 #define MAIN_DISPLAY_COLOR_BLACK 0x0000u
-#define MAIN_DISPLAY_COLOR_BADGE_BG MAIN_DISPLAY_COLOR_YELLOW
+/* Header rows redesign (ADR-0004): badge + divider are green, black badge
+ * text; light separators reuse the grid color (same family as the stats
+ * cells' hairlines). */
+#define MAIN_DISPLAY_COLOR_BADGE_BG MAIN_DISPLAY_COLOR_GREEN
 #define MAIN_DISPLAY_COLOR_BADGE_TEXT MAIN_DISPLAY_COLOR_BLACK
-#define MAIN_DISPLAY_COLOR_YELLOW_BORDER MAIN_DISPLAY_COLOR_YELLOW
+#define MAIN_DISPLAY_COLOR_DIVIDER MAIN_DISPLAY_COLOR_GREEN
+#define MAIN_DISPLAY_COLOR_SEP MAIN_DISPLAY_COLOR_GRID
 #define MAIN_DISPLAY_BADGE_PAD_X 10u
 #define MAIN_DISPLAY_BADGE_TEXT_GAP 8u
 #define MAIN_DISPLAY_YELLOW_LINE_H 2u
 #define MAIN_DISPLAY_BADGE_X 0u
+/* Row 1: 1px half-height separator after the brand + left-aligned lamps. */
+#define MAIN_DISPLAY_ROW1_SEP_GAP 10u
+#define MAIN_DISPLAY_ROW1_SEP_W 1u
+#define MAIN_DISPLAY_ROW1_SEP_H 12u
+#define MAIN_DISPLAY_ROW1_INFO_GAP 10u
+/* Row 2: stats-style name/value cells (BAR/BAR_ALT) + trigger block. */
+#define MAIN_DISPLAY_ROW2_CELL_PAD_X 4u
+#define MAIN_DISPLAY_ROW2_BLOCK_GAP 8u
+#define MAIN_DISPLAY_ROW2_TRIG_GAP 10u
+#define MAIN_DISPLAY_TRIG_MARGIN_R 12u
+#define MAIN_DISPLAY_TRIG_DOT_SIZE 8u
+#define MAIN_DISPLAY_TRIG_DOT_GAP 8u
 
 #define MAIN_DISPLAY_PLOT_X 96u
 #define MAIN_DISPLAY_PLOT_Y 202u

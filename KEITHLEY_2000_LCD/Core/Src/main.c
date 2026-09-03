@@ -344,7 +344,14 @@ static uint16_t s_reading_only_page_value_color[2];
 static uint8_t s_reading_only_value_index;
 static bool s_reading_only_page_status_valid[2];
 static uint8_t s_reading_only_page_status_lamps[2];
+static char s_reading_only_page_row1[2][MAIN_DISPLAY_META_MAX];
 static bool s_reading_only_page_info_valid[2];
+/* TRIGGER dot blink (ADR-0004): per-page last painted dot (-1 = none/erased,
+ * 0 = off, 1 = on), shared 250 ms phase, pending flag forcing INFO stage. */
+static int8_t s_reading_only_page_trig_dot[2];
+static bool s_trig_dot_phase;
+static uint32_t s_trig_dot_tick;
+static bool s_trig_dot_pending;
 static char s_reading_only_page_active_status[2][MAIN_DISPLAY_META_MAX];
 static char s_reading_only_page_temperature[2][12];
 static char s_reading_only_page_uptime[2][12];
@@ -3570,6 +3577,46 @@ static bool READING_ONLY_LEGACY trend_yield_to_regions(void)
 }
 
 #if K2000_READING_ONLY_BASELINE
+/* Row-1 left info (ADR-0004): all active core lamps EXCEPT the ones duplicated
+ * in row 2 (REL=6, FILT=7, AUTO=8), space-joined. TRIG stays (steady lamp);
+ * row 2 owns the event-style TRIGGER + blinking dot. */
+static void row1_status_text(char *out, uint8_t size)
+{
+    static const uint8_t order[] = {0u, 1u, 2u, 3u, 4u, 5u, 9u, 10u, 11u, 12u};
+    static const char *const labels[] = {"REM", "TALK", "LSTN", "SRQ", "HOLD",
+                                         "TRIG", "ERR", "BUFFER", "MATH", "CONT"};
+    uint8_t i;
+    bool first = true;
+
+    if (out == 0 || size == 0u) return;
+    out[0] = '\0';
+    for (i = 0u; i < (uint8_t)(sizeof(order) / sizeof(order[0])); i++)
+    {
+        uint8_t k = order[i];
+        size_t n;
+        if (k >= STATUS_BAR_CORE_COUNT || !s_frame.status_active[k]) continue;
+        n = strlen(out);
+        if (!first && n + 1u < size) { out[n] = ' '; out[n + 1u] = '\0'; n++; }
+        {
+            const char *s = labels[i];
+            while (*s != '\0' && n + 1u < size) out[n++] = *s++;
+            out[n] = '\0';
+        }
+        first = false;
+    }
+}
+
+static uint16_t row1_brand_end_x(void)
+{
+    return (uint16_t)(12u + strlen(s_frame.brand) * FONT_TEXT_WIDTH);
+}
+
+static uint16_t row1_info_x(void)
+{
+    return (uint16_t)(row1_brand_end_x() + MAIN_DISPLAY_ROW1_SEP_GAP +
+                      MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+}
+
 static bool reading_only_render_status_bar(void)
 {
     static const uint8_t status_bits[5] = {0u, 1u, 2u, 3u, 5u};
@@ -3578,7 +3625,11 @@ static bool reading_only_render_status_bar(void)
     if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
     brand_dirty = !s_reading_only_page_status_valid[s_render_page] ||
                   strcmp(s_reading_only_page_brand[s_render_page], s_frame.brand) != 0;
-    active_dirty = strcmp(s_reading_only_page_active_status[s_render_page], s_frame.active_status) != 0;
+    {
+        char cur_row1[MAIN_DISPLAY_META_MAX];
+        row1_status_text(cur_row1, sizeof(cur_row1));
+        active_dirty = strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0;
+    }
     temp_dirty = strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
     uptime_dirty = strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
     // Use layout framework to compute positions and detect overlap
@@ -3603,33 +3654,46 @@ static bool reading_only_render_status_bar(void)
                 uint16_t w = (uint16_t)(strlen(s_frame.brand) * FONT_TEXT_WIDTH);
                 uint16_t ow = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
                 uint16_t fw = w > ow ? w : ow;
+                /* Clear covers brand + separator + gap so a narrower brand
+                 * cannot leave a stale separator behind. */
+                fw = (uint16_t)(fw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                                MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
                 if (ui_fill_rect(12u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
             }
             if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            if (ui_fill_rect((uint16_t)(row1_brand_end_x() + MAIN_DISPLAY_ROW1_SEP_GAP),
+                             (uint16_t)((MAIN_DISPLAY_STATUS_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
+                             MAIN_DISPLAY_ROW1_SEP_W, MAIN_DISPLAY_ROW1_SEP_H,
+                             MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
             idx++;
             return false;
         }
     }
     if (idx == 2u) {
-        if (!active_dirty) { idx++; } else {
+        /* Left-aligned de-duplicated lamps (ADR-0004): single string keeps the
+         * resumable bitmap job safe (one job, one string per step). */
+        char cur[MAIN_DISPLAY_META_MAX];
+        uint16_t nx = row1_info_x();
+        uint16_t nw, ow, fx, xe;
+        uint16_t ox = nx;
+        row1_status_text(cur, sizeof(cur));
+        ow = (uint16_t)(strlen(s_reading_only_page_row1[s_render_page]) * FONT_TEXT_WIDTH);
+        /* Old origin moves with brand width; erase the union of both extents. */
+        {
+            uint16_t old_bw = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
+            ox = (uint16_t)(12u + old_bw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                            MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+        }
+        nw = (uint16_t)(strlen(cur) * FONT_TEXT_WIDTH);
+        fx = ox < nx ? ox : nx;
+        xe = ox + ow > nx + nw ? ox + ow : nx + nw;
+        if (!active_dirty && strcmp(s_reading_only_page_row1[s_render_page], cur) == 0) { idx++; } else {
             if (!s_bitmap_job.active) {
-                uint16_t nw = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
-                uint16_t ow = (uint16_t)(strlen(s_reading_only_page_active_status[s_render_page]) * FONT_TEXT_WIDTH);
-                uint16_t nx = nw ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw) / 2u) : 0u;
-                uint16_t ox = ow ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - ow) / 2u) : 0u;
-                uint16_t fx = nw && ow ? (nx < ox ? nx : ox) : (nw ? nx : ox);
-                uint16_t fw = 0u;
-                if (nw || ow) {
-                    uint16_t nxe = nw ? (uint16_t)(nx + nw) : 0u;
-                    uint16_t oxe = ow ? (uint16_t)(ox + ow) : 0u;
-                    uint16_t xe = nxe > oxe ? nxe : oxe;
-                    fw = (uint16_t)(xe - fx);
-                    if (ui_fill_rect(fx, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-                }
+                if (xe > fx &&
+                    ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H,
+                                 MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
             }
-            uint16_t nw2 = (uint16_t)(strlen(s_frame.active_status) * FONT_TEXT_WIDTH);
-            uint16_t nx2 = nw2 ? (uint16_t)((MAIN_DISPLAY_UI_WIDTH - nw2) / 2u) : 0u;
-            if (nw2 && !ui_draw_text(nx2, 0u, s_frame.active_status, MAIN_DISPLAY_COLOR_GREEN)) return false;
+            if (cur[0] != '\0' && !ui_draw_text(nx, 0u, cur, MAIN_DISPLAY_COLOR_GREEN)) return false;
             idx++;
             return false;
         }
@@ -3684,6 +3748,8 @@ static bool reading_only_render_status_bar(void)
             sizeof(s_reading_only_page_temperature[0]) - 1u);
     strncpy(s_reading_only_page_uptime[s_render_page], s_frame.uptime,
             sizeof(s_reading_only_page_uptime[0]) - 1u);
+    row1_status_text(s_reading_only_page_row1[s_render_page],
+                     sizeof(s_reading_only_page_row1[0]));
     {
         uint8_t cur = 0u;
     for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[status_bits[i]]) cur |= (1u<<i);
@@ -3691,13 +3757,55 @@ static bool reading_only_render_status_bar(void)
     }
     return true;
 }
+/* Row-2 geometry (ADR-0004): green badge, stats-style cells, right trigger. */
+static uint16_t row2_text_y(void)
+{
+    return (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
+                      (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT) / 2u);
+}
+
+static uint16_t row2_trig_dot_x(void)
+{
+    return (uint16_t)(MAIN_DISPLAY_UI_WIDTH - MAIN_DISPLAY_TRIG_MARGIN_R -
+                      MAIN_DISPLAY_TRIG_DOT_SIZE);
+}
+
+static uint16_t row2_trig_dot_y(void)
+{
+    return (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
+                      (MAIN_DISPLAY_INFO_BAR_H - MAIN_DISPLAY_TRIG_DOT_SIZE) / 2u);
+}
+
+static uint16_t row2_trig_text_x(void)
+{
+    return (uint16_t)(row2_trig_dot_x() - MAIN_DISPLAY_ROW2_TRIG_GAP -
+                      7u * FONT_TEXT_WIDTH);
+}
+
+static uint16_t row2_trig_sep_x(void)
+{
+    return (uint16_t)(row2_trig_text_x() - MAIN_DISPLAY_ROW2_TRIG_GAP);
+}
+
+static uint8_t row2_info_lamps(void)
+{
+    /* FILT/REL/MATH + TRIG bit: any change (incl. trigger on/off) forces a
+     * full row repaint so stale pixels can never survive. */
+    return (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) |
+                     (s_frame.status_active[6u] ? 2u : 0u) |
+                     (s_frame.status_active[11u] ? 4u : 0u) |
+                     (s_frame.status_active[5u] ? 8u : 0u));
+}
+
 static bool reading_only_render_info_panel(void)
 {
     static uint8_t idx;
     static uint16_t bx;
     static uint16_t badge_w;
+    /* Right statuses: active-only (ADR-0004), same rule as row 1. */
     static const char *const lamps[3] = {"FILT", "REL", "MATH"};
     static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
+    static const char *const cell_names[3] = {"Zin", "Range", "Rate"};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
     {
         uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
@@ -3713,18 +3821,28 @@ static bool reading_only_render_info_panel(void)
             // push would be needed, logged for framework verification
         }
     }
-    /* Yellow badge档位标识: 黄底黑字(仿图 “DC Voltage” 横条) + InfoBar下沿单条黄色分隔线。
-     * 边界约束(ADR-0003): INFO阶段只允许触碰 y24..51(InfoBar+顶部分隔线)；
-     * 禁止绘制屏幕底边黄线——它落在 X轴沟槽(298..319)内，会覆盖X轴标签并越界写TREND带。 */
+    /* Green badge档位标识 (ADR-0004: badge + divider both green) + InfoBar下沿
+     * 单条绿色分隔线。边界约束(ADR-0003): INFO阶段只允许触碰 y24..51。 */
     if (s_reading_only_page_info_valid[s_render_page] &&
         strcmp(s_reading_only_page_function[s_render_page], s_frame.function) == 0 &&
         strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) == 0 &&
         strcmp(s_reading_only_page_range[s_render_page], s_frame.range) == 0 &&
         strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) == 0 &&
-        s_reading_only_page_info_lamps[s_render_page] ==
-            (uint8_t)((s_frame.status_active[lamp_bits[0]] ? 1u : 0u) |
-                      (s_frame.status_active[lamp_bits[1]] ? 2u : 0u) |
-                      (s_frame.status_active[lamp_bits[2]] ? 4u : 0u))) {
+        s_reading_only_page_info_lamps[s_render_page] == row2_info_lamps()) {
+        /* Content identical: only the TRIGGER dot may need a repaint (blink
+         * phase toggled). Single 8x8 fill, no full row redraw. */
+        bool trig = s_frame.status_active[5u];
+        int8_t want = !trig ? (int8_t)-1 : (s_trig_dot_phase ? (int8_t)1 : (int8_t)0);
+        if (s_reading_only_page_trig_dot[s_render_page] == want) {
+            s_trig_dot_pending = false;
+            return true;
+        }
+        if (ui_fill_rect(row2_trig_dot_x(), row2_trig_dot_y(),
+                         MAIN_DISPLAY_TRIG_DOT_SIZE, MAIN_DISPLAY_TRIG_DOT_SIZE,
+                         want == 1 ? MAIN_DISPLAY_COLOR_GREEN :
+                                     MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+        s_reading_only_page_trig_dot[s_render_page] = want;
+        s_trig_dot_pending = false;
         return true;
     }
     if (idx == 0u && ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y,
@@ -3743,46 +3861,86 @@ static bool reading_only_render_info_panel(void)
     }
     if (idx == 2u) {
         uint16_t text_x = (uint16_t)(MAIN_DISPLAY_BADGE_X + MAIN_DISPLAY_BADGE_PAD_X);
-        uint16_t text_y = (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y + (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT)/2u);
-        if (!ui_draw_text(text_x, text_y,
+        if (!ui_draw_text(text_x, row2_text_y(),
                           s_frame.function, MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
         bx = (uint16_t)(MAIN_DISPLAY_BADGE_X + badge_w + 18u); idx++; return false;
     }
-    if (idx == 3u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Zin", MAIN_DISPLAY_COLOR_MUTED)) return false;
-        bx += 4u * FONT_TEXT_WIDTH; idx++; return false;
-    }
-    if (idx == 4u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.impedance, MAIN_DISPLAY_COLOR_MUTED)) return false;
-        bx += (uint16_t)(strlen(s_frame.impedance) * FONT_TEXT_WIDTH + 18u); idx++; return false;
-    }
-    if (idx == 5u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Range", MAIN_DISPLAY_COLOR_MUTED)) return false;
-        bx += 6u * FONT_TEXT_WIDTH; idx++; return false;
-    }
-    if (idx == 6u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.range, MAIN_DISPLAY_COLOR_WHITE)) return false;
-        bx += (uint16_t)(strlen(s_frame.range) * FONT_TEXT_WIDTH + 18u); idx++; return false;
-    }
-    if (idx == 7u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, "Rate", MAIN_DISPLAY_COLOR_MUTED)) return false;
-        bx += 5u * FONT_TEXT_WIDTH; idx++; return false;
-    }
-    if (idx == 8u) {
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, s_frame.rate, MAIN_DISPLAY_COLOR_WHITE)) return false;
-        bx += (uint16_t)(strlen(s_frame.rate) * FONT_TEXT_WIDTH + 18u); idx++; return false;
-    }
-    if (idx >= 9u && idx <= 11u) {
-        uint8_t lamp = (uint8_t)(idx - 9u);
-        if (!ui_draw_text(bx, MAIN_DISPLAY_INFO_BAR_Y, lamps[lamp],
-                          s_frame.status_active[lamp_bits[lamp]] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED)) return false;
-        bx += (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH + 12u);
+    /* Stats-style cells (ADR-0004): name on BAR, value on BAR_ALT, 1px light
+     * separator on each block's right. 3 blocks x 4 sub-steps (idx 3..14). */
+    if (idx >= 3u && idx <= 14u) {
+        uint8_t b = (uint8_t)((idx - 3u) / 4u);
+        uint8_t sub = (uint8_t)((idx - 3u) % 4u);
+        const char *val = b == 0u ? s_frame.impedance :
+                          b == 1u ? s_frame.range : s_frame.rate;
+        uint16_t val_color = b == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
+        uint16_t name_w = (uint16_t)(strlen(cell_names[b]) * FONT_TEXT_WIDTH +
+                                     2u * MAIN_DISPLAY_ROW2_CELL_PAD_X);
+        uint16_t val_w = (uint16_t)(strlen(val) * FONT_TEXT_WIDTH +
+                                    2u * MAIN_DISPLAY_ROW2_CELL_PAD_X);
+        if (sub == 0u) {
+            if (ui_fill_rect((uint16_t)(bx + name_w), MAIN_DISPLAY_INFO_BAR_Y,
+                             val_w, MAIN_DISPLAY_INFO_BAR_H,
+                             MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK) return false;
+            idx++; return false;
+        }
+        if (sub == 1u) {
+            if (!ui_draw_text((uint16_t)(bx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
+                              cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
+            idx++; return false;
+        }
+        if (sub == 2u) {
+            if (!ui_draw_text((uint16_t)(bx + name_w + MAIN_DISPLAY_ROW2_CELL_PAD_X),
+                              row2_text_y(), val, val_color)) return false;
+            idx++; return false;
+        }
+        if (ui_fill_rect((uint16_t)(bx + name_w + val_w), MAIN_DISPLAY_INFO_BAR_Y,
+                         1u, MAIN_DISPLAY_INFO_BAR_H,
+                         MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
+        bx = (uint16_t)(bx + name_w + val_w + 1u + MAIN_DISPLAY_ROW2_BLOCK_GAP);
         idx++; return false;
     }
-    if (idx == 12u) {
+    if (idx >= 15u && idx <= 17u) {
+        /* Active-only right statuses: inactive lamps vanish (no muted text),
+         * and must never cross the trigger separator. */
+        while (idx <= 17u && !s_frame.status_active[lamp_bits[idx - 15u]]) idx++;
+        if (idx > 17u) return false;
+        {
+            uint8_t lamp = (uint8_t)(idx - 15u);
+            uint16_t end_x = (uint16_t)(bx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
+            if (end_x > row2_trig_sep_x()) { idx = 18u; return false; }
+            if (!ui_draw_text(bx, row2_text_y(), lamps[lamp],
+                              MAIN_DISPLAY_COLOR_GREEN)) return false;
+            bx = (uint16_t)(end_x + 12u);
+            idx++; return false;
+        }
+    }
+    if (idx == 18u) {
+        /* TRIGGER block is right-aligned; without TRIG the whole block
+         * (incl. dot area) was already cleared by the row BAR fill. */
+        if (!s_frame.status_active[5u]) { idx = 21u; return false; }
+        if (ui_fill_rect(row2_trig_sep_x(), MAIN_DISPLAY_INFO_BAR_Y,
+                         1u, MAIN_DISPLAY_INFO_BAR_H,
+                         MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
+        idx++; return false;
+    }
+    if (idx == 19u) {
+        if (!ui_draw_text(row2_trig_text_x(), row2_text_y(), "TRIGGER",
+                          MAIN_DISPLAY_COLOR_GREEN)) return false;
+        idx++; return false;
+    }
+    if (idx == 20u) {
+        bool dot_on = s_trig_dot_phase;
+        if (ui_fill_rect(row2_trig_dot_x(), row2_trig_dot_y(),
+                         MAIN_DISPLAY_TRIG_DOT_SIZE, MAIN_DISPLAY_TRIG_DOT_SIZE,
+                         dot_on ? MAIN_DISPLAY_COLOR_GREEN :
+                                  MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+        s_reading_only_page_trig_dot[s_render_page] = dot_on ? (int8_t)1 : (int8_t)0;
+        idx++; return false;
+    }
+    if (idx == 21u) {
         if (ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y + MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_YELLOW_BORDER) != LT7680_OK) return false;
+                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK) return false;
         idx++; return false;
     }
     strncpy(s_reading_only_page_function[s_render_page], s_frame.function, sizeof(s_reading_only_page_function[0]) - 1u);
@@ -3793,10 +3951,10 @@ static bool reading_only_render_info_panel(void)
     s_reading_only_page_impedance[s_render_page][sizeof(s_reading_only_page_impedance[0])-1u] = '\0';
     s_reading_only_page_range[s_render_page][sizeof(s_reading_only_page_range[0])-1u] = '\0';
     s_reading_only_page_rate[s_render_page][sizeof(s_reading_only_page_rate[0])-1u] = '\0';
-    s_reading_only_page_info_lamps[s_render_page] =
-        (uint8_t)((s_frame.status_active[lamp_bits[0]] ? 1u : 0u) |
-                  (s_frame.status_active[lamp_bits[1]] ? 2u : 0u) |
-                  (s_frame.status_active[lamp_bits[2]] ? 4u : 0u));
+    s_reading_only_page_info_lamps[s_render_page] = row2_info_lamps();
+    s_reading_only_page_trig_dot[s_render_page] =
+        s_frame.status_active[5u] ? (s_trig_dot_phase ? (int8_t)1 : (int8_t)0) : (int8_t)-1;
+    s_trig_dot_pending = false;
     s_reading_only_page_info_valid[s_render_page] = true;
     idx = 0u;
     return true;
@@ -4288,15 +4446,13 @@ static void reading_only_render(void)
             return;
         }
         {
-              uint8_t cur_info_lamps = (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) |
-                                                 (s_frame.status_active[6u] ? 2u : 0u) |
-                                                 (s_frame.status_active[11u] ? 4u : 0u));
-               bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
+               bool info_need = s_trig_dot_pending ||
+                                !s_reading_only_page_info_valid[s_render_page] ||
                                 strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
                                 strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
-                                s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps;
+                                s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
             s_reading_only_stage = info_need ? READING_ONLY_INFO : READING_ONLY_CLEAR;
         }
         return;
@@ -4315,10 +4471,12 @@ static void reading_only_render(void)
         bool header_due = (uint32_t)(now - s_temperature_tick) >= 1000u;
         bool reading_due = s_reading_only_dirty &&
                            (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
-        if (!reading_due && !header_due)
+        bool dot_due = s_trig_dot_pending &&
+                       (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
+        if (!reading_due && !header_due && !dot_due)
             return;
         /* Header-only: still use hidden page + present to avoid visible tear, but copy reading band. */
-        bool header_only = header_due && !reading_due;
+        bool header_only = header_due && !reading_due && !dot_due;
         s_is_header_only = header_only;
 
         /* A/B: the direct-DMA diagnostic holds the selected page to determine
@@ -4364,20 +4522,21 @@ static void reading_only_render(void)
         {
             uint8_t cur_status = 0u;
             for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[(uint8_t[]){0u,1u,2u,3u,5u}[i]]) cur_status |= (1u<<i);
-             bool status_need = !s_reading_only_page_status_valid[s_render_page] ||
+             char cur_row1[MAIN_DISPLAY_META_MAX];
+             bool status_need;
+             row1_status_text(cur_row1, sizeof(cur_row1));
+             status_need = !s_reading_only_page_status_valid[s_render_page] ||
                                 s_reading_only_page_status_lamps[s_render_page] != cur_status ||
-                                strcmp(s_reading_only_page_active_status[s_render_page], s_frame.active_status) != 0 ||
+                                strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0 ||
                                 strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0 ||
                                 strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
-              uint8_t cur_info_lamps2 = (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) |
-                                                      (s_frame.status_active[6u] ? 2u : 0u) |
-                                                      (s_frame.status_active[11u] ? 4u : 0u));
-              bool info_need = !s_reading_only_page_info_valid[s_render_page] ||
-                               strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
-                               strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
-                               strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
-                               strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
-                               s_reading_only_page_info_lamps[s_render_page] != cur_info_lamps2;
+               bool info_need = s_trig_dot_pending ||
+                                !s_reading_only_page_info_valid[s_render_page] ||
+                                strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
+                                strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
+                                strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
+                                strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
+                                s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
             if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
             else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
             else s_reading_only_stage = READING_ONLY_CLEAR;
@@ -5402,6 +5561,21 @@ static void update_blink(void)
 {
     uint32_t now = HAL_GetTick();
 
+#if K2000_READING_ONLY_BASELINE
+    /* TRIGGER dot blink (ADR-0004): independent 250 ms phase. On toggle while
+     * TRIG is active, force a frame so the INFO stage repaints the dot; the
+     * INFO fast path then costs a single 8x8 fill. */
+    if ((uint32_t)(now - s_trig_dot_tick) >= 250u)
+    {
+        s_trig_dot_tick = now;
+        s_trig_dot_phase = !s_trig_dot_phase;
+        if (status_bar_active(&s_ui.status, 0x08u, 0x08u))
+        {
+            s_reading_only_dirty = true;
+            s_trig_dot_pending = true;
+        }
+    }
+#endif
     if (!s_ui.blink)
     {
         s_blink_visible = true;
