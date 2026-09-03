@@ -28,7 +28,7 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 <script>
 "use strict";
 const UI_W=960,UI_H=320;
- const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,rangeLine1Y:25,rangeLine2Y:37,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:0,plotY:192,plotW:960,plotH:128,plotBgY:192,plotBgH:128,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288,badgePadX:10,yellowLineH:2,badgeX:0};
+ const L={statusY:0,statusH:24,infoBarY:24,infoBarH:26,infoBarX:12,infoBarW:928,readingY:50,readingH:142,trendY:192,trendH:128,readingX:12,infoRight:940,infoX:760,infoNameW:72,infoRowH:32,infoZinY:24,infoRangeY:24,infoRateY:24,infoStatusY:24,rangeLine1Y:25,rangeLine2Y:37,chartPanelY:192,chartPanelH:128,plotDividerY:192,plotDividerH:4,plotX:96,plotY:218,plotW:864,plotH:78,plotBgY:218,plotBgH:78,trendHeaderY:192,trendHeaderH:26,trendTaskY:296,trendTaskH:24,trendGutterW:96,yAxisX:0,yAxisW:96,yAxisY:192,yAxisH:128,xAxisX:96,xAxisW:624,xAxisY:298,xAxisH:22,statsX:732,statsW:208,statsNameW:60,statsRowH:30,statsRangeY:198,statsMaxY:228,statsMinY:258,statsAvgY:288,badgePadX:10,yellowLineH:2,badgeX:0};
 const COLORS={bg:"#070D0F",bar:"#162126",bar2:"#24333A",green:"#00E676",greenDim:"#0B3A1F",cyan:"#4DD0E1",white:"#ECEFF1",muted:"#607D8B",grid:"#2A3F45",red:"#FF453A",yellow:"#FFD600",yellowDim:"#F2C000"};
 const X_LABELS=["10.00s","7.50s","5.00s","2.50s","0.00s"];
 const STATUS=["REM","TALK","LSTN","SRQ","BUFFER: IDLE (1024 MAX)","GPIB: 16","CONT","TRIG"];
@@ -118,9 +118,24 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
     digits(ctx,value,dx,ry,color);
   }
   // 右侧已无信息竖栏，读数可延伸至 928px
-  // 底部趋势带（ADR-0006）：整条黑底 + 曲线 + 末端圆点，无轴/网格/统计
-  ctx.fillStyle=COLORS.bg;ctx.fillRect(0,L.trendY,UI_W,L.trendH);
+  // 底部趋势带（ADR-0007）：header（Trend＋档位范围＋MAX/AVG/MIN）＋黑绘图＋纵指示线＋任务栏流逝时间＋左纵轴标签
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.trendY,UI_W,L.trendH);
+  ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotY,L.plotW,L.plotH);
+  for(let gi=0;gi<5;gi++){const gx=L.plotX+gi*L.plotW/4;ctx.fillStyle=COLORS.grid;ctx.fillRect(gx,L.plotY,1,L.plotH);}
    const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
+  const axisUnit=demo.on?demoAxisUnit():"V";
+  const axisScale=1;
+  const niceStep=(span)=>{let s=span/3,p=1;while(s>=10){s/=10;p*=10}while(s<1){s*=10;p/=10}return (s<=1?p:s<=2?2*p:s<=5?5*p:10*p)};
+  const scaledLo=ylo*axisScale,scaledHi=yhi*axisScale,step=niceStep(scaledHi-scaledLo),top=Math.ceil(scaledHi/step)*step;
+  const fmtAxis=(v)=>Math.abs(v)>=100?v.toFixed(0):Math.abs(v)>=10?v.toFixed(1):Math.abs(v)>=1?v.toFixed(2):v.toFixed(3);
+  const trimNum=(s)=>s.includes(".")?s.replace(/0+$/,"").replace(/\.$/,""):s;
+  const rangeTxt="±"+trimNum(fmtAxis(top))+axisUnit.replace(/(DC|AC)$/,"");
+  const dAvg=data.reduce((a,b)=>a+b,0)/data.length;
+  const hCells=[["MAX "+fmtAxis(hi)+axisUnit,"#ECEFF1"],["AVG "+fmtAxis(dAvg)+axisUnit,"#ECEFF1"],["MIN "+fmtAxis(lo)+axisUnit,"#ECEFF1"],[rangeTxt,"#00E676"]];
+  text(ctx,"Trend",12,L.trendHeaderY+1,COLORS.white);
+  {let hx=960-12;for(let k=3;k>=0;k--){const w=hCells[k][0].length*TEXT_W;hx-=w;if(k<3)hx-=18;if(hx<200)break;text(ctx,hCells[k][0],hx,L.trendHeaderY+1,hCells[k][1]);}}
+  for(let i=0;i<3;i++){const s=fmtAxis(top-step*i)+axisUnit;const ay=L.plotY+i*L.plotH/2;let ty=Math.round(ay-TEXT_H/2);ty=Math.max(L.plotY,Math.min(L.plotY+L.plotH-TEXT_H,ty));const tx=L.trendGutterW-s.length*TEXT_W-4;text(ctx,s,Math.max(0,tx),ty,COLORS.cyan);}
+  ["10s","7.5s","5s","2.5s","0s"].forEach((s,gi)=>{const gx=L.plotX+gi*L.plotW/4;let lx=Math.round(gx-s.length*TEXT_W/2);lx=Math.max(L.plotX,Math.min(L.plotX+L.plotW-s.length*TEXT_W,lx));text(ctx,s,lx,L.trendTaskY,COLORS.cyan);});
   ctx.lineWidth=2; ctx.lineCap="round"; ctx.lineJoin="round";
  for(const [color,dy,alpha] of [[COLORS.greenDim,-1,0.0],[COLORS.greenDim,1,0.0],[COLORS.green,0,1.0]]){
    if(alpha===0) continue;
