@@ -3606,11 +3606,40 @@ static void row1_status_text(char *out, uint8_t size)
     }
 }
 
-/* Red badge rect end (brand text + right pad), text itself stays at x12. */
+/* Brand split (ADR-0004): only "KEITHLEY" rides the red badge (black text);
+ * the "2000" tail stays plain white on BAR. Brand is "AAA...A TAIL", split at
+ * the first space; no space = whole brand on red (fallback). */
+static size_t row1_brand_head_len(const char *brand)
+{
+    const char *sp = brand != 0 ? strchr(brand, ' ') : 0;
+    return sp != 0 ? (size_t)(sp - brand) : strlen(brand);
+}
+
+static const char *row1_brand_tail(const char *brand)
+{
+    const char *sp = brand != 0 ? strchr(brand, ' ') : 0;
+    if (sp == 0) return "";
+    while (*sp == ' ') sp++;
+    return sp;
+}
+
+/* Red rect end for a brand string (text at x12 + head + right pad). */
+static uint16_t row1_red_end_for(const char *brand)
+{
+    return (uint16_t)(12u + row1_brand_head_len(brand) * FONT_TEXT_WIDTH +
+                      MAIN_DISPLAY_BADGE_PAD_X);
+}
+
+/* Full brand text end (red end + gap + tail), anchors sep + info lamps. */
+static uint16_t row1_text_end_for(const char *brand)
+{
+    return (uint16_t)(row1_red_end_for(brand) + MAIN_DISPLAY_BRAND_TAIL_GAP +
+                      strlen(row1_brand_tail(brand)) * FONT_TEXT_WIDTH);
+}
+
 static uint16_t row1_brand_end_x(void)
 {
-    return (uint16_t)(12u + strlen(s_frame.brand) * FONT_TEXT_WIDTH +
-                      MAIN_DISPLAY_BADGE_PAD_X);
+    return row1_text_end_for(s_frame.brand);
 }
 
 static uint16_t row1_info_x(void)
@@ -3651,18 +3680,18 @@ static bool reading_only_render_status_bar(void)
         } else { idx++; }
     }
     if (idx == 1u) {
-        /* Red brand badge (ADR-0004): solid red rect + black text, same
-         * inverse language as the function badge. */
+        /* Red KEITHLEY badge (ADR-0004): solid red rect under the head only;
+         * the "2000" tail is drawn plain in the next step. */
         if (!brand_dirty) { idx = 4u; } else {
-            uint16_t w = row1_brand_end_x();
-            uint16_t ow = (uint16_t)(12u + strlen(s_reading_only_page_brand[s_render_page]) *
-                                     FONT_TEXT_WIDTH + MAIN_DISPLAY_BADGE_PAD_X);
-            uint16_t fw = w > ow ? w : ow;
-            /* Clear covers badge + separator + gap so a narrower brand
-             * cannot leave stale pixels behind. */
-            fw = (uint16_t)(fw + MAIN_DISPLAY_ROW1_SEP_GAP +
+            uint16_t w = row1_red_end_for(s_frame.brand);
+            uint16_t fw = row1_text_end_for(s_frame.brand);
+            uint16_t ofw = row1_text_end_for(s_reading_only_page_brand[s_render_page]);
+            uint16_t cw = fw > ofw ? fw : ofw;
+            /* Clear covers badge + tail + separator + gap so a narrower
+             * brand cannot leave stale pixels behind. */
+            cw = (uint16_t)(cw + MAIN_DISPLAY_ROW1_SEP_GAP +
                             MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
-            if (ui_fill_rect(0u, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(0u, 0u, cw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
             if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
             idx++;
             return false;
@@ -3670,7 +3699,19 @@ static bool reading_only_render_status_bar(void)
     }
     if (idx == 2u) {
         if (!brand_dirty) { idx++; } else {
-            if (!ui_draw_text(12u, 0u, s_frame.brand, MAIN_DISPLAY_COLOR_BRAND_TEXT)) return false;
+            /* Sequential single-string draws: the second starts only after
+             * the first job completes (job inactive again), so the shared
+             * resumable job is never re-tasked mid-flight. */
+            char head[MAIN_DISPLAY_META_MAX];
+            size_t n = row1_brand_head_len(s_frame.brand);
+            uint16_t tail_x = (uint16_t)(row1_red_end_for(s_frame.brand) +
+                                         MAIN_DISPLAY_BRAND_TAIL_GAP);
+            if (n >= sizeof(head)) n = sizeof(head) - 1u;
+            memcpy(head, s_frame.brand, n);
+            head[n] = '\0';
+            if (!ui_draw_text(12u, 0u, head, MAIN_DISPLAY_COLOR_BRAND_TEXT)) return false;
+            if (!ui_draw_text(tail_x, 0u, row1_brand_tail(s_frame.brand),
+                              MAIN_DISPLAY_COLOR_WHITE)) return false;
             idx++;
             return false;
         }
@@ -3699,8 +3740,7 @@ static bool reading_only_render_status_bar(void)
          * 并集擦除会抹掉刚画好的品牌只剩 "KE"——此时只擦新范围。 */
         if (ow > 0u)
         {
-            uint16_t old_bw = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
-            uint16_t oo = (uint16_t)(12u + old_bw + MAIN_DISPLAY_BADGE_PAD_X +
+            uint16_t oo = (uint16_t)(row1_text_end_for(s_reading_only_page_brand[s_render_page]) +
                                      MAIN_DISPLAY_ROW1_SEP_GAP +
                                      MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
             if (oo < ox) ox = oo;

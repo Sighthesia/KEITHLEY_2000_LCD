@@ -25,7 +25,7 @@ check("header brand and runtime",html.includes("KEITHLEY 2000")&&html.includes("
 check("no horizontal info-bar hairlines",!html.includes("L.infoBarY,960,1")&&!html.includes("L.infoBarH-1,960"));
 check("row1 de-duplicated left lamps",html.includes('["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]')&&!html.includes("STATUS.forEach"));
 check("row1 brand separator",html.includes("brandEnd+10")&&html.includes("Math.floor((L.statusH-12)/2)"));
-check("red brand badge",html.includes("ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,brandEnd"));
+check("red KEITHLEY-only badge",html.includes("ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,redEnd")&&html.includes('text(ctx,tail,x2000,0,COLORS.white)'));
 check("rate half-height section divider",html.includes("Math.floor((L.infoBarH-12)/2)"));
 check("trigger always shown",html.includes('"TRIGGER",trigX,cellY,trigOn?'));
 check("row2 stats-style cells + trigger",html.includes("trigSepX")&&html.includes("TRIGGER")&&html.includes("trigDotX"));
