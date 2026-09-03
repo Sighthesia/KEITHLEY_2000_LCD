@@ -3678,11 +3678,15 @@ static bool reading_only_render_status_bar(void)
         uint16_t ox = nx;
         row1_status_text(cur, sizeof(cur));
         ow = (uint16_t)(strlen(s_reading_only_page_row1[s_render_page]) * FONT_TEXT_WIDTH);
-        /* Old origin moves with brand width; erase the union of both extents. */
+        /* Old origin moves with brand width; erase the union of both extents.
+         * 首刷边界(ADR-0004§Bug)：缓存为空时旧原点无意义（按空品牌算出 x33），
+         * 并集擦除会抹掉刚画好的品牌只剩 "KE"——此时只擦新范围。 */
+        if (ow > 0u)
         {
             uint16_t old_bw = (uint16_t)(strlen(s_reading_only_page_brand[s_render_page]) * FONT_TEXT_WIDTH);
-            ox = (uint16_t)(12u + old_bw + MAIN_DISPLAY_ROW1_SEP_GAP +
-                            MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+            uint16_t oo = (uint16_t)(12u + old_bw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                                     MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+            if (oo < ox) ox = oo;
         }
         nw = (uint16_t)(strlen(cur) * FONT_TEXT_WIDTH);
         fx = ox < nx ? ox : nx;
