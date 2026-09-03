@@ -3681,8 +3681,8 @@ static bool reading_only_render_status_bar(void)
     }
     if (idx == 1u) {
         /* Red KEITHLEY badge (ADR-0004): solid red rect under the head only;
-         * the "2000" tail is drawn plain in the next step. */
-        if (!brand_dirty) { idx = 4u; } else {
+         * the "2000" tail is drawn plain two steps later. */
+        if (!brand_dirty) { idx = 5u; } else {
             uint16_t w = row1_red_end_for(s_frame.brand);
             uint16_t fw = row1_text_end_for(s_frame.brand);
             uint16_t ofw = row1_text_end_for(s_reading_only_page_brand[s_render_page]);
@@ -3698,25 +3698,31 @@ static bool reading_only_render_status_bar(void)
         }
     }
     if (idx == 2u) {
+        /* 黑屏教训：一步内连续两次 ui_draw_text 会饿死——作业完成后的再次
+         * 调用被当成新任务从头重绘，idx 永不推进、帧永不提交。头/尾必须各
+         * 占一步（ADR-0004§Bug2）。 */
         if (!brand_dirty) { idx++; } else {
-            /* Sequential single-string draws: the second starts only after
-             * the first job completes (job inactive again), so the shared
-             * resumable job is never re-tasked mid-flight. */
             char head[MAIN_DISPLAY_META_MAX];
             size_t n = row1_brand_head_len(s_frame.brand);
-            uint16_t tail_x = (uint16_t)(row1_red_end_for(s_frame.brand) +
-                                         MAIN_DISPLAY_BRAND_TAIL_GAP);
             if (n >= sizeof(head)) n = sizeof(head) - 1u;
             memcpy(head, s_frame.brand, n);
             head[n] = '\0';
             if (!ui_draw_text(12u, 0u, head, MAIN_DISPLAY_COLOR_BRAND_TEXT)) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 3u) {
+        if (!brand_dirty) { idx++; } else {
+            uint16_t tail_x = (uint16_t)(row1_red_end_for(s_frame.brand) +
+                                         MAIN_DISPLAY_BRAND_TAIL_GAP);
             if (!ui_draw_text(tail_x, 0u, row1_brand_tail(s_frame.brand),
                               MAIN_DISPLAY_COLOR_WHITE)) return false;
             idx++;
             return false;
         }
     }
-    if (idx == 3u) {
+    if (idx == 4u) {
         if (!brand_dirty) { idx++; } else {
             if (ui_fill_rect((uint16_t)(row1_brand_end_x() + MAIN_DISPLAY_ROW1_SEP_GAP),
                              (uint16_t)((MAIN_DISPLAY_STATUS_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
@@ -3726,7 +3732,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 4u) {
+    if (idx == 5u) {
         /* Left-aligned de-duplicated lamps (ADR-0004): single string keeps the
          * resumable bitmap job safe (one job, one string per step). */
         char cur[MAIN_DISPLAY_META_MAX];
@@ -3759,7 +3765,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 5u) {
+    if (idx == 6u) {
         if (!temp_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
@@ -3776,7 +3782,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 6u) {
+    if (idx == 7u) {
         if (!uptime_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
@@ -3795,7 +3801,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 7u) { idx++; }
+    if (idx == 8u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
     strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
