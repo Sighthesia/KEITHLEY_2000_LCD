@@ -54,7 +54,7 @@ function render(){
   if(active)text(ctx,active,(960-active.length*TEXT_W)/2,0,COLORS.green);
   const runtime="+25.0°C  "+demoUptime();
   text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
-  // 第二行：黄底黑字档位标识（模仿图示“DC Voltage” Badge）+ 上下黄色描边
+  // 第二行：黄底黑字档位标识（模仿图示“DC Voltage” Badge）+ InfoBar下沿单条黄色分隔线（ADR-0003：禁止屏底黄线，越界进X轴沟槽）
    ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.infoBarY,960,L.infoBarH);
    const range=demo.on?demo.rangeVal:"DC Voltage";
    const rangeW=range.length*TEXT_W, badgeW=Math.max(80,Math.min(220, rangeW+2*L.badgePadX));
@@ -64,9 +64,8 @@ function render(){
    let bx=L.badgeX+badgeW+18;
    const meta=["Zin --","Range "+(demo.on?demo.rangeVal:"AUTO"),"Rate "+(demo.on?demo.rateVal:"500 Read/s"),"FILT","REL","MATH"];
    for(const s of meta){text(ctx,s,bx,L.rangeLine1Y,s.startsWith("FILT")||s.startsWith("REL")||s.startsWith("MATH")?COLORS.green:COLORS.white);bx+=s.length*TEXT_W+18}
-   // 上下黄色描边（与固件一致：InfoBar下沿 + 屏幕底边）
+   // 单条黄色分隔线（与固件一致：仅InfoBar下沿；屏底禁止，见ADR-0003）
    ctx.fillStyle=COLORS.yellow;ctx.fillRect(0,L.infoBarY+L.infoBarH,960,L.yellowLineH);
-   ctx.fillRect(0,UI_H-L.yellowLineH,960,L.yellowLineH);
 const overflow=document.getElementById("overflow").checked;const value=overflow?"OVERFLOW":document.getElementById("reading").value;const unit=normalizeUnit(document.getElementById("unit").value);
   const color=overflow?COLORS.red:COLORS.green;
   let base=unit,suffix="";

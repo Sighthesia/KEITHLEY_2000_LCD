@@ -3713,7 +3713,9 @@ static bool reading_only_render_info_panel(void)
             // push would be needed, logged for framework verification
         }
     }
-    /* Yellow badge档位标识: 黄底黑字(仿图 “DC Voltage” 横条) + 上下黄色描边。 */
+    /* Yellow badge档位标识: 黄底黑字(仿图 “DC Voltage” 横条) + InfoBar下沿单条黄色分隔线。
+     * 边界约束(ADR-0003): INFO阶段只允许触碰 y24..51(InfoBar+顶部分隔线)；
+     * 禁止绘制屏幕底边黄线——它落在 X轴沟槽(298..319)内，会覆盖X轴标签并越界写TREND带。 */
     if (s_reading_only_page_info_valid[s_render_page] &&
         strcmp(s_reading_only_page_function[s_render_page], s_frame.function) == 0 &&
         strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) == 0 &&
@@ -3779,12 +3781,6 @@ static bool reading_only_render_info_panel(void)
     }
     if (idx == 12u) {
         if (ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y + MAIN_DISPLAY_INFO_BAR_H,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_YELLOW_BORDER) != LT7680_OK) return false;
-        idx++; return false;
-    }
-    if (idx == 13u) {
-        if (ui_fill_rect(0u, MAIN_DISPLAY_UI_HEIGHT - MAIN_DISPLAY_YELLOW_LINE_H,
                          MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
                          MAIN_DISPLAY_COLOR_YELLOW_BORDER) != LT7680_OK) return false;
         idx++; return false;
