@@ -363,6 +363,12 @@ static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
+/* Shared stat-slot snapshot: the two pages build one frame apart and the
+ * sliding window would otherwise mint different last digits per page —
+ * alternating flips then flicker between two near-identical values. First
+ * page to build captures; the sibling repaints from the snapshot. */
+static char s_trend_stat_snapshot[3][24];
+static bool s_trend_stat_snap_valid;
 
 static uint16_t s_reading_only_trend_column;
 static bool s_reading_only_trend_bg_failed;
@@ -388,6 +394,7 @@ static void reading_only_invalidate_trend_pages(void)
 
     s_trend_scroll_ms = 0u;
     s_reading_only_trend_column = 0u;
+    s_trend_stat_snap_valid = false;
     for (page = 0u; page < 2u; page++)
     {
         s_reading_only_page_trend_bg_valid[page] = false;
@@ -4075,47 +4082,45 @@ static uint16_t trend_grid_x(uint8_t gi)
                       (uint32_t)gi * MAIN_DISPLAY_PLOT_W / 4u);
 }
 
-/* Bare stat value: strip the axis unit suffix, cap at 8 chars ("0.40mVAC"
- * with "mVAC" -> "0.40"). Empty input renders as "--". */
-static void trend_stat_bare(char *out, uint8_t size, const char *text,
-                            const char *unit)
-{
-    size_t len = text != 0 ? strlen(text) : 0u;
-    size_t ulen = unit != 0 ? strlen(unit) : 0u;
-    size_t n = len;
-    uint8_t i = 0u;
-
-    if (out == 0 || size == 0u) return;
-    if (ulen > 0u && len > ulen &&
-        memcmp(text + len - ulen, unit, ulen) == 0)
-        n = len - ulen;
-    if (n > MAIN_DISPLAY_TREND_STAT_CHARS) n = MAIN_DISPLAY_TREND_STAT_CHARS;
-    if (n + 1u > size) n = size - 1u;
-    while (i < n) { out[i] = text[i]; i++; }
-    out[n] = '\0';
-    if (n == 0u && size > 2u) memcpy(out, "--", 3u);
-}
-
-/* Fixed header slot k (0=MAX left, 1=AVG mid, 2=MIN right): "MAX <bare>".
- * Frame is stable across a pass; rebuilt per visit (pure RAM). */
+/* Fixed header slot k (0=MAX left, 1=AVG mid, 2=MIN right): "MAX <v><unit>".
+ * Values come from the shared snapshot (see s_trend_stat_snapshot), never
+ * straight from the sliding window — otherwise the two pages mint different
+ * last digits one frame apart and every flip flickers. */
 static void trend_header_slot(uint8_t k, char *out, uint8_t size)
 {
-    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
-    const char *vals[3];
-    char bare[MAIN_DISPLAY_TREND_STAT_CHARS + 1u];
     uint8_t n = 0u;
     const char *p;
 
     if (out == 0 || size == 0u) return;
     out[0] = '\0';
-    if (k >= 3u) return;
+    if (k >= 3u || !s_trend_stat_snap_valid) return;
+    for (p = s_trend_stat_snapshot[k]; *p != '\0' && n + 1u < size; p++)
+        out[n++] = *p;
+    out[n] = '\0';
+}
+
+/* Capture the slot snapshot from the live frame (unit included). Called
+ * once per background build, before the slot steps paint from it. */
+static void trend_stat_snapshot_capture(void)
+{
+    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
+    const char *vals[3];
+    uint8_t k;
+
     vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
     vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
     vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
-    for (p = tags[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
-    trend_stat_bare(bare, sizeof(bare), vals[k], s_frame.trend_axis_unit);
-    for (p = bare; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
-    out[n] = '\0';
+    for (k = 0u; k < 3u; k++)
+    {
+        uint8_t n = 0u;
+        const char *p;
+        for (p = tags[k]; *p != '\0' && n + 1u < sizeof(s_trend_stat_snapshot[k]); p++)
+            s_trend_stat_snapshot[k][n++] = *p;
+        for (p = vals[k]; *p != '\0' && n + 1u < sizeof(s_trend_stat_snapshot[k]); p++)
+            s_trend_stat_snapshot[k][n++] = *p;
+        s_trend_stat_snapshot[k][n] = '\0';
+    }
+    s_trend_stat_snap_valid = true;
 }
 
 /* Elapsed-time label for gridline gi: window fractions 1..0 ("10s".."0s"). */
@@ -4190,6 +4195,10 @@ static bool reading_only_render_trend_background(void)
     {
         return true;
     }
+    /* First page to rebuild captures the stat snapshot; the sibling
+     * repaints from it one frame later — identical digits, no flicker. */
+    if (!s_trend_stat_snap_valid)
+        trend_stat_snapshot_capture();
 
     if (idx == 0u)
     {

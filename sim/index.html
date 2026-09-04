@@ -136,9 +136,8 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.trendY+2,80,L.trendHeaderH-2);
   text(ctx,"Trend",10,L.trendY+2,"#000000");
   for(let gi=0;gi<5;gi++){const gx=L.plotX+gi*L.plotW/4;ctx.fillStyle=COLORS.grid;ctx.fillRect(gx,L.plotY,1,L.plotH);}
-  // 三固定槽位（左中右）：名＋去单位裸值（≤8字），位置永不动（data/axis/rangeTxt/dAvg 见行2前）
-  const bare=(s)=>{const t=String(s||"");return (axisUnit&&t.endsWith(axisUnit)?t.slice(0,-axisUnit.length):t).slice(0,8)||"--";};
-  const hStats=["MAX "+bare(fmtAxis(hi)+axisUnit),"AVG "+bare(fmtAxis(dAvg)+axisUnit),"MIN "+bare(fmtAxis(lo)+axisUnit)];
+  // 三固定槽位（左中右）：名＋带单位全值（与固件快照同内容），位置永不动（data/axis/rangeTxt/dAvg 见行2前）
+  const hStats=["MAX "+fmtAxis(hi)+axisUnit,"AVG "+fmtAxis(dAvg)+axisUnit,"MIN "+fmtAxis(lo)+axisUnit];
   const slotX=[120,420,720], slotY=L.trendY+2;
   hStats.forEach((s,k)=>text(ctx,s,slotX[k],slotY,COLORS.white));
   for(let i=0;i<3;i++){const s=fmtAxis(top-step*i)+axisUnit;const ay=L.plotY+i*L.plotH/2;let ty=Math.round(ay-TEXT_H/2);ty=Math.max(L.plotY,Math.min(L.plotY+L.plotH-TEXT_H,ty));const tx=L.trendGutterW-s.length*TEXT_W-4;text(ctx,s,Math.max(0,tx),ty,COLORS.cyan);}
