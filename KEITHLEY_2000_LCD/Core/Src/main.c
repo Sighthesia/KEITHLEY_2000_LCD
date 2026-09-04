@@ -137,7 +137,11 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * cursor storms at 50 buckets/s, single buckets get min/max-stretched ten
  * times over, and slots re-render several times per frame (visible
  * flicker). 10 Hz is the validated value (AGENTS 2026-08-22). */
-#define K2000_DEMO_INPUT_HZ 500u
+/* Third regression of this knob (08-22, 08-30, now): 500 feeds a full reading
+ * frame every 2 ms — trend cursor storms at 50 buckets/s, every TREND visit
+ * burns the 48-slot rescan budget incl. slow MRWDP peeks, and the main loop
+ * turn stretches past 100 ms so the reading visibly freezes. Keep 10. */
+#define K2000_DEMO_INPUT_HZ 10u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -4892,6 +4896,24 @@ static void reading_only_render(void)
         uint32_t now = HAL_GetTick();
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
+
+        /* Yield: a newer reading arrived while a multi-visit trend pass
+         * (bg rebuild / rescan / chrome) is still running. Suspend the pass
+         * — bg/chrome idx, sweep cursor and dot state all persist in
+         * statics — repaint the reading band on the same hidden page, and
+         * resume via the SUFFIX→TREND edge (the scroll shortcut is dead:
+         * s_trend_scroll_ms is always 0). Coalesce the generation so a
+         * continuous stream suspends at most once per display period and
+         * the trend can never starve. */
+        if (s_reading_only_generation != s_reading_only_frame_generation &&
+            (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS)
+        {
+            s_reading_only_frame_generation = s_reading_only_generation;
+            s_reading_only_value_index = 0u;
+            s_display_due_tick = now;
+            s_reading_only_stage = READING_ONLY_CLEAR;
+            return;
+        }
 
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {

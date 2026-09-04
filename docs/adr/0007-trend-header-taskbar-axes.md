@@ -59,6 +59,12 @@
 - 单位切换（V↔mV、V↔Ω、demo 每 20 秒轮换档位）会清空 buffer（`trend_buffer_add` 按显示单位身份重置，旧单位曲线在新刻度下是谎言）＋黑底重建＋10 秒窗口缓慢重填——看到的是"灭隔一段时间重绘"。同单位内的换挡/量程漂移只渐进重扫，不黑闪。
 - 如需同量纲（V↔mV）不断线，需 buffer 保留基值＋显示重定标，属于另一需求，未做。
 
+## 500Hz 第三次回归＋TREND 让行
+
+- `K2000_DEMO_INPUT_HZ` 又被改回 500（第三次）：每 2ms 一个读数帧，sweep 每轮拉满 48 槽预算（含慢速 MRWDP 回读），主循环单轮破百毫秒→读数冻结、趋势翻腾。改回 10Hz；判据：`input_hz=10` 且 `missed=0`，先查此再查渲染器。
+- 结构补强：TREND 入口对新读数让行——快照 generation 合并、中断后经 SUFFIX→TREND 恢复（bg/chrome idx、sweep 游标、圆点状态全在静态量里续跑），33ms 节流保证趋势不饿死。换挡全量重建期间读数照常显示。
+- 换挡全字体重绘本身是必要的（新单位全部文字都变），让行保证它不再挡住读数。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）
