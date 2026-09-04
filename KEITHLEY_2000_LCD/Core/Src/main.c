@@ -2938,8 +2938,7 @@ static void trend_sweep_wipe_cycle(void)
     {
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
-            (void)ui_draw_line(trend_grid_x(gi),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+            (void)ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
                                trend_grid_x(gi),
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                                MAIN_DISPLAY_COLOR_GRID);
@@ -4076,6 +4075,49 @@ static uint16_t trend_grid_x(uint8_t gi)
                       (uint32_t)gi * MAIN_DISPLAY_PLOT_W / 4u);
 }
 
+/* Bare stat value: strip the axis unit suffix, cap at 8 chars ("0.40mVAC"
+ * with "mVAC" -> "0.40"). Empty input renders as "--". */
+static void trend_stat_bare(char *out, uint8_t size, const char *text,
+                            const char *unit)
+{
+    size_t len = text != 0 ? strlen(text) : 0u;
+    size_t ulen = unit != 0 ? strlen(unit) : 0u;
+    size_t n = len;
+    uint8_t i = 0u;
+
+    if (out == 0 || size == 0u) return;
+    if (ulen > 0u && len > ulen &&
+        memcmp(text + len - ulen, unit, ulen) == 0)
+        n = len - ulen;
+    if (n > MAIN_DISPLAY_TREND_STAT_CHARS) n = MAIN_DISPLAY_TREND_STAT_CHARS;
+    if (n + 1u > size) n = size - 1u;
+    while (i < n) { out[i] = text[i]; i++; }
+    out[n] = '\0';
+    if (n == 0u && size > 2u) memcpy(out, "--", 3u);
+}
+
+/* Fixed header slot k (0=MAX left, 1=AVG mid, 2=MIN right): "MAX <bare>".
+ * Frame is stable across a pass; rebuilt per visit (pure RAM). */
+static void trend_header_slot(uint8_t k, char *out, uint8_t size)
+{
+    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
+    const char *vals[3];
+    char bare[MAIN_DISPLAY_TREND_STAT_CHARS + 1u];
+    uint8_t n = 0u;
+    const char *p;
+
+    if (out == 0 || size == 0u) return;
+    out[0] = '\0';
+    if (k >= 3u) return;
+    vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
+    vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
+    vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
+    for (p = tags[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    trend_stat_bare(bare, sizeof(bare), vals[k], s_frame.trend_axis_unit);
+    for (p = bare; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    out[n] = '\0';
+}
+
 /* Elapsed-time label for gridline gi: window fractions 1..0 ("10s".."0s"). */
 static void trend_time_text(uint8_t gi, char *out, uint8_t size)
 {
@@ -4110,8 +4152,7 @@ static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1)
     {
         uint16_t gx = trend_grid_x(gi);
         if (gx < x0 || gx > x1) continue;
-        if (ui_draw_line(gx,
-                         (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+        if (ui_draw_line(gx, MAIN_DISPLAY_PLOT_Y,
                          gx, (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                          MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
             return false;
@@ -4127,28 +4168,6 @@ static bool reading_only_render_trend_background(void)
     static uint8_t last_page = 0xFFu;
     static char pending_unit[TREND_UNIT_ID_MAX];
     const char *unit = trend_buffer_display_unit(&s_trend);
-    /* Header right cells, rebuilt every visit (pure RAM, frame is stable
-     * across the pass): "MAX <v>" / "AVG <v>" / "MIN <v>" / range. */
-    static char cells[4][24];
-    {
-        static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
-        const char *vals[3];
-        uint8_t k;
-        vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
-        vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
-        vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
-        for (k = 0u; k < 3u; k++)
-        {
-            uint8_t n = 0u;
-            const char *p;
-            for (p = tags[k]; *p != '\0' && n + 1u < sizeof(cells[k]); p++)
-                cells[k][n++] = *p;
-            for (p = vals[k]; *p != '\0' && n + 1u < sizeof(cells[k]); p++)
-                cells[k][n++] = *p;
-            cells[k][n] = '\0';
-        }
-        trend_range_text(cells[3], sizeof(cells[3]));
-    }
 
     if (last_page != s_render_page)
     {
@@ -4202,9 +4221,7 @@ static bool reading_only_render_trend_background(void)
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
         {
-            /* Verticals stop below the green top line (ADR-0007). */
-            if (ui_draw_line(trend_grid_x(gi),
-                             (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+            if (ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
                              trend_grid_x(gi),
                              (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                              MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
@@ -4218,18 +4235,20 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 3u)
     {
-        /* Trend badge in function-badge language (green rect + black text)
-         * plus the green line on the plot top edge. */
+        /* Green line on the Trend TOP edge; badge + texts live in the
+         * content band below it (line first, badge over it). */
         if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
-                         MAIN_DISPLAY_TREND_BADGE_W, MAIN_DISPLAY_TREND_HEADER_H,
-                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK)
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
         }
-        if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK)
+        if (ui_fill_rect(0u,
+                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+                         MAIN_DISPLAY_TREND_BADGE_W,
+                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
+                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
@@ -4239,44 +4258,40 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 4u)
     {
-        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, MAIN_DISPLAY_TREND_HEADER_Y,
+        uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, ty,
                           "Trend", MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
         idx++;
         return false;
     }
-    if (idx >= 5u && idx <= 8u)
+    if (idx >= 5u && idx <= 7u)
     {
-        /* Right block, one string per step (single job rule): MAX / AVG /
-         * MIN in white, the range in green at the far right edge. */
+        /* Fixed left/mid/right slots, one string per step (single job
+         * rule): "MAX <bare>" etc. in white. Positions never move, so the
+         * auto-squeeze jitter of the sequential layout is gone. */
         uint8_t k = (uint8_t)(idx - 5u);
-        uint16_t x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - 12u);
-        uint8_t i;
-        for (i = 4u; i > k; i--)
-        {
-            x = (uint16_t)(x - strlen(cells[i - 1u]) * FONT_TEXT_WIDTH);
-            if (i - 1u > k) x = (uint16_t)(x - 18u);
-        }
-        if (!ui_draw_text(x, MAIN_DISPLAY_TREND_HEADER_Y, cells[k],
-                          k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
-                                    MAIN_DISPLAY_COLOR_WHITE)) return false;
+        uint16_t x = (uint16_t)(MAIN_DISPLAY_TREND_STAT_X0 +
+                                (uint16_t)k * MAIN_DISPLAY_TREND_STAT_PITCH);
+        uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+        char text[16];
+        trend_header_slot(k, text, sizeof(text));
+        if (!ui_draw_text(x, ty, text, MAIN_DISPLAY_COLOR_WHITE)) return false;
         idx++;
         return false;
     }
-    if (idx >= 9u && idx <= 11u)
+    if (idx >= 8u && idx <= 10u)
     {
         /* Left Y gutter: max / mid / min of the resident axis. */
-        uint8_t i = (uint8_t)(idx - 9u);
+        uint8_t i = (uint8_t)(idx - 8u);
         size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
         uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_TREND_GUTTER_W
                                ? (uint16_t)(MAIN_DISPLAY_TREND_GUTTER_W - 4u - (uint16_t)label_width)
                                : 0u;
         uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                      i * MAIN_DISPLAY_PLOT_H / 2u);
-        /* Top label parks below the green top line (ADR-0007). */
-        uint16_t top = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H);
-        uint16_t label_y = axis_y > top + FONT_TEXT_HEIGHT / 2u
+        uint16_t label_y = axis_y > MAIN_DISPLAY_PLOT_Y + FONT_TEXT_HEIGHT / 2u
                                ? (uint16_t)(axis_y - FONT_TEXT_HEIGHT / 2u)
-                               : top;
+                               : MAIN_DISPLAY_PLOT_Y;
         uint16_t bottom = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H -
                                      FONT_TEXT_HEIGHT);
         if (label_y > bottom) label_y = bottom;
@@ -4290,7 +4305,7 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx == 12u)
+    if (idx == 11u)
     {
         /* Empty window hint; a live window skips this step silently. */
         if (!s_frame.trend_has_data)
@@ -4309,10 +4324,10 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx >= 13u && idx <= 17u)
+    if (idx >= 12u && idx <= 16u)
     {
         /* Taskbar elapsed times under their gridlines, "0s" at newest. */
-        uint8_t gi = (uint8_t)(idx - 13u);
+        uint8_t gi = (uint8_t)(idx - 12u);
         char label[8];
         uint16_t gx = trend_grid_x(gi);
         uint16_t lx;
@@ -4523,6 +4538,25 @@ static void reading_only_render(void)
 #endif
         main_display_format(&s_ui, &s_frame);
         refresh_runtime_snapshot();
+        /* Row-2 Range cell shows mode + resident range ("AUTO ±10V");
+         * the trend header keeps MAX/AVG/MIN only. Content-driven repaint
+         * comes free via the existing range string compare. */
+        {
+            char range_text[16];
+            size_t rl = strlen(s_frame.range);
+            trend_range_text(range_text, sizeof(range_text));
+            if (rl + 1u + strlen(range_text) < sizeof(s_frame.range))
+            {
+                size_t i = 0u;
+                s_frame.range[rl] = ' ';
+                while (range_text[i] != '\0')
+                {
+                    s_frame.range[rl + 1u + i] = range_text[i];
+                    i++;
+                }
+                s_frame.range[rl + 1u + i] = '\0';
+            }
+        }
         if (!header_only) {
             s_reading_only_frame_generation = s_reading_only_generation;
             s_reading_only_value_index = 0u;

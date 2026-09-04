@@ -107,6 +107,11 @@
 #define MAIN_DISPLAY_TREND_GUTTER_W 96u
 /* "Trend" badge: 5 chars * 12px + 2 * 10px pad, function-badge language. */
 #define MAIN_DISPLAY_TREND_BADGE_W 80u
+/* Header stat slots: fixed left/mid/right positions, "NAME " + up to 8 bare
+ * digits (no unit). Fixed slots kill the auto-squeeze jitter. */
+#define MAIN_DISPLAY_TREND_STAT_X0 120u
+#define MAIN_DISPLAY_TREND_STAT_PITCH 300u
+#define MAIN_DISPLAY_TREND_STAT_CHARS 8u
 #define MAIN_DISPLAY_PLOT_X MAIN_DISPLAY_TREND_GUTTER_W
 #define MAIN_DISPLAY_PLOT_Y \
     (MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_TREND_HEADER_H)
