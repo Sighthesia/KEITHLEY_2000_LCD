@@ -4313,10 +4313,6 @@ static bool trend_header_sync_sibling(void)
                                 &fb) == LT7680_OK;
 }
 
-/* [DBG2] slow-frame attribution bits (removed post-diagnosis):
- * 0x01 live ran, 0x02 fresh bg rebuild, 0x04 STATUS entered, 0x08 INFO. */
-static uint8_t s_dbg2_frame_flags;
-
 /* Live stat refresh: changed glyphs only (≤6 per visit), single-page +
  * header-strip BTE sync at commit. Static chrome untouched. Snapshot moves
  * to the temp bufs per slot and publishes to the shared snapshot only
@@ -4746,7 +4742,6 @@ static void reading_only_render(void)
     if (!s_display_ready)
         return;
     if (s_reading_only_stage == READING_ONLY_STATUS) {
-        s_dbg2_frame_flags |= 0x04u;
         if (!reading_only_render_status_bar()) {
             if (s_reading_only_io_error)
                 s_reading_only_stage = READING_ONLY_CLEAR;
@@ -4771,7 +4766,6 @@ static void reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_INFO) {
-        s_dbg2_frame_flags |= 0x08u;
         if (!reading_only_render_info_panel()) {
             if (s_reading_only_io_error)
                 s_reading_only_stage = READING_ONLY_CLEAR;
@@ -4789,7 +4783,6 @@ static void reading_only_render(void)
                        (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
         if (!reading_due && !header_due && !dot_due)
             return;
-        s_dbg2_frame_flags = 0u;
         /* Header-only: still use hidden page + present to avoid visible tear, but copy reading band. */
         bool header_only = header_due && !reading_due && !dot_due;
         s_is_header_only = header_only;
@@ -5157,7 +5150,6 @@ static void reading_only_render(void)
              * re-anchors through the trend-buffer reset detector or the
              * rescale restart above and redraws the window within its
              * per-pass budget. */
-            s_dbg2_frame_flags |= 0x02u;
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
@@ -5169,7 +5161,6 @@ static void reading_only_render(void)
         /* Live stat refresh (changed glyphs only, static chrome untouched). */
         if (trend_live_due(now))
         {
-            s_dbg2_frame_flags |= 0x01u;
             if (!reading_only_render_trend_live())
                 return;
         }
@@ -5195,15 +5186,6 @@ static void reading_only_render(void)
         s_renderer.phase = RENDER_PHASE_IDLE;
         s_perf_display_commits_window++;
         perf_record_frame();
-        if (s_perf_last_frame_ms > 80u)
-        {
-            hal_uart_send_text("[DBG2] slow=");
-            perf_send_u32(s_perf_last_frame_ms);
-            hal_uart_send_text(" f=");
-            perf_send_u32(s_dbg2_frame_flags);
-            hal_uart_send_text("\r\n");
-        }
-        s_dbg2_frame_flags = 0u;
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
     }
