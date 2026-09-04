@@ -4419,6 +4419,17 @@ static bool reading_only_render_trend_background(void)
     {
         return true;
     }
+    /* Empty identity right after a rotation reset: the buffer was just
+     * cleared and no new-unit sample has landed yet. Painting now would
+     * store "" as the page unit and force a second full rebuild one frame
+     * later when the identity arrives (the ~2000-fill rotation storm).
+     * Wait it out (~2 ms) — unless virgin (boot, cached unit also empty),
+     * which must still build taskbar/verticals/badge once. */
+    if (unit[0] == '\0' &&
+        s_reading_only_page_trend_unit[s_render_page][0] != '\0')
+    {
+        return true;
+    }
     /* First page to rebuild captures the stat snapshot; the sibling
      * repaints from it one frame later — identical digits, no flicker. */
     if (!s_trend_stat_snap_valid)
