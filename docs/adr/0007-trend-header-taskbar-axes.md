@@ -72,6 +72,15 @@
 - 同样的重画量从每秒一批改为每 100ms 一小批（due 节流 100ms），单轮峰值 ~15ms→~5ms，trend 刷新不再冲出读数节拍。字形预算与快照机制不变。
 - 实测：稳态 fps 25、帧 ~12ms；轮换窗跌落一窗即恢复（demo 20s 一次，真机换挡罕见）。
 
+## 描述/Trend行1Hz卡顿诊断（diagnosing-bugs 全流程，2026-09-04）
+
+- 反馈回路：串口 `gap≥50ms` 为红（30s 抓取，确定性）；`frame-ms>80` 慢帧打 `[DBG2]f` 位归因。
+- 假设排序：H1 live 整槽差分无预算（单轮 230 填充≈66ms）＞ H2 header 秒帧 uptime 全重画（~60 填充≈20ms）＞ H3 demo 2s 状态行（偶发）＞ H4 ADC（µs，排除）。
+- 插桩实测：`live=43~73, status=19~20, bg≤20, sweep≤2, demo≤5, hdr=0`；`copy=3~4ms`（BTE 无罪）、`painted≈47/5s`。H1/H2 确认。
+- 修复：差分 4 字形预算（跨轮续跑）＋uptime 等长差分（temp 变回全量）＋live 单页画＋header 条带 BTE 同步（替代 dual 双写）；插桩清零。
+- 回归：无 host 接缝（渲染器需硬件），以串口回路为准：fps 24~32、帧 ~8ms、gap<40、无 error。
+- 结果：1Hz 卡顿消除；统计 10Hz（100ms 节流）跟随、`missed=0`。
+
 ## 1Hz 卡顿诊断（diagnosing-bugs 全流程，2026-09-04）
 
 - 反馈回路：串口 PERF `gap≥50` 为红信号（30s 抓取，确定性）。
