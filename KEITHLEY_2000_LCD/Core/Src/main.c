@@ -295,6 +295,7 @@ static uint32_t s_perf_max_frame_ms;
 static uint32_t s_perf_window_tick;
 static uint16_t s_perf_window_frames;
 static uint16_t s_perf_fps;
+
 static uint32_t s_perf_sample_count;
 static uint32_t s_perf_sample_missed;
 /* Main-loop watchdog: records the worst iteration gap plus the renderer
@@ -3657,10 +3658,16 @@ static uint16_t row1_info_x(void)
                       MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
 }
 
+static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
+                                  uint16_t x, uint16_t y, uint16_t h, uint16_t color,
+                                  char *saved, uint8_t saved_size,
+                                  uint8_t *pos, uint8_t budget);
+
 static bool reading_only_render_status_bar(void)
 {
     static const uint8_t status_bits[5] = {0u, 1u, 2u, 3u, 5u};
     static uint8_t idx;
+    static uint8_t uptime_diff_pos;
     bool brand_dirty, active_dirty, temp_dirty, uptime_dirty;
     if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
     brand_dirty = !s_reading_only_page_status_valid[s_render_page] ||
@@ -3792,11 +3799,30 @@ static bool reading_only_render_status_bar(void)
         }
     }
     if (idx == 7u) {
-        if (!uptime_dirty) { idx++; } else {
+        if (!uptime_dirty) { idx++; uptime_diff_pos = 0u; } else {
+            uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
+            uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
+            /* Steady-state uptime (fixed 8 glyphs, temp unchanged): repaint
+             * only the changed digit cells instead of erase-all + full
+             * redraw (~60 fills ≈ 20 ms every second). */
+            if (!temp_dirty &&
+                strlen(s_reading_only_page_uptime[s_render_page]) == strlen(s_frame.uptime)) {
+                if (!trend_paint_cell_diff(s_reading_only_page_uptime[s_render_page],
+                                           s_frame.uptime, ux, 0u,
+                                           MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_WHITE,
+                                           s_reading_only_page_uptime[s_render_page],
+                                           sizeof(s_reading_only_page_uptime[0]),
+                                           &uptime_diff_pos, 6u)) {
+                    if (s_reading_only_io_error) { idx = 0u; uptime_diff_pos = 0u; }
+                    return false;
+                }
+                uptime_diff_pos = 0u;
+                idx++;
+                return false;
+            }
+            uptime_diff_pos = 0u;
             if (!s_bitmap_job.active) {
-                uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
-                uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
-                uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
                 uint16_t nw = (uint16_t)(strlen(s_frame.uptime) * FONT_TEXT_WIDTH);
                 uint16_t ow = (uint16_t)(strlen(s_reading_only_page_uptime[s_render_page]) * FONT_TEXT_WIDTH);
                 uint16_t fw = nw > ow ? nw : ow;
@@ -4176,14 +4202,32 @@ static void trend_stat_snapshot_capture(void)
  * the shared resumable job, so many glyphs may complete in one visit, and
  * static chrome (BAR/badge/Trend) is never touched: no 1 Hz full-header
  * blink. Snapshot updated on success. */
+/* Budgeted per-glyph diff: paints at most `budget` changed glyphs per call
+ * (each erase+draw ≈ 9 GE fills ≈ 3 ms single-page), resuming at *pos next
+ * visit. Live uses budget 4 (≈36 fills ≈ ≤15 ms/visit worst case).
+ * Throwaway job per glyph — never touches the shared resumable job, so a
+ * suspend/resume or abort mid-cell cannot corrupt it. Snapshot written only
+ * on full completion; callers must reset *pos when starting a new string. */
 static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
                                   uint16_t x, uint16_t y, uint16_t h, uint16_t color,
-                                  char *saved, uint8_t saved_size)
+                                  char *saved, uint8_t saved_size,
+                                  uint8_t *pos, uint8_t budget)
 {
     const char *op = old_text != 0 ? old_text : "";
     const char *np = new_text != 0 ? new_text : "";
     uint16_t gi = 0u;
+    uint8_t painted = 0u;
 
+    while (gi < *pos && (*op != '\0' || *np != '\0'))
+    {
+        uint8_t oa = 1u;
+        uint8_t na = 1u;
+        if (*op != '\0') (void)text_glyph(op, &oa);
+        if (*np != '\0') (void)text_glyph(np, &na);
+        if (*op != '\0') op += oa;
+        if (*np != '\0') np += na;
+        gi++;
+    }
     while (*op != '\0' || *np != '\0')
     {
         uint8_t oa = 1u;
@@ -4206,6 +4250,11 @@ static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
                 if (!ui_draw_bitmap_slice(&job, gx, y, token, color, 0u))
                     return false;
             }
+            if (++painted >= budget)
+            {
+                *pos = (uint8_t)(gi + 1u);
+                return false;
+            }
         }
         if (*op != '\0') op += oa;
         if (*np != '\0') np += na;
@@ -4221,6 +4270,7 @@ static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
         }
         saved[n] = '\0';
     }
+    *pos = 0u;
     return true;
 }
 
@@ -4243,28 +4293,51 @@ static bool trend_live_due(uint32_t now)
     return false;
 }
 
-/* Live stat refresh: changed glyphs only, dual-page (reuses the sweep
- * gate), one slot per visit. Static chrome untouched. */
+/* Header strip sync: single BTE copy render→sibling (~3 fast ops vs ~2x
+ * per-run fills). Exact pixels, so pages stay identical without flicker. */
+static bool trend_header_sync_sibling(void)
+{
+    lt7680_rect_t fb;
+    panel_transform_ui_rect_to_fb(0u, MAIN_DISPLAY_TREND_HEADER_Y,
+                                  MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_HEADER_H,
+                                  &fb.x, &fb.y, &fb.w, &fb.h);
+    if (fb.w == 0u || fb.h == 0u) return true;
+    return lt7680_gfx_copy_rect(s_render_page,
+                                (uint8_t)(s_render_page ^ 1u),
+                                &fb) == LT7680_OK;
+}
+
+/* Live stat refresh: changed glyphs only (≤6 per visit), single-page +
+ * header-strip BTE sync at commit. Static chrome untouched. Snapshot moves
+ * to the temp bufs per slot and publishes to the shared snapshot only
+ * after a successful sync — a failed sync retries instead of diverging. */
 static bool reading_only_render_trend_live(void)
 {
     static uint8_t idx;
     static uint8_t last_page = 0xFFu;
+    static uint8_t diff_slot = 0xFFu;
+    static uint8_t diff_pos;
+    static char diff_tmp[3][24];
     uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
 
-    if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; }
-    s_trend_sweep_drawing = true;
+    if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; diff_slot = 0xFFu; diff_pos = 0u; }
+    /* Single-page text + strip copy at commit (NOT dual): dual doubles the
+     * per-run fills and was measured at 73 ms/visit. */
+    s_trend_sweep_drawing = false;
     if (idx <= 2u)
     {
         uint8_t k = (uint8_t)idx;
         uint16_t x = (uint16_t)(MAIN_DISPLAY_TREND_STAT_X0 +
                                 (uint16_t)k * MAIN_DISPLAY_TREND_STAT_PITCH);
         char text[24];
+        if (k != diff_slot) { diff_slot = k; diff_pos = 0u; }
         trend_live_cell(k, text, sizeof(text));
         if (!trend_paint_cell_diff(s_trend_stat_snapshot[k], text, x, ty,
                                    (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                                    MAIN_DISPLAY_COLOR_WHITE,
-                                   s_trend_stat_snapshot[k],
-                                   sizeof(s_trend_stat_snapshot[k])))
+                                   diff_tmp[k],
+                                   sizeof(diff_tmp[k]),
+                                   &diff_pos, 4u))
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
@@ -4273,7 +4346,12 @@ static bool reading_only_render_trend_live(void)
         return false;
     }
     s_trend_live_tick = HAL_GetTick();
-    s_trend_sweep_drawing = false;
+    if (!trend_header_sync_sibling())
+    {
+        if (s_reading_only_io_error) idx = 0u;
+        return false;
+    }
+    memcpy(s_trend_stat_snapshot, diff_tmp, sizeof(s_trend_stat_snapshot));
     idx = 0u;
     return true;
 }
