@@ -24,6 +24,11 @@
 - Y 标签只在背景重建时绘制（同单位漂移不触发重建，标签即 resident 身份，天然稳定）。
 - 空窗显示居中 `WAITING FOR DATA`；首个样本（单位变化）触发背景重建。
 
+## 后续调整：Trend 徽标＋绘图顶端绿线
+
+- `Trend` 改为仿档位徽标（绿底黑字，80px 宽 Badge，与行2档位标签同语言），不再是 header 上的白字。
+- 绘图区顶端加全幅 2px 绿线（与行2分隔线同高同色）；纵指示线、顶部 Y 标签、擦除回补、回卷重画一律从线下起算，互不覆盖。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）

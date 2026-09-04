@@ -2938,7 +2938,8 @@ static void trend_sweep_wipe_cycle(void)
     {
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
-            (void)ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
+            (void)ui_draw_line(trend_grid_x(gi),
+                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
                                trend_grid_x(gi),
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                                MAIN_DISPLAY_COLOR_GRID);
@@ -4109,7 +4110,8 @@ static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1)
     {
         uint16_t gx = trend_grid_x(gi);
         if (gx < x0 || gx > x1) continue;
-        if (ui_draw_line(gx, MAIN_DISPLAY_PLOT_Y,
+        if (ui_draw_line(gx,
+                         (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
                          gx, (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                          MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
             return false;
@@ -4200,7 +4202,9 @@ static bool reading_only_render_trend_background(void)
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
         {
-            if (ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
+            /* Verticals stop below the green top line (ADR-0007). */
+            if (ui_draw_line(trend_grid_x(gi),
+                             (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
                              trend_grid_x(gi),
                              (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                              MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
@@ -4214,16 +4218,37 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 3u)
     {
-        if (!ui_draw_text(12u, MAIN_DISPLAY_TREND_HEADER_Y, "Trend",
-                          MAIN_DISPLAY_COLOR_WHITE)) return false;
+        /* Trend badge in function-badge language (green rect + black text)
+         * plus the green line on the plot top edge. */
+        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
+                         MAIN_DISPLAY_TREND_BADGE_W, MAIN_DISPLAY_TREND_HEADER_H,
+                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK)
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
         idx++;
         return false;
     }
-    if (idx >= 4u && idx <= 7u)
+    if (idx == 4u)
+    {
+        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, MAIN_DISPLAY_TREND_HEADER_Y,
+                          "Trend", MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
+        idx++;
+        return false;
+    }
+    if (idx >= 5u && idx <= 8u)
     {
         /* Right block, one string per step (single job rule): MAX / AVG /
          * MIN in white, the range in green at the far right edge. */
-        uint8_t k = (uint8_t)(idx - 4u);
+        uint8_t k = (uint8_t)(idx - 5u);
         uint16_t x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - 12u);
         uint8_t i;
         for (i = 4u; i > k; i--)
@@ -4237,19 +4262,21 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx >= 8u && idx <= 10u)
+    if (idx >= 9u && idx <= 11u)
     {
         /* Left Y gutter: max / mid / min of the resident axis. */
-        uint8_t i = (uint8_t)(idx - 8u);
+        uint8_t i = (uint8_t)(idx - 9u);
         size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
         uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_TREND_GUTTER_W
                                ? (uint16_t)(MAIN_DISPLAY_TREND_GUTTER_W - 4u - (uint16_t)label_width)
                                : 0u;
         uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                      i * MAIN_DISPLAY_PLOT_H / 2u);
-        uint16_t label_y = axis_y > MAIN_DISPLAY_PLOT_Y + FONT_TEXT_HEIGHT / 2u
+        /* Top label parks below the green top line (ADR-0007). */
+        uint16_t top = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+        uint16_t label_y = axis_y > top + FONT_TEXT_HEIGHT / 2u
                                ? (uint16_t)(axis_y - FONT_TEXT_HEIGHT / 2u)
-                               : MAIN_DISPLAY_PLOT_Y;
+                               : top;
         uint16_t bottom = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H -
                                      FONT_TEXT_HEIGHT);
         if (label_y > bottom) label_y = bottom;
@@ -4263,7 +4290,7 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx == 11u)
+    if (idx == 12u)
     {
         /* Empty window hint; a live window skips this step silently. */
         if (!s_frame.trend_has_data)
@@ -4282,10 +4309,10 @@ static bool reading_only_render_trend_background(void)
         idx++;
         return false;
     }
-    if (idx >= 12u && idx <= 16u)
+    if (idx >= 13u && idx <= 17u)
     {
         /* Taskbar elapsed times under their gridlines, "0s" at newest. */
-        uint8_t gi = (uint8_t)(idx - 12u);
+        uint8_t gi = (uint8_t)(idx - 13u);
         char label[8];
         uint16_t gx = trend_grid_x(gi);
         uint16_t lx;
