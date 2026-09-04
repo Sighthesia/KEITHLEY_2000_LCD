@@ -240,4 +240,7 @@ void main_display_format_trend(const trend_buffer_t *trend, uint32_t now_ms,
 void main_display_set_trend_axis(main_display_frame_t *frame, float step,
                                  float top, const char *unit);
 void main_display_format_linear_trend_labels(main_display_frame_t *frame);
+void main_display_format_stat_fixed(float value, const char *unit,
+                                    uint8_t decimals, char *out,
+                                    uint8_t out_size);
 uint8_t main_display_trend_plot_y(float value, float minimum, float maximum);

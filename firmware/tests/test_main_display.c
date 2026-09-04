@@ -130,6 +130,15 @@ int main(void)
                    "4W \xCE\xA9") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_DC_VOLTAGE),
                    "DC Voltage") == 0);
+    {
+        char buf[16];
+        main_display_format_stat_fixed(4.0f, "\xCE\xA9", 4u, buf, sizeof(buf));
+        assert(strcmp(buf, "4.0000\xCE\xA9") == 0);
+        main_display_format_stat_fixed(-2.3624f, "\xCE\xA9", 4u, buf, sizeof(buf));
+        assert(strcmp(buf, "-2.3624\xCE\xA9") == 0);
+        main_display_format_stat_fixed(10.0f, "VDC", 0u, buf, sizeof(buf));
+        assert(strcmp(buf, "10VDC") == 0);
+    }
 
     /* Resistance units are normalized to the UTF-8 Ohm sign so the display
      * shows Ω / kΩ / MΩ; the function is inferred after normalization. */

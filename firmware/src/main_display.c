@@ -197,6 +197,36 @@ static void format_fixed_axis(float value, const char *unit, float step,
     append_text(out, out_size, unit);
 }
 
+/* Fixed-decimal stat formatting: value is already in DISPLAY units, exactly
+ * `decimals` fractional digits (padded, never trimmed — "4.0000Ω" next to a
+ * "2.3624Ω" reading), unit appended, all bounded by out_size. No float
+ * printf involved. */
+void main_display_format_stat_fixed(float value, const char *unit,
+                                    uint8_t decimals, char *out,
+                                    uint8_t out_size)
+{
+    float scale = 1.0f;
+    float rounded;
+    uint32_t whole, fraction;
+    uint8_t d;
+
+    if (out == 0 || out_size == 0u) return;
+    out[0] = '\0';
+    if (decimals > 5u) decimals = 5u;
+    for (d = 0u; d < decimals; d++) scale *= 10.0f;
+    rounded = value * scale;
+    if (rounded < 0.0f) { append_text(out, out_size, "-"); rounded = -rounded; }
+    rounded += 0.5f;
+    whole = (uint32_t)(rounded / scale);
+    fraction = (uint32_t)rounded - whole * (uint32_t)scale;
+    append_unsigned(out, out_size, whole, 1u);
+    if (decimals != 0u) {
+        append_text(out, out_size, ".");
+        append_unsigned(out, out_size, fraction, decimals);
+    }
+    append_text(out, out_size, unit);
+}
+
 uint8_t main_display_trend_plot_y(float value, float minimum, float maximum)
 {
     float span;

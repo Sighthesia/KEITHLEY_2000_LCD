@@ -4039,7 +4039,11 @@ static void trend_range_text(char *out, uint8_t size)
 
     if (out == 0 || size == 0u) return;
     out[0] = '\0';
-    if (!s_frame.trend_has_data || !s_trend_axis_valid || !(mag > 0.0f))
+    /* NOTE: s_frame.trend_has_data is NOT valid here — main_display_format()
+     * memsets the frame at every IDLE snapshot and the trend fields only
+     * come back in the TREND stage. The buffer flag is the truth. Reading
+     * it from the frame pins the row-2 range at "--" forever. */
+    if (!s_trend.has_sample || !s_trend_axis_valid || !(mag > 0.0f))
     {
         if (size > 2u) memcpy(out, "--", 3u);
         return;
@@ -4892,6 +4896,32 @@ static void reading_only_render(void)
             reading_only_invalidate_trend_pages();
         }
         main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
+        /* Stat decimals follow the reading ("4.0000Ω" next to "2.3624Ω",
+         * not span-rounded "4.0Ω"). No '.' in value (OVERFLOW/empty) keeps
+         * the span-based texts. */
+        {
+            const char *dot = strchr(s_frame.value, '.');
+            if (s_frame.trend_has_data && dot != 0)
+            {
+                uint8_t dec = 0u;
+                const char *p = dot + 1u;
+                float scale = trend_buffer_display_scale(&s_trend);
+                const char *au = trend_buffer_display_unit(&s_trend);
+                while (*p >= '0' && *p <= '9' && dec < 5u) { dec++; p++; }
+                main_display_format_stat_fixed(
+                    s_frame.trend_stat_maximum * scale, au, dec,
+                    s_frame.trend_stat_maximum_text,
+                    sizeof(s_frame.trend_stat_maximum_text));
+                main_display_format_stat_fixed(
+                    s_frame.trend_stat_minimum * scale, au, dec,
+                    s_frame.trend_stat_minimum_text,
+                    sizeof(s_frame.trend_stat_minimum_text));
+                main_display_format_stat_fixed(
+                    s_frame.trend_stat_average * scale, au, dec,
+                    s_frame.trend_stat_average_text,
+                    sizeof(s_frame.trend_stat_average_text));
+            }
+        }
         if (s_frame.trend_has_data && s_trend_axis_valid &&
             s_frame.trend_minimum >= s_trend_axis_min &&
             s_frame.trend_maximum <= s_trend_axis_max)
