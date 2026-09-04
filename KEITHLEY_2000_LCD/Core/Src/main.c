@@ -333,6 +333,11 @@ typedef enum {
 } reading_only_stage_t;
 
 static bool s_reading_only_dirty;
+/* Yield arming (livelock guard): at most one trend→reading suspend per
+ * presented frame. Without it, a 500 Hz stream re-suspends on every resume
+ * (the CLEAR detour outlasts the 33 ms throttle) and PRESENT is never
+ * reached — frozen display, silent serial. */
+static bool s_trend_yield_armed = true;
 static reading_only_stage_t s_reading_only_stage;
 static uint32_t s_reading_only_generation;
 static uint32_t s_reading_only_frame_generation;
@@ -2935,34 +2940,13 @@ static float s_sweep_scale_lo, s_sweep_scale_hi; /* applied axis, jitter gate */
 static bool s_sweep_active;
 static uint32_t s_sweep_cycle; /* completed 500-bucket cycles at last render */
 
-/* One-shot wipe when the sweep wraps: the previous cycle's trace would
- * otherwise linger on the right of the cursor for a full 10 s window.
- * Classic scope behavior is to clear the plot at the start of a new
- * sweep, so erase the plot area and forget per-slot bookkeeping.
- * ADR-0006: no grid to restore — the plot is bare black. */
-static void trend_sweep_wipe_cycle(void)
-{
-    uint8_t page;
-
-    (void)ui_fill_rect(MAIN_DISPLAY_PLOT_X, MAIN_DISPLAY_PLOT_Y,
-                       MAIN_DISPLAY_PLOT_W, MAIN_DISPLAY_PLOT_H,
-                       MAIN_DISPLAY_COLOR_BG);
-    {
-        uint8_t gi;
-        for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
-            (void)ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
-                               trend_grid_x(gi),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
-                               MAIN_DISPLAY_COLOR_GRID);
-    }
-    for (page = 0u; page < 2u; page++)
-    {
-        memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
-        memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
-        memset(s_drawn_trend_occupied[page], 0,
-               sizeof(s_drawn_trend_occupied[page]));
-    }
-}
+/* Wrap without wipe (overwrite ring): when the sweep wraps, slots are
+ * re-rendered from the buffer as their new-cycle buckets arrive — erase +
+ * draw per slot, so the trace never blanks. Bookkeeping is deliberately
+ * KEPT: a stale-occupied slot mismatches its recomputed state and gets
+ * erased (idle-expired data included), an unchanged slot is skipped. A
+ * dead channel may show up-to-10 s-old pixels until its slots expire and
+ * clear; live data always overwrites. */
 
 static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket)
 {
@@ -3224,13 +3208,11 @@ static bool trend_sweep_advance(void)
     if ((s_trend.newest_bucket - s_sweep_epoch_bucket) / TREND_BUCKET_COUNT >
         s_sweep_cycle)
     {
-        /* Wrapped into a new sweep cycle: clear last cycle's trace. */
+        /* Wrapped into a new sweep cycle: no wipe, slots overwrite
+         * progressively from the buffer (see above). Just track it. */
         s_sweep_cycle =
             (s_trend.newest_bucket - s_sweep_epoch_bucket) /
             TREND_BUCKET_COUNT;
-        s_trend_sweep_drawing = true;
-        trend_sweep_wipe_cycle();
-        s_trend_sweep_drawing = false;
     }
     if (s_frame.trend_minimum != s_sweep_scale_lo ||
         s_frame.trend_maximum != s_sweep_scale_hi)
@@ -4546,41 +4528,19 @@ static bool reading_only_render_trend_chrome(void)
     static uint8_t last_page = 0xFFu;
     uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
 
-    /* A page flip mid-pass must restart from the BAR clear, otherwise text
-     * lands on a stale strip (overlap). Fills dual-write; text stays
-     * single-page with a strip sync at commit (per-run fills are ~100x a
-     * BTE copy). */
+    /* Static chrome (BAR/badge/Trend/taskbar) is owned by the background
+     * build and never changes — repainting it here blanked the visible
+     * page's header every second (the 1 Hz row flicker). Only changed cell
+     * glyphs (per-glyph diff) and, on relabel, the gutter repaint. All
+     * dual-page, so no sibling copy is needed. */
     if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; }
-    s_trend_sweep_drawing = (idx == 0u);
-    if (idx == 0u)
+    s_trend_sweep_drawing = true;
+    if (idx <= 3u)
     {
-        /* Same order as the background build (line first, badge over it)
-         * so both paths produce identical pixels. */
-        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_HEADER_H,
-                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK) return false;
-        if (ui_fill_rect(0u, ty, MAIN_DISPLAY_TREND_BADGE_W,
-                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
-                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK) return false;
-        idx++;
-        return false;
-    }
-    if (idx == 1u)
-    {
-        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, ty,
-                          "Trend", MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
-        idx++;
-        return false;
-    }
-    if (idx >= 2u && idx <= 5u)
-    {
-        uint8_t k = (uint8_t)(idx - 2u);
+        uint8_t k = (uint8_t)idx;
         uint16_t x = trend_header_cell_x(k);
         char text[24];
-        if (x < 200u) { idx = 6u; return false; }
+        if (x < 200u) { idx = 4u; return false; }
         trend_header_cell(k, text, sizeof(text));
         if (!trend_paint_cell_diff(s_trend_chrome_cells[k], text, x, ty,
                                    k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
@@ -4594,17 +4554,20 @@ static bool reading_only_render_trend_chrome(void)
         idx++;
         return false;
     }
-    if (idx == 6u)
+    if (idx == 4u)
     {
+        /* Gutter only on relabel; otherwise the labels on canvas are
+         * already identical (dual-written at build). */
+        if (!trend_chrome_ylabels_dirty()) { idx = 8u; return false; }
         if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
                          MAIN_DISPLAY_TREND_GUTTER_W, MAIN_DISPLAY_PLOT_H,
                          MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
         idx++;
         return false;
     }
-    if (idx >= 7u && idx <= 9u)
+    if (idx >= 5u && idx <= 7u)
     {
-        uint8_t i = (uint8_t)(idx - 7u);
+        uint8_t i = (uint8_t)(idx - 5u);
         size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
         uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_TREND_GUTTER_W
                                ? (uint16_t)(MAIN_DISPLAY_TREND_GUTTER_W - 4u - (uint16_t)label_width)
@@ -4621,12 +4584,6 @@ static bool reading_only_render_trend_chrome(void)
             !ui_draw_text(label_x, label_y, s_frame.y_labels[i],
                           MAIN_DISPLAY_COLOR_CYAN)) return false;
         idx++;
-        return false;
-    }
-    if (!trend_chrome_sync_sibling())
-    {
-        s_trend_sweep_drawing = false;
-        idx = 0u;
         return false;
     }
     trend_chrome_snapshot();
@@ -4783,6 +4740,8 @@ static void reading_only_render(void)
                        (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
         if (!reading_due && !header_due && !dot_due)
             return;
+        /* A new presented frame re-arms the trend yield (see the flag). */
+        s_trend_yield_armed = true;
         /* Header-only: still use hidden page + present to avoid visible tear, but copy reading band. */
         bool header_only = header_due && !reading_due && !dot_due;
         s_is_header_only = header_only;
@@ -5028,12 +4987,14 @@ static void reading_only_render(void)
          * — bg/chrome idx, sweep cursor and dot state all persist in
          * statics — repaint the reading band on the same hidden page, and
          * resume via the SUFFIX→TREND edge (the scroll shortcut is dead:
-         * s_trend_scroll_ms is always 0). Coalesce the generation so a
-         * continuous stream suspends at most once per display period and
-         * the trend can never starve. */
-        if (s_reading_only_generation != s_reading_only_frame_generation &&
+         * s_trend_scroll_ms is always 0). Armed once per presented frame:
+         * without the flag the CLEAR detour outlasts the throttle at
+         * 500 Hz and every resume re-suspends → PRESENT unreachable. */
+        if (s_trend_yield_armed &&
+            s_reading_only_generation != s_reading_only_frame_generation &&
             (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS)
         {
+            s_trend_yield_armed = false;
             s_reading_only_frame_generation = s_reading_only_generation;
             s_reading_only_value_index = 0u;
             s_display_due_tick = now;
@@ -5162,6 +5123,7 @@ static void reading_only_render(void)
         s_renderer.phase = RENDER_PHASE_IDLE;
         s_perf_display_commits_window++;
         perf_record_frame();
+        s_trend_yield_armed = true;
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
     }

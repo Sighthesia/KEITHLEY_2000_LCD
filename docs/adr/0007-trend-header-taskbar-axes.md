@@ -76,6 +76,13 @@
 - 根因找到（2026-09-04 实测）：`dm=492ms/73ops`——字形走了慢速 Flash DMA（~7ms/字，遗留 A/B 诊断开关 `READING_ONLY_DIRECT_DMA=1`），而非已验收的 SDRAM 缓存 BTE。切回缓存后 `dm≈120ms/100ops`（~1.2ms/字），fps 19~27、frame 11~14ms。单位轮换挡仍有约 1s 全量重建（fps 短暂到 8，设计内）。
 - 旧板"静默卡死"一次（PC 全零，需复位恢复），60~90s soak 未复现；如再现，抓 wedge 前最后 PERF＋复现时长。
 
+## 活锁＋闪烁＋回卷三连修（2026-09-04 实测驱动）
+
+- 让行活锁：500Hz 下每次恢复都立刻再中断，PRESENT 永不到→冻屏＋串口静默。修复：每提交帧只许中断一次（armed 标志，PRESENT/IDLE 重置）。
+- chrome 闪烁：静态区（BAR/徽标/Trend）每秒全量重绘拍在可见页上。修复：chrome 只画变化字形＋按需沟槽，静态归背景。
+- 回卷黑闪：整幅 wipe 每 10 秒清空。改覆写环：保留记账，利用"失配即擦"的自然收敛渐进覆写（ 新周期槽位到达即重画）；死通道最多残留 10 秒旧像素。
+- 实测：稳态 fps 25~27、帧 10~14ms、input 500＋/missed 0；轮换挡跌一帧（12fps）即恢复；60s＋ soak 无 wedge（此前一次静默卡死未复现，继续观察）。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）
