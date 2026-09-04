@@ -35,7 +35,7 @@ check("plot geometry (ADR-0007)",e.L.plotX===96&&e.L.plotY===218&&e.L.plotW===86
 check("left-aligned reading",e.L.readingX===12);
 check("bottom band geometry",e.L.trendY===192&&e.L.trendH===128&&e.L.chartPanelY===192);
 check("trend header/taskbar (ADR-0007)",html.includes('text(ctx,"Trend"')&&html.includes('"MAX "')&&html.includes('"0s"')&&html.includes("trendTaskY")&&html.includes("ADR-0007"));
-check("trend top green line + badge",html.includes("ctx.fillRect(0,L.trendY,960,2)")&&html.includes("ctx.fillRect(0,L.trendY+2,80")&&html.includes('text(ctx,"Trend",10,L.trendY+2'));
+check("trend badge + top green line",html.includes("ctx.fillRect(0,L.trendHeaderY,80")&&html.includes('text(ctx,"Trend",10,')&&html.includes("ctx.fillRect(0,L.plotY,960,2)"));
 check("trend verticals, no grid clutter",!html.includes("setLineDash")&&!html.includes("strokeRect")&&!html.includes("sx=L.statsX"));
 check("curve and end dot kept",html.includes("L.plotX+i*(L.plotW-1)/239")&&html.includes("L.plotX+L.plotW-2, py-2"));
 if(failures)process.exit(1);console.log("sim/verify.js: ALL CHECKS PASS");

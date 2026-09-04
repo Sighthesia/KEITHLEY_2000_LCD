@@ -118,14 +118,14 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
     digits(ctx,value,dx,ry,color);
   }
   // 右侧已无信息竖栏，读数可延伸至 928px
-  // 底部趋势带（ADR-0007）：Trend顶边绿线＋徽标＋档位范围＋MAX/AVG/MIN＋黑绘图＋纵指示线＋任务栏流逝时间＋左纵轴标签
+  // 底部趋势带（ADR-0007）：header（Trend徽标＋档位范围＋MAX/AVG/MIN）＋绘图顶端绿线＋黑绘图＋纵指示线＋任务栏流逝时间＋左纵轴标签
   ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.trendY,UI_W,L.trendH);
   ctx.fillStyle=COLORS.bg;ctx.fillRect(L.plotX,L.plotY,L.plotW,L.plotH);
-  // Trend 顶边绿线＋徽标（仿档位标签：绿底黑字，线下内容带）
-  ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.trendY,960,2);
-  ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.trendY+2,80,L.trendHeaderH-2);
-  text(ctx,"Trend",10,L.trendY+2,"#000000");
-  for(let gi=0;gi<5;gi++){const gx=L.plotX+gi*L.plotW/4;ctx.fillStyle=COLORS.grid;ctx.fillRect(gx,L.plotY,1,L.plotH);}
+  // Trend 仿档位徽标（绿底黑字）＋绘图顶端绿线
+  ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.trendHeaderY,80,L.trendHeaderH);
+  text(ctx,"Trend",10,L.trendHeaderY+1,"#000000");
+  ctx.fillStyle=COLORS.green;ctx.fillRect(0,L.plotY,960,2);
+  for(let gi=0;gi<5;gi++){const gx=L.plotX+gi*L.plotW/4;ctx.fillStyle=COLORS.grid;ctx.fillRect(gx,L.plotY+2,1,L.plotH-2);}
    const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
   const axisUnit=demo.on?demoAxisUnit():"V";
   const axisScale=1;
@@ -137,8 +137,8 @@ const overflow=document.getElementById("overflow").checked;const value=overflow?
   const dAvg=data.reduce((a,b)=>a+b,0)/data.length;
   const hCells=[["MAX "+fmtAxis(hi)+axisUnit,"#ECEFF1"],["AVG "+fmtAxis(dAvg)+axisUnit,"#ECEFF1"],["MIN "+fmtAxis(lo)+axisUnit,"#ECEFF1"],[rangeTxt,"#00E676"]];
 
-  {let hx=960-12;for(let k=3;k>=0;k--){const w=hCells[k][0].length*TEXT_W;hx-=w;if(k<3)hx-=18;if(hx<200)break;text(ctx,hCells[k][0],hx,L.trendY+2,hCells[k][1]);}}
-  for(let i=0;i<3;i++){const s=fmtAxis(top-step*i)+axisUnit;const ay=L.plotY+i*L.plotH/2;let ty=Math.round(ay-TEXT_H/2);ty=Math.max(L.plotY,Math.min(L.plotY+L.plotH-TEXT_H,ty));const tx=L.trendGutterW-s.length*TEXT_W-4;text(ctx,s,Math.max(0,tx),ty,COLORS.cyan);}
+  {let hx=960-12;for(let k=3;k>=0;k--){const w=hCells[k][0].length*TEXT_W;hx-=w;if(k<3)hx-=18;if(hx<200)break;text(ctx,hCells[k][0],hx,L.trendHeaderY+1,hCells[k][1]);}}
+  for(let i=0;i<3;i++){const s=fmtAxis(top-step*i)+axisUnit;const ay=L.plotY+i*L.plotH/2;let ty=Math.round(ay-TEXT_H/2);ty=Math.max(L.plotY+2,Math.min(L.plotY+L.plotH-TEXT_H,ty));const tx=L.trendGutterW-s.length*TEXT_W-4;text(ctx,s,Math.max(0,tx),ty,COLORS.cyan);}
   ["10s","7.5s","5s","2.5s","0s"].forEach((s,gi)=>{const gx=L.plotX+gi*L.plotW/4;let lx=Math.round(gx-s.length*TEXT_W/2);lx=Math.max(L.plotX,Math.min(L.plotX+L.plotW-s.length*TEXT_W,lx));text(ctx,s,lx,L.trendTaskY,COLORS.cyan);});
   ctx.lineWidth=2; ctx.lineCap="round"; ctx.lineJoin="round";
  for(const [color,dy,alpha] of [[COLORS.greenDim,-1,0.0],[COLORS.greenDim,1,0.0],[COLORS.green,0,1.0]]){
