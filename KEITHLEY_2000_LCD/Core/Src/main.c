@@ -2938,8 +2938,7 @@ static void trend_sweep_wipe_cycle(void)
     {
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
-            (void)ui_draw_line(trend_grid_x(gi),
-                               (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+            (void)ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
                                trend_grid_x(gi),
                                (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                                MAIN_DISPLAY_COLOR_GRID);
@@ -4110,8 +4109,7 @@ static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1)
     {
         uint16_t gx = trend_grid_x(gi);
         if (gx < x0 || gx > x1) continue;
-        if (ui_draw_line(gx,
-                         (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+        if (ui_draw_line(gx, MAIN_DISPLAY_PLOT_Y,
                          gx, (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                          MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
             return false;
@@ -4169,8 +4167,14 @@ static bool reading_only_render_trend_background(void)
     if (s_reading_only_page_trend_bg_valid[s_render_page] &&
         strcmp(s_reading_only_page_trend_unit[s_render_page], unit) == 0)
     {
+        s_trend_sweep_drawing = false;
         return true;
     }
+    /* Jitter fix: header/taskbar/gutter/labels/verticals dual-write both
+     * pages (reuses the sweep gate), so the two pages can never show
+     * different stat digits on alternating flips. Plot black stays
+     * single-page — the sweep owns per-page curve pixels. */
+    s_trend_sweep_drawing = (idx >= 2u);
 
     if (idx == 0u)
     {
@@ -4202,9 +4206,7 @@ static bool reading_only_render_trend_background(void)
         uint8_t gi;
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
         {
-            /* Verticals stop below the green top line (ADR-0007). */
-            if (ui_draw_line(trend_grid_x(gi),
-                             (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+            if (ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
                              trend_grid_x(gi),
                              (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H - 1u),
                              MAIN_DISPLAY_COLOR_GRID) != LT7680_OK)
@@ -4218,18 +4220,20 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 3u)
     {
-        /* Trend badge in function-badge language (green rect + black text)
-         * plus the green line on the plot top edge. */
+        /* Green line on the Trend TOP edge, badge + texts below it:
+         * line y192..193, content band y194..218. */
         if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
-                         MAIN_DISPLAY_TREND_BADGE_W, MAIN_DISPLAY_TREND_HEADER_H,
-                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK)
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
         }
-        if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK)
+        if (ui_fill_rect(0u,
+                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+                         MAIN_DISPLAY_TREND_BADGE_W,
+                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
+                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
@@ -4239,7 +4243,8 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx == 4u)
     {
-        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, MAIN_DISPLAY_TREND_HEADER_Y,
+        uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, ty,
                           "Trend", MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
         idx++;
         return false;
@@ -4250,13 +4255,14 @@ static bool reading_only_render_trend_background(void)
          * MIN in white, the range in green at the far right edge. */
         uint8_t k = (uint8_t)(idx - 5u);
         uint16_t x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - 12u);
+        uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
         uint8_t i;
         for (i = 4u; i > k; i--)
         {
             x = (uint16_t)(x - strlen(cells[i - 1u]) * FONT_TEXT_WIDTH);
             if (i - 1u > k) x = (uint16_t)(x - 18u);
         }
-        if (!ui_draw_text(x, MAIN_DISPLAY_TREND_HEADER_Y, cells[k],
+        if (!ui_draw_text(x, ty, cells[k],
                           k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
                                     MAIN_DISPLAY_COLOR_WHITE)) return false;
         idx++;
@@ -4272,11 +4278,9 @@ static bool reading_only_render_trend_background(void)
                                : 0u;
         uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
                                      i * MAIN_DISPLAY_PLOT_H / 2u);
-        /* Top label parks below the green top line (ADR-0007). */
-        uint16_t top = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_YELLOW_LINE_H);
-        uint16_t label_y = axis_y > top + FONT_TEXT_HEIGHT / 2u
+        uint16_t label_y = axis_y > MAIN_DISPLAY_PLOT_Y + FONT_TEXT_HEIGHT / 2u
                                ? (uint16_t)(axis_y - FONT_TEXT_HEIGHT / 2u)
-                               : top;
+                               : MAIN_DISPLAY_PLOT_Y;
         uint16_t bottom = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H -
                                      FONT_TEXT_HEIGHT);
         if (label_y > bottom) label_y = bottom;
@@ -4335,11 +4339,20 @@ static bool reading_only_render_trend_background(void)
            sizeof(s_drawn_trend_occupied[0]));
     s_reading_only_page_trend_curve_valid[s_render_page] = false;
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
+    /* Chrome pixels are now identical on both pages: publish the sibling so
+     * it never rebuilds divergent stat digits. Its plot pixels/bookkeeping
+     * are untouched and converge through the sweep rescan. */
+    {
+        uint8_t sib = (uint8_t)(s_render_page ^ 1u);
+        s_reading_only_page_trend_bg_valid[sib] = true;
+        strncpy(s_reading_only_page_trend_unit[sib], unit,
+                TREND_UNIT_ID_MAX - 1u);
+        s_reading_only_page_trend_unit[sib][TREND_UNIT_ID_MAX - 1u] = '\0';
+    }
+    s_trend_sweep_drawing = false;
     idx = 0u;
     return true;
 }
-
-/* ADR-0006: trend stats column removed with the plot-only bottom band. */
 
 static void keithley_trend_axis_range(const char *unit, float peak,
                                       float *minimum, float *maximum)
