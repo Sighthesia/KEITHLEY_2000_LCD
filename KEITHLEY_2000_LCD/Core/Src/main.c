@@ -703,9 +703,30 @@ static void perf_record_frame(void)
     s_perf_window_frames++;
     if ((uint32_t)(now - s_perf_window_tick) >= 1000u)
     {
+        /* Counters stay 1 s windows; the ~450 B print costs ~40 ms of
+         * blocking UART, so it goes out every 5th window (1 Hz hitch). */
+        static uint8_t print_div = 0u;
+        bool print_this;
         s_perf_fps = s_perf_window_frames;
         s_perf_window_frames = 0u;
         s_perf_window_tick = now;
+        print_div = (uint8_t)(print_div + 1u);
+        print_this = (print_div >= 5u);
+        if (print_this) print_div = 0u;
+        if (!print_this)
+        {
+            s_loop_max_gap_ms = 0u;
+            s_sweep_px_ok = 0u;
+            s_sweep_px_missed = 0u;
+            s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
+            s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
+            s_perf_fields_window = 0u;
+            s_perf_reading_frames_window = 0u;
+            s_perf_display_commits_window = 0u;
+            s_perf_axis_rebuilds_window = 0u;
+            s_perf_trend_columns_window = 0u;
+            return;
+        }
         hal_uart_send_text("PERF fps=");
         perf_send_u32(s_perf_fps);
         hal_uart_send_text(" frame-ms=");
