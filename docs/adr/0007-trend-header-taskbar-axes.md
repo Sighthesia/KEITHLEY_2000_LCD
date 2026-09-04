@@ -65,6 +65,15 @@
 - 结构补强：TREND 入口对新读数让行——快照 generation 合并、中断后经 SUFFIX→TREND 恢复（bg/chrome idx、sweep 游标、圆点状态全在静态量里续跑），33ms 节流保证趋势不饿死。换挡全量重建期间读数照常显示。
 - 换挡全字体重绘本身是必要的（新单位全部文字都变），让行保证它不再挡住读数。
 
+## 500Hz＋30fps 硬化（2026-09-04，需求反转）
+
+- 过去"喂样率必须 10Hz"的结论被 bench 需求取代：现在要求 500Hz 输入 sustained＋30fps 显示，改为硬化管线而非回避速率。
+- 探针：sweep 逐槽 MRWDP 回读探针默认关（`TREND_SWEEP_PROBE`，诊断时才开）——它一个人在 500Hz 下就能把单轮撑过 100ms。
+- 文本单页画＋BTE 条带拷贝同步兄弟页（3 快操作代替 ~2x 逐墨段填充）；header 字形级差分（稳态只画变的 2-4 个字）；统计节流 1Hz。
+- demo catch-up 预算 16→64（500Hz/30fps 下每轮欠约 17 个样）。
+- TREND 入口读数让行（suspend/resume＋33ms 节流）。
+- 实测（串口 PERF）：input_hz≈510、missed=0、fps 13~19、frame 35~57ms、填充 1400/s→200/s。距 30fps 仍差约 40%，瓶颈在逐操作 canvas 切页＋BTE/GE 忙等待，需驱动层批量优化（未做）。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）
