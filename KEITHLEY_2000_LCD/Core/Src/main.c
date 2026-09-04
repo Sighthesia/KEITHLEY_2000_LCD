@@ -4276,15 +4276,18 @@ static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
 
 static uint32_t s_trend_live_tick;
 
-/* Live refresh due: snapshot exists, 1 s elapsed, fresh strings differ.
- * Pure-RAM compare when clean. */
+/* Live refresh due: snapshot exists, 100 ms elapsed, fresh strings differ.
+ * Pure-RAM compare when clean. 10 Hz small steps instead of 1 Hz batches:
+ * the same repaint volume spread over 10 passes peaks at ~5 ms/visit
+ * instead of ~15 ms, so the trend refresh stops punching a hole in the
+ * reading cadence. */
 static bool trend_live_due(uint32_t now)
 {
     uint8_t k;
     char tmp[24];
 
     if (!s_trend_stat_snap_valid) return false;
-    if ((uint32_t)(now - s_trend_live_tick) < 1000u) return false;
+    if ((uint32_t)(now - s_trend_live_tick) < 100u) return false;
     for (k = 0u; k < 3u; k++)
     {
         trend_live_cell(k, tmp, sizeof(tmp));
