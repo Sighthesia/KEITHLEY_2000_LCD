@@ -4170,11 +4170,13 @@ static bool reading_only_render_trend_background(void)
         s_trend_sweep_drawing = false;
         return true;
     }
-    /* Jitter fix: header/taskbar/gutter/labels/verticals dual-write both
-     * pages (reuses the sweep gate), so the two pages can never show
-     * different stat digits on alternating flips. Plot black stays
-     * single-page — the sweep owns per-page curve pixels. */
-    s_trend_sweep_drawing = (idx >= 2u);
+    /* Jitter fix: the WHOLE background dual-writes both pages (reuses the
+     * sweep gate). Partial dual (chrome only) is worse: the sibling keeps
+     * stale text under the new text (overlap), stale labels (frozen) and a
+     * stale plot (flicker), while shared-valid stops it ever rebuilding.
+     * Full dual is consistent because invalidate_trend_pages() already
+     * clears both pages' bookkeeping — both canvases restart identical. */
+    s_trend_sweep_drawing = true;
 
     if (idx == 0u)
     {
