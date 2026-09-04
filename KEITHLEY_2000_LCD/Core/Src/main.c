@@ -4302,37 +4302,24 @@ static bool trend_live_due(uint32_t now)
     return false;
 }
 
-/* Header strip sync: single BTE copy render→sibling (~3 fast ops vs ~2x
- * per-run fills). Exact pixels, so pages stay identical without flicker. */
-static bool trend_header_sync_sibling(void)
-{
-    lt7680_rect_t fb;
-    panel_transform_ui_rect_to_fb(0u, MAIN_DISPLAY_TREND_HEADER_Y,
-                                  MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_HEADER_H,
-                                  &fb.x, &fb.y, &fb.w, &fb.h);
-    if (fb.w == 0u || fb.h == 0u) return true;
-    return lt7680_gfx_copy_rect(s_render_page,
-                                (uint8_t)(s_render_page ^ 1u),
-                                &fb) == LT7680_OK;
-}
-
-/* Live stat refresh: changed glyphs only (≤6 per visit), single-page +
- * header-strip BTE sync at commit. Static chrome untouched. Snapshot moves
- * to the temp bufs per slot and publishes to the shared snapshot only
- * after a successful sync — a failed sync retries instead of diverging. */
+/* Live stat refresh: changed glyphs only (≤2 per visit), dual-page so both
+ * canvases stay identical without any copy. One slot per visit, and the
+ * caller does NOT wait for pass completion — it presents every frame and
+ * resumes next frame. That removes the stall-then-recover pattern: the
+ * reading commits metronomically while stats chase within ~3 frames.
+ * Snapshot publishes per completed slot (not just at pass end), so any cut
+ * point leaves both pages showing identical, possibly slightly stale
+ * digits. Worst case is a single-glyph single-frame tear mid-slot —
+ * far below visibility and self-healing next visit; no sustained flicker
+ * or divergence possible by construction. */
 static bool reading_only_render_trend_live(void)
 {
     static uint8_t idx;
-    static uint8_t last_page = 0xFFu;
     static uint8_t diff_slot = 0xFFu;
     static uint8_t diff_pos;
-    static char diff_tmp[3][24];
     uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
 
-    if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; diff_slot = 0xFFu; diff_pos = 0u; }
-    /* Single-page text + strip copy at commit (NOT dual): dual doubles the
-     * per-run fills and was measured at 73 ms/visit. */
-    s_trend_sweep_drawing = false;
+    s_trend_sweep_drawing = true;
     if (idx <= 2u)
     {
         uint8_t k = (uint8_t)idx;
@@ -4344,9 +4331,9 @@ static bool reading_only_render_trend_live(void)
         if (!trend_paint_cell_diff(s_trend_stat_snapshot[k], text, x, ty,
                                    (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                                    MAIN_DISPLAY_COLOR_WHITE,
-                                   diff_tmp[k],
-                                   sizeof(diff_tmp[k]),
-                                   &diff_pos, 4u))
+                                   s_trend_stat_snapshot[k],
+                                   sizeof(s_trend_stat_snapshot[k]),
+                                   &diff_pos, 2u))
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
@@ -4355,12 +4342,7 @@ static bool reading_only_render_trend_live(void)
         return false;
     }
     s_trend_live_tick = HAL_GetTick();
-    if (!trend_header_sync_sibling())
-    {
-        if (s_reading_only_io_error) idx = 0u;
-        return false;
-    }
-    memcpy(s_trend_stat_snapshot, diff_tmp, sizeof(s_trend_stat_snapshot));
+    s_trend_sweep_drawing = false;
     idx = 0u;
     return true;
 }
@@ -5161,12 +5143,13 @@ static void reading_only_render(void)
          * so no region flag is needed before the flip. */
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
-        /* Live stat refresh (changed glyphs only, static chrome untouched). */
+        /* Live stat refresh: one bounded slice per frame, then ALWAYS
+         * present — the pass resumes next frame. Blocking present on pass
+         * completion froze the reading for the whole pass whenever stats
+         * churned (stall-then-recover). Dual-page + per-slot snapshot
+         * publish keep every cut point flicker-free. */
         if (trend_live_due(now))
-        {
-            if (!reading_only_render_trend_live())
-                return;
-        }
+            (void)reading_only_render_trend_live();
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
