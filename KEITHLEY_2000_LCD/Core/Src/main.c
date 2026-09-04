@@ -957,8 +957,9 @@ static void k2000_demo_feed(void)
     uint32_t now = HAL_GetTick();
     /* A 30 Hz display frame can occupy nearly 20 ms, which spans ten 500 Hz
      * input ticks. Keep enough catch-up budget to preserve the requested demo
-     * rate instead of reporting a synthetic missed sample every frame. */
-    uint8_t budget = 16u;
+     * rate instead of reporting a synthetic missed sample every frame.
+     * 64 covers 25 fps turns (each owes ~20 samples at 500 Hz). */
+    uint8_t budget = 64u;
 
     if (!s_display_enabled)
         return;
@@ -4099,28 +4100,142 @@ static void trend_header_slot(uint8_t k, char *out, uint8_t size)
     out[n] = '\0';
 }
 
+/* Fresh slot string k from the live frame (unit included). */
+static void trend_live_cell(uint8_t k, char *out, uint8_t size)
+{
+    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
+    const char *vals[3];
+    uint8_t n = 0u;
+    const char *p;
+
+    if (out == 0 || size == 0u) return;
+    out[0] = '\0';
+    if (k >= 3u) return;
+    vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
+    vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
+    vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
+    for (p = tags[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    for (p = vals[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    out[n] = '\0';
+}
+
 /* Capture the slot snapshot from the live frame (unit included). Called
  * once per background build, before the slot steps paint from it. */
 static void trend_stat_snapshot_capture(void)
 {
-    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
-    const char *vals[3];
     uint8_t k;
-
-    vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
-    vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
-    vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
     for (k = 0u; k < 3u; k++)
+        trend_live_cell(k, s_trend_stat_snapshot[k],
+                        sizeof(s_trend_stat_snapshot[k]));
+    s_trend_stat_snap_valid = true;
+}
+
+/* Per-glyph diff repaint of one slot (fixed 12 px advance,
+ * multibyte-aware via text_glyph). Only changed glyph cells are erased
+ * (exactly the 24 px content band) + redrawn with a throwaway job — never
+ * the shared resumable job, so many glyphs may complete in one visit, and
+ * static chrome (BAR/badge/Trend) is never touched: no 1 Hz full-header
+ * blink. Snapshot updated on success. */
+static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
+                                  uint16_t x, uint16_t y, uint16_t h, uint16_t color,
+                                  char *saved, uint8_t saved_size)
+{
+    const char *op = old_text != 0 ? old_text : "";
+    const char *np = new_text != 0 ? new_text : "";
+    uint16_t gi = 0u;
+
+    while (*op != '\0' || *np != '\0')
+    {
+        uint8_t oa = 1u;
+        uint8_t na = 1u;
+        char token[3] = {0, 0, 0};
+        bitmap_job_t job = {0};
+        uint8_t k;
+
+        if (*op != '\0') (void)text_glyph(op, &oa);
+        if (*np != '\0') (void)text_glyph(np, &na);
+        if (!(oa == na && oa != 0u && memcmp(op, np, oa) == 0))
+        {
+            uint16_t gx = (uint16_t)(x + gi * FONT_TEXT_WIDTH);
+            if (ui_fill_rect(gx, y, FONT_TEXT_WIDTH, h,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+                return false;
+            if (*np != '\0')
+            {
+                for (k = 0u; k < na && k < 2u; k++) token[k] = np[k];
+                if (!ui_draw_bitmap_slice(&job, gx, y, token, color, 0u))
+                    return false;
+            }
+        }
+        if (*op != '\0') op += oa;
+        if (*np != '\0') np += na;
+        gi++;
+        if (gi >= 20u) break;
+    }
     {
         uint8_t n = 0u;
-        const char *p;
-        for (p = tags[k]; *p != '\0' && n + 1u < sizeof(s_trend_stat_snapshot[k]); p++)
-            s_trend_stat_snapshot[k][n++] = *p;
-        for (p = vals[k]; *p != '\0' && n + 1u < sizeof(s_trend_stat_snapshot[k]); p++)
-            s_trend_stat_snapshot[k][n++] = *p;
-        s_trend_stat_snapshot[k][n] = '\0';
+        while (new_text != 0 && new_text[n] != '\0' && n + 1u < saved_size)
+        {
+            saved[n] = new_text[n];
+            n++;
+        }
+        saved[n] = '\0';
     }
-    s_trend_stat_snap_valid = true;
+    return true;
+}
+
+static uint32_t s_trend_live_tick;
+
+/* Live refresh due: snapshot exists, 1 s elapsed, fresh strings differ.
+ * Pure-RAM compare when clean. */
+static bool trend_live_due(uint32_t now)
+{
+    uint8_t k;
+    char tmp[24];
+
+    if (!s_trend_stat_snap_valid) return false;
+    if ((uint32_t)(now - s_trend_live_tick) < 1000u) return false;
+    for (k = 0u; k < 3u; k++)
+    {
+        trend_live_cell(k, tmp, sizeof(tmp));
+        if (strcmp(tmp, s_trend_stat_snapshot[k]) != 0) return true;
+    }
+    return false;
+}
+
+/* Live stat refresh: changed glyphs only, dual-page (reuses the sweep
+ * gate), one slot per visit. Static chrome untouched. */
+static bool reading_only_render_trend_live(void)
+{
+    static uint8_t idx;
+    static uint8_t last_page = 0xFFu;
+    uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+
+    if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; }
+    s_trend_sweep_drawing = true;
+    if (idx <= 2u)
+    {
+        uint8_t k = (uint8_t)idx;
+        uint16_t x = (uint16_t)(MAIN_DISPLAY_TREND_STAT_X0 +
+                                (uint16_t)k * MAIN_DISPLAY_TREND_STAT_PITCH);
+        char text[24];
+        trend_live_cell(k, text, sizeof(text));
+        if (!trend_paint_cell_diff(s_trend_stat_snapshot[k], text, x, ty,
+                                   (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
+                                   MAIN_DISPLAY_COLOR_WHITE,
+                                   s_trend_stat_snapshot[k],
+                                   sizeof(s_trend_stat_snapshot[k])))
+        {
+            if (s_reading_only_io_error) idx = 0u;
+            return false;
+        }
+        idx++;
+        return false;
+    }
+    s_trend_live_tick = HAL_GetTick();
+    s_trend_sweep_drawing = false;
+    idx = 0u;
+    return true;
 }
 
 /* Elapsed-time label for gridline gi: window fractions 1..0 ("10s".."0s"). */
@@ -4861,6 +4976,12 @@ static void reading_only_render(void)
          * so no region flag is needed before the flip. */
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
+        /* Live stat refresh (changed glyphs only, static chrome untouched). */
+        if (trend_live_due(now))
+        {
+            if (!reading_only_render_trend_live())
+                return;
+        }
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
