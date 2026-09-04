@@ -41,6 +41,15 @@
 - 改为背景整段（清屏＋黑底＋全部 chrome）双页写：`invalidate_trend_pages()` 本来就清双页记账，两页从同一空白重启恒等；提交时兄弟页共享有效位＋单位。
 - 规则：双页写要么整段、要么不写；半段双页必然制造分叉。
 
+## Chrome 刷新层（统计刷新/防重叠/渐进 rescale）
+
+- 症状：统计冻结（header 只在背景重建时画一次）＋长数值撞徽标＋同单位 rescale 整图黑闪。
+- 修复：
+  - 新增 `reading_only_render_trend_chrome()`：只重画 header 条＋沟槽条（双页，一串一步），统计变化 1Hz 跟随、gutter 重标立即；右块 x<200 钳位防撞徽标；跨页从清底重来防叠字。
+  - 同单位 rescale 改渐进：保留绘图＋记账、sweep 重扫收敛，只置 gutter 重标；真单位切换仍全量黑底重建。
+  - 背景提交与 chrome 提交都同步快照（cells＋ylabels＋tick），避免刚建完又触发。
+- 规则：动态 chrome（header/沟槽）与静态 chrome（任务栏/纵线）分离；前者走快照＋节流，后者随背景一次建成。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）

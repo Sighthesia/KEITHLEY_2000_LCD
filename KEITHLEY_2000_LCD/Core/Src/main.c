@@ -4075,6 +4075,91 @@ static uint16_t trend_grid_x(uint8_t gi)
                       (uint32_t)gi * MAIN_DISPLAY_PLOT_W / 4u);
 }
 
+/* Header right cells (ADR-0007): "MAX <v>" / "AVG <v>" / "MIN <v>" / range.
+ * Frame is stable across a pass; rebuilt per visit (pure RAM). */
+static void trend_header_cell(uint8_t k, char *out, uint8_t size)
+{
+    static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
+    const char *vals[3];
+    uint8_t n = 0u;
+    const char *p;
+
+    if (out == 0 || size == 0u) return;
+    out[0] = '\0';
+    if (k >= 4u) return;
+    if (k == 3u)
+    {
+        trend_range_text(out, size);
+        return;
+    }
+    vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
+    vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
+    vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
+    for (p = tags[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    for (p = vals[k]; *p != '\0' && n + 1u < size; p++) out[n++] = *p;
+    out[n] = '\0';
+}
+
+/* Right-aligned start x of cell k (cells k..3 laid from the right edge). */
+static uint16_t trend_header_cell_x(uint8_t k)
+{
+    uint16_t x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - 12u);
+    uint8_t i;
+    char tmp[24];
+    for (i = 4u; i > k; i--)
+    {
+        trend_header_cell(i - 1u, tmp, sizeof(tmp));
+        x = (uint16_t)(x - strlen(tmp) * FONT_TEXT_WIDTH);
+        if (i - 1u > k) x = (uint16_t)(x - 18u);
+    }
+    return x;
+}
+
+/* Last-painted chrome snapshot (dual-written, so one copy serves both
+ * pages): header cells + gutter labels + last header paint tick. */
+static char s_trend_chrome_cells[4][24];
+static char s_trend_chrome_ylabels[3][MAIN_DISPLAY_AXIS_LABEL_MAX];
+static uint32_t s_trend_chrome_tick;
+static bool s_trend_gutter_pending;
+
+static void trend_chrome_snapshot(void)
+{
+    uint8_t k;
+    for (k = 0u; k < 4u; k++)
+        trend_header_cell(k, s_trend_chrome_cells[k],
+                          sizeof(s_trend_chrome_cells[k]));
+    memcpy(s_trend_chrome_ylabels, s_frame.y_labels,
+           sizeof(s_trend_chrome_ylabels));
+    s_trend_chrome_tick = HAL_GetTick();
+}
+
+static bool trend_chrome_cells_dirty(void)
+{
+    uint8_t k;
+    char tmp[24];
+    for (k = 0u; k < 4u; k++)
+    {
+        trend_header_cell(k, tmp, sizeof(tmp));
+        if (strcmp(tmp, s_trend_chrome_cells[k]) != 0) return true;
+    }
+    return false;
+}
+
+static bool trend_chrome_ylabels_dirty(void)
+{
+    return memcmp(s_trend_chrome_ylabels, s_frame.y_labels,
+                  sizeof(s_trend_chrome_ylabels)) != 0;
+}
+
+/* Refresh due: relabel immediately, stats at most 1 Hz and only on change. */
+static bool trend_chrome_due(uint32_t now)
+{
+    if (s_trend_gutter_pending) return true;
+    if (trend_chrome_ylabels_dirty()) return true;
+    if ((uint32_t)(now - s_trend_chrome_tick) < 1000u) return false;
+    return trend_chrome_cells_dirty();
+}
+
 /* Elapsed-time label for gridline gi: window fractions 1..0 ("10s".."0s"). */
 static void trend_time_text(uint8_t gi, char *out, uint8_t size)
 {
@@ -4125,28 +4210,6 @@ static bool reading_only_render_trend_background(void)
     static uint8_t last_page = 0xFFu;
     static char pending_unit[TREND_UNIT_ID_MAX];
     const char *unit = trend_buffer_display_unit(&s_trend);
-    /* Header right cells, rebuilt every visit (pure RAM, frame is stable
-     * across the pass): "MAX <v>" / "AVG <v>" / "MIN <v>" / range. */
-    static char cells[4][24];
-    {
-        static const char *const tags[3] = {"MAX ", "AVG ", "MIN "};
-        const char *vals[3];
-        uint8_t k;
-        vals[0] = s_frame.trend_has_data ? s_frame.trend_stat_maximum_text : "--";
-        vals[1] = s_frame.trend_has_data ? s_frame.trend_stat_average_text : "--";
-        vals[2] = s_frame.trend_has_data ? s_frame.trend_stat_minimum_text : "--";
-        for (k = 0u; k < 3u; k++)
-        {
-            uint8_t n = 0u;
-            const char *p;
-            for (p = tags[k]; *p != '\0' && n + 1u < sizeof(cells[k]); p++)
-                cells[k][n++] = *p;
-            for (p = vals[k]; *p != '\0' && n + 1u < sizeof(cells[k]); p++)
-                cells[k][n++] = *p;
-            cells[k][n] = '\0';
-        }
-        trend_range_text(cells[3], sizeof(cells[3]));
-    }
 
     if (last_page != s_render_page)
     {
@@ -4254,17 +4317,15 @@ static bool reading_only_render_trend_background(void)
     if (idx >= 5u && idx <= 8u)
     {
         /* Right block, one string per step (single job rule): MAX / AVG /
-         * MIN in white, the range in green at the far right edge. */
+         * MIN in white, the range in green at the far right edge. Overlong
+         * values stop at x200 instead of crashing into the badge. */
         uint8_t k = (uint8_t)(idx - 5u);
-        uint16_t x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - 12u);
+        uint16_t x = trend_header_cell_x(k);
         uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
-        uint8_t i;
-        for (i = 4u; i > k; i--)
-        {
-            x = (uint16_t)(x - strlen(cells[i - 1u]) * FONT_TEXT_WIDTH);
-            if (i - 1u > k) x = (uint16_t)(x - 18u);
-        }
-        if (!ui_draw_text(x, ty, cells[k],
+        char text[24];
+        if (x < 200u) { idx = 9u; return false; }
+        trend_header_cell(k, text, sizeof(text));
+        if (!ui_draw_text(x, ty, text,
                           k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
                                     MAIN_DISPLAY_COLOR_WHITE)) return false;
         idx++;
@@ -4343,7 +4404,8 @@ static bool reading_only_render_trend_background(void)
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
     /* Chrome pixels are now identical on both pages: publish the sibling so
      * it never rebuilds divergent stat digits. Its plot pixels/bookkeeping
-     * are untouched and converge through the sweep rescan. */
+     * are untouched and converge through the sweep rescan. Snapshot the
+     * chrome so the refresh layer below starts clean. */
     {
         uint8_t sib = (uint8_t)(s_render_page ^ 1u);
         s_reading_only_page_trend_bg_valid[sib] = true;
@@ -4351,6 +4413,89 @@ static bool reading_only_render_trend_background(void)
                 TREND_UNIT_ID_MAX - 1u);
         s_reading_only_page_trend_unit[sib][TREND_UNIT_ID_MAX - 1u] = '\0';
     }
+    trend_chrome_snapshot();
+    s_trend_gutter_pending = false;
+    s_trend_sweep_drawing = false;
+    idx = 0u;
+    return true;
+}
+
+/* Chrome refresh (symptom fix): repaints the header strip + gutter strip
+ * without touching the plot — stats follow the sliding window (1 Hz), Y
+ * labels follow a same-unit rescale progressively (no black flash). Runs
+ * dual-page like the background chrome, one string per step. */
+static bool reading_only_render_trend_chrome(void)
+{
+    static uint8_t idx;
+    static uint8_t last_page = 0xFFu;
+    uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
+
+    /* A page flip mid-pass must restart from the BAR clear, otherwise text
+     * lands on a stale strip (overlap). */
+    if (last_page != s_render_page) { idx = 0u; last_page = s_render_page; }
+    s_trend_sweep_drawing = true;
+    if (idx == 0u)
+    {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_HEADER_H,
+                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+        if (ui_fill_rect(0u, ty, MAIN_DISPLAY_TREND_BADGE_W,
+                         (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
+                         MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK) return false;
+        idx++;
+        return false;
+    }
+    if (idx == 1u)
+    {
+        if (!ui_draw_text(MAIN_DISPLAY_BADGE_PAD_X, ty,
+                          "Trend", MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
+        idx++;
+        return false;
+    }
+    if (idx >= 2u && idx <= 5u)
+    {
+        uint8_t k = (uint8_t)(idx - 2u);
+        uint16_t x = trend_header_cell_x(k);
+        char text[24];
+        if (x < 200u) { idx = 6u; return false; }
+        trend_header_cell(k, text, sizeof(text));
+        if (!ui_draw_text(x, ty, text,
+                          k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
+                                    MAIN_DISPLAY_COLOR_WHITE)) return false;
+        idx++;
+        return false;
+    }
+    if (idx == 6u)
+    {
+        if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
+                         MAIN_DISPLAY_TREND_GUTTER_W, MAIN_DISPLAY_PLOT_H,
+                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+        idx++;
+        return false;
+    }
+    if (idx >= 7u && idx <= 9u)
+    {
+        uint8_t i = (uint8_t)(idx - 7u);
+        size_t label_width = strlen(s_frame.y_labels[i]) * FONT_TEXT_WIDTH;
+        uint16_t label_x = label_width + 4u <= MAIN_DISPLAY_TREND_GUTTER_W
+                               ? (uint16_t)(MAIN_DISPLAY_TREND_GUTTER_W - 4u - (uint16_t)label_width)
+                               : 0u;
+        uint16_t axis_y = (uint16_t)(MAIN_DISPLAY_PLOT_Y +
+                                     i * MAIN_DISPLAY_PLOT_H / 2u);
+        uint16_t label_y = axis_y > MAIN_DISPLAY_PLOT_Y + FONT_TEXT_HEIGHT / 2u
+                               ? (uint16_t)(axis_y - FONT_TEXT_HEIGHT / 2u)
+                               : MAIN_DISPLAY_PLOT_Y;
+        uint16_t bottom = (uint16_t)(MAIN_DISPLAY_PLOT_Y + MAIN_DISPLAY_PLOT_H -
+                                     FONT_TEXT_HEIGHT);
+        if (label_y > bottom) label_y = bottom;
+        if (s_frame.y_labels[i][0] != '\0' &&
+            !ui_draw_text(label_x, label_y, s_frame.y_labels[i],
+                          MAIN_DISPLAY_COLOR_CYAN)) return false;
+        idx++;
+        return false;
+    }
+    trend_chrome_snapshot();
+    s_trend_gutter_pending = false;
     s_trend_sweep_drawing = false;
     idx = 0u;
     return true;
@@ -4798,10 +4943,13 @@ static void reading_only_render(void)
             main_display_format_linear_trend_labels(&s_frame);
             if (axis_expanded)
             {
-                /* Clean background; the sweep's own axis-move detector
-                 * restarts a live-window rescan at the new scale (no
-                 * per-slot cursor reset needed here). */
-                reading_only_invalidate_trend_pages();
+                /* Same-unit rescale: keep the plot and its bookkeeping and
+                 * rescan progressively (the sweep's axis-move detector
+                 * restarts a live-window rescan at the new scale); only the
+                 * gutter labels repaint through the chrome layer — no black
+                 * flash. A true unit change still takes the full invalidate
+                 * path in the proto handler. */
+                s_trend_gutter_pending = true;
             }
         }
         background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
@@ -4833,6 +4981,12 @@ static void reading_only_render(void)
          * so no region flag is needed before the flip. */
         if (!trend_sweep_advance())
             s_reading_only_io_error = false;
+        /* Chrome refresh (stats 1 Hz / relabel immediate) before commit. */
+        if (trend_chrome_due(now))
+        {
+            if (!reading_only_render_trend_chrome())
+                return;
+        }
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
