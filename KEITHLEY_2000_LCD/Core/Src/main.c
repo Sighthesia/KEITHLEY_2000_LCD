@@ -4436,9 +4436,14 @@ static bool reading_only_render_trend_chrome(void)
     s_trend_sweep_drawing = true;
     if (idx == 0u)
     {
+        /* Same order as the background build (line first, badge over it)
+         * so both paths produce identical pixels. */
         if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
                          MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_HEADER_H,
                          MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_HEADER_Y,
+                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_DIVIDER) != LT7680_OK) return false;
         if (ui_fill_rect(0u, ty, MAIN_DISPLAY_TREND_BADGE_W,
                          (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                          MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK) return false;

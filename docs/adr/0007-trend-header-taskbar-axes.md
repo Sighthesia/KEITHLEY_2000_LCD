@@ -50,6 +50,15 @@
   - 背景提交与 chrome 提交都同步快照（cells＋ylabels＋tick），避免刚建完又触发。
 - 规则：动态 chrome（header/沟槽）与静态 chrome（任务栏/纵线）分离；前者走快照＋节流，后者随背景一次建成。
 
+## Chrome 补洞：顶边绿线也要重画
+
+- chrome 刷新清 header 条却只重画徽标＋文字，顶边绿线被擦后永不回来。修复：chrome idx0 与背景同序（清底→绿线→徽标），两路径像素恒等。
+
+## 周期性整图重绘的说明（非 bug）
+
+- 单位切换（V↔mV、V↔Ω、demo 每 20 秒轮换档位）会清空 buffer（`trend_buffer_add` 按显示单位身份重置，旧单位曲线在新刻度下是谎言）＋黑底重建＋10 秒窗口缓慢重填——看到的是"灭隔一段时间重绘"。同单位内的换挡/量程漂移只渐进重扫，不黑闪。
+- 如需同量纲（V↔mV）不断线，需 buffer 保留基值＋显示重定标，属于另一需求，未做。
+
 ## 影响文件
 
 - `firmware/src/main_display.h` ↔ `KEITHLEY_2000_LCD/Core/Inc/main_display.h`（三区几何）
