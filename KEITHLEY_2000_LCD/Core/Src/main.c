@@ -296,7 +296,6 @@ static uint32_t s_perf_window_tick;
 static uint16_t s_perf_window_frames;
 static uint16_t s_perf_fps;
 
-
 static uint32_t s_perf_sample_count;
 static uint32_t s_perf_sample_missed;
 /* Main-loop watchdog: records the worst iteration gap plus the renderer
@@ -2953,8 +2952,12 @@ static bool READING_ONLY_LEGACY trend_join_column(uint16_t column)
  * Slot addressing is CYCLE-relative: the buffer keeps the last
  * TREND_BUCKET_COUNT buckets, so a slot at the cursor resolves to the
  * buckets in the cursor's own sweep cycle, not the very first one. */
+/* Rescan budget: a 48-bucket catch-up visit burns ~200 ms in one turn
+ * (dual erase+draw+restore per slot) and shows up as a frozen reading.
+ * 16 spreads the same catch-up over a few frames (cursor persists);
+ * refill after rotation takes ~1 s instead of one long hitch. */
 #define TREND_SWEEP_BUDGET 8u
-#define TREND_SWEEP_RESCAN_BUDGET 48u
+#define TREND_SWEEP_RESCAN_BUDGET 16u
 static uint16_t trend_grid_x(uint8_t gi);
 static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1);
 static uint32_t s_sweep_epoch_bucket;
@@ -4279,18 +4282,18 @@ static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
 
 static uint32_t s_trend_live_tick;
 
-/* Live refresh due: snapshot exists, 100 ms elapsed, fresh strings differ.
- * Pure-RAM compare when clean. 10 Hz small steps instead of 1 Hz batches:
- * the same repaint volume spread over 10 passes peaks at ~5 ms/visit
- * instead of ~15 ms, so the trend refresh stops punching a hole in the
- * reading cadence. */
+/* Live refresh due: snapshot exists, 1 s elapsed, fresh strings differ.
+ * Pure-RAM compare when clean. Deliberately NOT faster: at 500 Hz input
+ * the window stats differ on every pass, so cadence only sets how often
+ * a ~25 ms repaint happens — 10 Hz burns 250 ms/s in hitches, 1 Hz burns
+ * 25 ms/s for one stretched frame. Measured live=25~30 ms/visit pre-fix. */
 static bool trend_live_due(uint32_t now)
 {
     uint8_t k;
     char tmp[24];
 
     if (!s_trend_stat_snap_valid) return false;
-    if ((uint32_t)(now - s_trend_live_tick) < 100u) return false;
+    if ((uint32_t)(now - s_trend_live_tick) < 1000u) return false;
     for (k = 0u; k < 3u; k++)
     {
         trend_live_cell(k, tmp, sizeof(tmp));
