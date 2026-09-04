@@ -152,9 +152,17 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #endif
 #if K2000_READING_ONLY_BASELINE
 #define READING_ONLY_LEGACY __attribute__((unused))
-#define READING_ONLY_DIRECT_DMA 1u
+/* Production glyph path: BTE blits from the boot-staged SDRAM cache
+ * (~1 ms/glyph). DIRECT_DMA=1 forces per-glyph serial-Flash DMA (~7 ms
+ * each) — a leftover A/B diagnostic that stalls every range-change
+ * rebuild under 500 Hz input. Pixels are identical either way. */
+#define READING_ONLY_DIRECT_DMA 0u
 #define READING_ONLY_PAGE_FLIP 1u
 #define READING_ONLY_CLEAR_BAND 0u
+/* MRWDP per-slot landing probe, diagnostic only (default OFF). */
+#ifndef TREND_SWEEP_PROBE
+#define TREND_SWEEP_PROBE 0
+#endif
 #else
 #define READING_ONLY_LEGACY
 #define READING_ONLY_DIRECT_DMA 0u
@@ -3143,6 +3151,10 @@ static bool trend_sweep_render_slot(uint16_t slot, uint32_t ref_bucket)
     trend_set_drawn(slot, occ, y0, y1);
     trend_sweep_mirror_drawn(slot);
     s_perf_trend_columns_window++;
+    /* Pixel-landing probe (diagnostic only, default OFF): each peek costs
+     * page selects + width sets + a slow MRWDP read, and at 500 Hz the
+     * storm alone visibly stalls range-change rebuilds. */
+#if TREND_SWEEP_PROBE
     {
         /* Reconciliation probe: did the pixels actually land? Read the
          * slot center back from the visible page. */
@@ -3170,6 +3182,7 @@ static bool trend_sweep_render_slot(uint16_t slot, uint32_t ref_bucket)
             (void)lt7680_gfx_set_canvas_width(320u);
         }
     }
+#endif
     return true;
 }
 
