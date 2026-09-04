@@ -403,12 +403,14 @@ static void reading_only_invalidate_trend_pages(void)
     s_trend_scroll_ms = 0u;
     s_reading_only_trend_column = 0u;
     s_trend_stat_snap_valid = false;
+    /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
+     * unit tells the background pass this is a rotation (targeted repaint
+     * of dynamic strips) rather than a virgin page (full build). Boot pages
+     * start with empty units, which forces the full build. */
     for (page = 0u; page < 2u; page++)
     {
         s_reading_only_page_trend_bg_valid[page] = false;
         s_reading_only_page_trend_curve_valid[page] = false;
-        memset(s_reading_only_page_trend_unit[page], 0,
-               sizeof(s_reading_only_page_trend_unit[page]));
         memset(s_drawn_trend_y0[page], 0, sizeof(s_drawn_trend_y0[page]));
         memset(s_drawn_trend_y1[page], 0, sizeof(s_drawn_trend_y1[page]));
         memset(s_drawn_trend_occupied[page], 0,
@@ -4352,16 +4354,44 @@ static bool reading_only_render_trend_background(void)
      * repaints from it one frame later — identical digits, no flicker. */
     if (!s_trend_stat_snap_valid)
         trend_stat_snapshot_capture();
+    /* Virgin page (boot, cached unit empty): full build. Rotation (stale
+     * cached unit): targeted repaint — badge/line/Trend/verticals/taskbar
+     * are static and survive; only plot + dynamic text strips refresh. */
+    bool virgin = s_reading_only_page_trend_unit[s_render_page][0] == '\0';
 
     if (idx == 0u)
     {
-        /* Header + taskbar share the BAR backdrop; the plot is black. */
-        if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y,
-                         MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_H,
-                         MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+        if (virgin)
         {
-            if (s_reading_only_io_error) idx = 0u;
-            return false;
+            /* Header + taskbar share the BAR backdrop; the plot is black. */
+            if (ui_fill_rect(0u, MAIN_DISPLAY_TREND_Y,
+                             MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_TREND_H,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+            {
+                if (s_reading_only_io_error) idx = 0u;
+                return false;
+            }
+        }
+        else
+        {
+            /* Targeted erases: header content right of the badge + gutter.
+             * Badge, line, Trend text, verticals and taskbar stay. */
+            if (ui_fill_rect(MAIN_DISPLAY_TREND_BADGE_W,
+                             (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H),
+                             (uint16_t)(MAIN_DISPLAY_UI_WIDTH - MAIN_DISPLAY_TREND_BADGE_W),
+                             (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+            {
+                if (s_reading_only_io_error) idx = 0u;
+                return false;
+            }
+            if (ui_fill_rect(0u, MAIN_DISPLAY_PLOT_Y,
+                             MAIN_DISPLAY_TREND_GUTTER_W, MAIN_DISPLAY_PLOT_H,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+            {
+                if (s_reading_only_io_error) idx = 0u;
+                return false;
+            }
         }
         idx = 1u;
         return false;
@@ -4381,6 +4411,7 @@ static bool reading_only_render_trend_background(void)
     if (idx == 2u)
     {
         uint8_t gi;
+        if (!virgin) { idx = 5u; return false; }
         for (gi = 0u; gi < MAIN_DISPLAY_TREND_GRID_COUNT; gi++)
         {
             if (ui_draw_line(trend_grid_x(gi), MAIN_DISPLAY_PLOT_Y,
@@ -4488,8 +4519,11 @@ static bool reading_only_render_trend_background(void)
     }
     if (idx >= 12u && idx <= 16u)
     {
-        /* Taskbar elapsed times under their gridlines, "0s" at newest. */
-        uint8_t gi = (uint8_t)(idx - 12u);
+        /* Taskbar elapsed times under their gridlines, "0s" at newest.
+         * Static per window geometry — rotation rebuilds skip them. */
+        uint8_t gi;
+        if (!virgin) { idx = 17u; return false; }
+        gi = (uint8_t)(idx - 12u);
         char label[8];
         uint16_t gx = trend_grid_x(gi);
         uint16_t lx;
