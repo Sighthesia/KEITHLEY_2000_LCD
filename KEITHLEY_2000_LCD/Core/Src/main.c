@@ -4199,7 +4199,7 @@ static bool trend_chrome_sync_sibling(void)
  * redrawn with a throwaway job (never touches the shared resumable job, so
  * many glyphs may complete in one visit). Snapshot updated on success. */
 static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
-                                  uint16_t x, uint16_t y, uint16_t color,
+                                  uint16_t x, uint16_t y, uint16_t h, uint16_t color,
                                   char *saved, uint8_t saved_size)
 {
     const char *op = old_text != 0 ? old_text : "";
@@ -4219,8 +4219,7 @@ static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
         {
             uint16_t gx = (uint16_t)(x + gi * FONT_TEXT_WIDTH);
             uint8_t k;
-            if (ui_fill_rect(gx, y, FONT_TEXT_WIDTH,
-                             MAIN_DISPLAY_TREND_HEADER_H,
+            if (ui_fill_rect(gx, y, FONT_TEXT_WIDTH, h,
                              MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
                 return false;
             if (*np != '\0')
@@ -4409,7 +4408,10 @@ static bool reading_only_render_trend_background(void)
         char text[24];
         if (x < 200u) { idx = 9u; return false; }
         trend_header_cell(k, text, sizeof(text));
+        /* Erase exactly the content band (24 px): 26 px would smear BAR
+         * ticks onto the plot top edge with every changed glyph. */
         if (!trend_paint_cell_diff(s_trend_chrome_cells[k], text, x, ty,
+                                   (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                                    k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
                                              MAIN_DISPLAY_COLOR_WHITE,
                                    s_trend_chrome_cells[k],
@@ -4543,6 +4545,7 @@ static bool reading_only_render_trend_chrome(void)
         if (x < 200u) { idx = 4u; return false; }
         trend_header_cell(k, text, sizeof(text));
         if (!trend_paint_cell_diff(s_trend_chrome_cells[k], text, x, ty,
+                                   (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                                    k == 3u ? MAIN_DISPLAY_COLOR_GREEN :
                                              MAIN_DISPLAY_COLOR_WHITE,
                                    s_trend_chrome_cells[k],
@@ -4989,8 +4992,12 @@ static void reading_only_render(void)
          * resume via the SUFFIX→TREND edge (the scroll shortcut is dead:
          * s_trend_scroll_ms is always 0). Armed once per presented frame:
          * without the flag the CLEAR detour outlasts the throttle at
-         * 500 Hz and every resume re-suspends → PRESENT unreachable. */
+         * 500 Hz and every resume re-suspends → PRESENT unreachable.
+         * Job-idle gate: suspending mid-glyph lets the resume chain's
+         * draws continue the STALE job (wrong text at wrong coords +
+         * poisoned paint caches). Wait a visit for the glyph instead. */
         if (s_trend_yield_armed &&
+            !s_bitmap_job.active && !s_rif_draw_job.active &&
             s_reading_only_generation != s_reading_only_frame_generation &&
             (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS)
         {
