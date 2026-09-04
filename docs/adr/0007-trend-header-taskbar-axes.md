@@ -73,6 +73,8 @@
 - demo catch-up 预算 16→64（500Hz/30fps 下每轮欠约 17 个样）。
 - TREND 入口读数让行（suspend/resume＋33ms 节流）。
 - 实测（串口 PERF）：input_hz≈510、missed=0、fps 13~19、frame 35~57ms、填充 1400/s→200/s。距 30fps 仍差约 40%，瓶颈在逐操作 canvas 切页＋BTE/GE 忙等待，需驱动层批量优化（未做）。
+- 根因找到（2026-09-04 实测）：`dm=492ms/73ops`——字形走了慢速 Flash DMA（~7ms/字，遗留 A/B 诊断开关 `READING_ONLY_DIRECT_DMA=1`），而非已验收的 SDRAM 缓存 BTE。切回缓存后 `dm≈120ms/100ops`（~1.2ms/字），fps 19~27、frame 11~14ms。单位轮换挡仍有约 1s 全量重建（fps 短暂到 8，设计内）。
+- 旧板"静默卡死"一次（PC 全零，需复位恢复），60~90s soak 未复现；如再现，抓 wedge 前最后 PERF＋复现时长。
 
 ## 影响文件
 

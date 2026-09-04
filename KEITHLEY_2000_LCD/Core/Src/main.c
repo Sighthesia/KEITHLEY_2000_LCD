@@ -155,7 +155,11 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
 #endif
 #if K2000_READING_ONLY_BASELINE
 #define READING_ONLY_LEGACY __attribute__((unused))
-#define READING_ONLY_DIRECT_DMA 1u
+/* Production glyph path: BTE blits from the boot-staged SDRAM cache
+ * (~0.5 ms/glyph). DIRECT_DMA=1 forces per-glyph serial-Flash DMA (~7 ms
+ * each) — a leftover A/B diagnostic that alone caps the frame at ~15 fps
+ * under 500 Hz input. Measured via PERF dm=492ms/73ops on 2026-09-04. */
+#define READING_ONLY_DIRECT_DMA 0u
 #define READING_ONLY_PAGE_FLIP 1u
 #define READING_ONLY_CLEAR_BAND 0u
 #else
