@@ -378,6 +378,22 @@ static bool s_trend_rebuild_transaction;
  * correct) is exactly the cache-match below, so the mask was either a
  * no-op or poison (post-defer stale caches protected from repainting:
  * old-badge/new-badge alternation). Cache-match alone is complete. */
+/* Row snapshot: rotation values arrive in one message but status
+ * (AUTO/lamps/rate) trickles in on later 2 s ticks, so the model steps
+ * through MANUAL+blank, MANUAL+value, AUTO+value... and every step gets
+ * faithfully painted (3 flickers). Freeze the row fields at the first
+ * axis-valid frame of the episode; reading + trend stay live. Cleared
+ * when quiet; a dataless axis never snapshots (honest live rows). */
+static bool s_row_snap_taken;
+static bool s_row_snap_active[STATUS_BAR_CORE_COUNT];
+static char s_row_snap_function[MAIN_DISPLAY_FUNCTION_MAX];
+static char s_row_snap_impedance[MAIN_DISPLAY_META_MAX];
+static char s_row_snap_range[MAIN_DISPLAY_META_MAX];
+static char s_row_snap_rate[MAIN_DISPLAY_META_MAX];
+static char s_row_snap_brand[20];
+static char s_row_snap_active_status[MAIN_DISPLAY_META_MAX];
+static char s_row_snap_temperature[12];
+static char s_row_snap_uptime[12];
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
  * alternating flips then flicker between two near-identical values. First
@@ -416,6 +432,7 @@ static void reading_only_invalidate_trend_pages(void)
      * committed page without its top two rows. */
     if (s_display_enabled)
         s_trend_rebuild_transaction = true;
+    s_row_snap_taken = false;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
@@ -4884,6 +4901,69 @@ static void reading_only_render(void)
         s_reading_only_io_error = false;
         s_perf_frame_start_tick = now;
         if (!header_only) s_display_due_tick = now;
+        /* Row snapshot lifecycle (see decl): hold one coherent row state
+         * for the episode; live again once quiet. */
+        {
+            uint32_t behind =
+                (s_trend.has_sample &&
+                 s_trend.newest_bucket > s_sweep_cursor_bucket)
+                    ? s_trend.newest_bucket - s_sweep_cursor_bucket
+                    : 0u;
+            bool row_episode = s_trend_rebuild_transaction || behind > 8u;
+            if (!row_episode)
+            {
+                s_row_snap_taken = false;
+            }
+            else
+            {
+                if (s_trend_rebuild_transaction && !s_row_snap_taken &&
+                    s_trend_axis_valid)
+                {
+                    uint8_t i;
+                    for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
+                        s_row_snap_active[i] = s_frame.status_active[i];
+                    memcpy(s_row_snap_function, s_frame.function,
+                           sizeof(s_row_snap_function));
+                    memcpy(s_row_snap_impedance, s_frame.impedance,
+                           sizeof(s_row_snap_impedance));
+                    memcpy(s_row_snap_range, s_frame.range,
+                           sizeof(s_row_snap_range));
+                    memcpy(s_row_snap_rate, s_frame.rate,
+                           sizeof(s_row_snap_rate));
+                    memcpy(s_row_snap_brand, s_frame.brand,
+                           sizeof(s_row_snap_brand));
+                    memcpy(s_row_snap_active_status, s_frame.active_status,
+                           sizeof(s_row_snap_active_status));
+                    memcpy(s_row_snap_temperature, s_frame.temperature,
+                           sizeof(s_row_snap_temperature));
+                    memcpy(s_row_snap_uptime, s_frame.uptime,
+                           sizeof(s_row_snap_uptime));
+                    s_row_snap_taken = true;
+                }
+                if (s_row_snap_taken)
+                {
+                    uint8_t i;
+                    for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
+                        s_frame.status_active[i] = s_row_snap_active[i];
+                    memcpy(s_frame.function, s_row_snap_function,
+                           sizeof(s_frame.function));
+                    memcpy(s_frame.impedance, s_row_snap_impedance,
+                           sizeof(s_frame.impedance));
+                    memcpy(s_frame.range, s_row_snap_range,
+                           sizeof(s_frame.range));
+                    memcpy(s_frame.rate, s_row_snap_rate,
+                           sizeof(s_frame.rate));
+                    memcpy(s_frame.brand, s_row_snap_brand,
+                           sizeof(s_frame.brand));
+                    memcpy(s_frame.active_status, s_row_snap_active_status,
+                           sizeof(s_frame.active_status));
+                    memcpy(s_frame.temperature, s_row_snap_temperature,
+                           sizeof(s_frame.temperature));
+                    memcpy(s_frame.uptime, s_row_snap_uptime,
+                           sizeof(s_frame.uptime));
+                }
+            }
+        }
         {
             uint8_t cur_status = 0u;
             for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[(uint8_t[]){0u,1u,2u,3u,5u}[i]]) cur_status |= (1u<<i);
