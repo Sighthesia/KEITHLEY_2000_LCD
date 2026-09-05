@@ -3928,15 +3928,30 @@ static uint8_t row2_info_lamps(void)
                      (s_frame.status_active[5u] ? 8u : 0u));
 }
 
+/* Row-2 fixed cells (ADR-0007): positions never move — only text changes.
+ * The old flow layout (bx cursor from measured widths) pushed every cell
+ * after a widened value (Range!) sideways on every repaint: visible squeeze
+ * flicker. Badge keeps its measured width (function changes are rare and
+ * atomic); cells start at fixed origins past the widest badge. */
+#define ROW2_X_ZIN 162u
+#define ROW2_W_ZIN 108u
+#define ROW2_X_RANGE 280u
+#define ROW2_W_RANGE 248u
+#define ROW2_X_RATE 538u
+#define ROW2_W_RATE 120u
+#define ROW2_X_SHORT_SEP 658u
+static const uint16_t row2_lamp_x[3] = {666u, 726u, 774u};
+
 static bool reading_only_render_info_panel(void)
 {
     static uint8_t idx;
-    static uint16_t bx;
     static uint16_t badge_w;
     /* Right statuses: active-only (ADR-0004), same rule as row 1. */
     static const char *const lamps[3] = {"FILT", "REL", "MATH"};
     static const uint8_t lamp_bits[3] = {7u, 6u, 11u};
     static const char *const cell_names[3] = {"Zin", "Range", "Rate"};
+    static const uint16_t cell_x[3] = {ROW2_X_ZIN, ROW2_X_RANGE, ROW2_X_RATE};
+    static const uint16_t cell_w[3] = {ROW2_W_ZIN, ROW2_W_RANGE, ROW2_W_RATE};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
     {
         uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
@@ -3994,10 +4009,12 @@ static bool reading_only_render_info_panel(void)
         uint16_t text_x = (uint16_t)(MAIN_DISPLAY_BADGE_X + MAIN_DISPLAY_BADGE_PAD_X);
         if (!ui_draw_text(text_x, row2_text_y(),
                           s_frame.function, MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
-        bx = (uint16_t)(MAIN_DISPLAY_BADGE_X + badge_w + 18u); idx++; return false;
+        idx++; return false;
     }
-    /* Stats-style cells (ADR-0004): name on BAR, value on BAR_ALT, 1px light
-     * separator on each block's right. 3 blocks x 4 sub-steps (idx 3..14). */
+    /* Stats-style cells in fixed slots (ADR-0007 row-2 grid): name on BAR,
+     * value on BAR_ALT, 1px light separator at each block's fixed right
+     * edge. 3 blocks x 4 sub-steps (idx 3..14). Value text may change;
+     * positions never do, so a widened Range cannot push Rate/lamps. */
     if (idx >= 3u && idx <= 14u) {
         uint8_t b = (uint8_t)((idx - 3u) / 4u);
         uint8_t sub = (uint8_t)((idx - 3u) % 4u);
@@ -4006,21 +4023,21 @@ static bool reading_only_render_info_panel(void)
         uint16_t val_color = b == 0u ? MAIN_DISPLAY_COLOR_MUTED : MAIN_DISPLAY_COLOR_WHITE;
         uint16_t name_w = (uint16_t)(strlen(cell_names[b]) * FONT_TEXT_WIDTH +
                                      2u * MAIN_DISPLAY_ROW2_CELL_PAD_X);
-        uint16_t val_w = (uint16_t)(strlen(val) * FONT_TEXT_WIDTH +
-                                    2u * MAIN_DISPLAY_ROW2_CELL_PAD_X);
+        uint16_t val_zone = (uint16_t)(cell_w[b] - name_w);
+        uint16_t cx = cell_x[b];
         if (sub == 0u) {
-            if (ui_fill_rect((uint16_t)(bx + name_w), MAIN_DISPLAY_INFO_BAR_Y,
-                             val_w, MAIN_DISPLAY_INFO_BAR_H,
+            if (ui_fill_rect((uint16_t)(cx + name_w), MAIN_DISPLAY_INFO_BAR_Y,
+                             val_zone, MAIN_DISPLAY_INFO_BAR_H,
                              MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK) return false;
             idx++; return false;
         }
         if (sub == 1u) {
-            if (!ui_draw_text((uint16_t)(bx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
+            if (!ui_draw_text((uint16_t)(cx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
                               cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
             idx++; return false;
         }
         if (sub == 2u) {
-            if (!ui_draw_text((uint16_t)(bx + name_w + MAIN_DISPLAY_ROW2_CELL_PAD_X),
+            if (!ui_draw_text((uint16_t)(cx + name_w + MAIN_DISPLAY_ROW2_CELL_PAD_X),
                               row2_text_y(), val, val_color)) return false;
             idx++; return false;
         }
@@ -4028,36 +4045,34 @@ static bool reading_only_render_info_panel(void)
             /* Rate block: no full-height sep here; the section divider
              * between the RATE value and the lamp group is a half-height
              * short line (idx 15), same language as the row-1 brand sep. */
-            bx = (uint16_t)(bx + name_w + val_w);
             idx++; return false;
         }
-        if (ui_fill_rect((uint16_t)(bx + name_w + val_w), MAIN_DISPLAY_INFO_BAR_Y,
+        if (ui_fill_rect((uint16_t)(cx + cell_w[b] - 1u), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
-        bx = (uint16_t)(bx + name_w + val_w + 1u + MAIN_DISPLAY_ROW2_BLOCK_GAP);
         idx++; return false;
     }
     if (idx == 15u) {
-        if (ui_fill_rect(bx,
+        if (ui_fill_rect(ROW2_X_SHORT_SEP,
                          (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
                                     (MAIN_DISPLAY_INFO_BAR_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
                          1u, MAIN_DISPLAY_ROW1_SEP_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
-        bx = (uint16_t)(bx + 1u + MAIN_DISPLAY_ROW2_BLOCK_GAP);
         idx++; return false;
     }
     if (idx >= 16u && idx <= 18u) {
-        /* Active-only right statuses: inactive lamps vanish (no muted text),
-         * and must never cross the trigger separator. */
+        /* Active-only right statuses in fixed slots: inactive lamps vanish
+         * in place (no muted text, no neighbor shift), and must never
+         * cross the trigger separator. */
         while (idx <= 18u && !s_frame.status_active[lamp_bits[idx - 16u]]) idx++;
         if (idx > 18u) return false;
         {
             uint8_t lamp = (uint8_t)(idx - 16u);
-            uint16_t end_x = (uint16_t)(bx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
+            uint16_t lx = row2_lamp_x[lamp];
+            uint16_t end_x = (uint16_t)(lx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
             if (end_x > row2_trig_sep_x()) { idx = 19u; return false; }
-            if (!ui_draw_text(bx, row2_text_y(), lamps[lamp],
+            if (!ui_draw_text(lx, row2_text_y(), lamps[lamp],
                               MAIN_DISPLAY_COLOR_GREEN)) return false;
-            bx = (uint16_t)(end_x + 12u);
             idx++; return false;
         }
     }
