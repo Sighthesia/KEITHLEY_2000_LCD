@@ -4770,10 +4770,12 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-            s_reading_only_stage = s_trend_rebuild_transaction
-                                       ? READING_ONLY_CLEAR
-                                       : (info_need ? READING_ONLY_INFO
-                                                    : READING_ONLY_CLEAR);
+            /* Rows paint inside the transaction on the hidden page and ride
+             * the same atomic flip (PRESENT is already gated): freezing them
+             * here only delays rows one composition behind the reading and
+             * manufactures the mixed page (new reading + old rows). */
+            s_reading_only_stage = info_need ? READING_ONLY_INFO
+                                             : READING_ONLY_CLEAR;
         }
         return;
     }
@@ -4880,9 +4882,7 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-              if (s_trend_rebuild_transaction)
-                  s_reading_only_stage = READING_ONLY_CLEAR;
-              else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+              if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
               else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
              else s_reading_only_stage = READING_ONLY_CLEAR;
         }
@@ -5503,16 +5503,7 @@ static void reading_scene_render(void)
                * reading pipeline can be measured without graph turns. */
               trend_needed = !K2000_TREND_TEST_DISABLE &&
                              (trend_due || s_trend_full_repaint);
-             /* A range/unit change is one visual transaction. Keep the
-              * second row on the old visible page until the hidden trend
-              * rebuild is complete; leave the dirty bit queued for the next
-              * normal frame rather than presenting it independently. */
-             if (s_trend_rebuild_transaction)
-             {
-                 due_regions &= (uint8_t)~RENDER_DIRTY_STATUS;
-                 s_render_status_regions = false;
-             }
-             if (begin_hidden_frame())
+              if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
                 {
