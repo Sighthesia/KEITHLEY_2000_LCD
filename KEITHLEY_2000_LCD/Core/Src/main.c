@@ -4628,7 +4628,6 @@ static bool reading_only_render_trend_background(void)
            sizeof(s_drawn_trend_occupied[0]));
     s_reading_only_page_trend_curve_valid[s_render_page] = false;
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
-    s_trend_rebuild_transaction = false;
     idx = 0u;
     return true;
 }
@@ -4760,7 +4759,10 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-            s_reading_only_stage = info_need ? READING_ONLY_INFO : READING_ONLY_CLEAR;
+            s_reading_only_stage = s_trend_rebuild_transaction
+                                       ? READING_ONLY_CLEAR
+                                       : (info_need ? READING_ONLY_INFO
+                                                    : READING_ONLY_CLEAR);
         }
         return;
     }
@@ -4863,8 +4865,10 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-            if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
-            else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
+             if (s_trend_rebuild_transaction)
+                 s_reading_only_stage = READING_ONLY_CLEAR;
+             else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+             else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
             else s_reading_only_stage = READING_ONLY_CLEAR;
         }
         s_perf_reading_frames_window++;
@@ -5150,6 +5154,7 @@ static void reading_only_render(void)
              * rescale restart above and redraws the window within its
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
+            s_trend_rebuild_transaction = false;
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
@@ -5340,7 +5345,16 @@ static void reading_scene_render(void)
                * reading pipeline can be measured without graph turns. */
               trend_needed = !K2000_TREND_TEST_DISABLE &&
                              (trend_due || s_trend_full_repaint);
-            if (begin_hidden_frame())
+             /* A range/unit change is one visual transaction. Keep the
+              * second row on the old visible page until the hidden trend
+              * rebuild is complete; leave the dirty bit queued for the next
+              * normal frame rather than presenting it independently. */
+             if (s_trend_rebuild_transaction)
+             {
+                 due_regions &= (uint8_t)~RENDER_DIRTY_STATUS;
+                 s_render_status_regions = false;
+             }
+             if (begin_hidden_frame())
             {
                 if ((due_regions & RENDER_DIRTY_READING) != 0u)
                 {
