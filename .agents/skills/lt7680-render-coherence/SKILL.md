@@ -110,13 +110,16 @@ flickers at flip rate. Rules, in order:
    the throttle) → PRESENT unreachable → frozen display, silent serial.
    Also gate suspend on both jobs idle, or the resume chain continues a
    stale job (wrong text, poisoned caches).
-8. **Scope the dual-write gate to the turn, never the pass.** The global
+8. **Scope the dual-write gate to the call, never the pass.** The global
    dual flag (`s_trend_sweep_drawing`) asserted across a multi-visit live
    pass dual-writes every unrelated STATUS/INFO/VALUE stage in between
    straight onto the visible page — rows visibly paint item-by-item on
-   every rotation (user-verified). Live stays hidden-page single; the
-   sibling converges via the shared snapshot pass. Sweep keeps its
-   turn-scoped dual (explicit design).
+   every rotation (user-verified). But single-page live leaves the pages
+   with complementary slots (global idx lands slot0/2 on A, slot1 on B)
+   — two spectra alternating every flip. So: assert dual around the
+   paint call only, clear before the visit returns. Both pages identical
+   every visit (no flicker), gate never leaks (no progressive rows).
+   Sweep keeps its turn-scoped dual (explicit design).
 
 ## Live stat refresh design (2026-09 session)
 

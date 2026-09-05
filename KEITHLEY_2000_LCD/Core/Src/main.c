@@ -4307,17 +4307,17 @@ static bool trend_live_due(uint32_t now)
     return false;
 }
 
-/* Live stat refresh: changed glyphs only (≤2 per visit), hidden-page only.
- * One slot per visit, and the caller does NOT wait for pass completion —
- * it presents every frame and resumes next frame. That removes the
- * stall-then-recover pattern: the reading commits metronomically while
- * stats chase within ~3 frames. The sibling converges through the same
- * shared pass (same snapshot digits, painted as compositions alternate),
- * monotonically and without flicker.
- * Deliberately NOT dual-page: the dual gate is global and a live pass
- * spans many compositions, so dual-live dual-writes every unrelated
- * STATUS/INFO/VALUE stage in between straight onto the visible page —
- * rows visibly paint item-by-item on every rotation. */
+/* Live stat refresh: changed glyphs only (≤2 per visit). One slot per
+ * visit, and the caller does NOT wait for pass completion — it presents
+ * every frame and resumes next frame. That removes the stall-then-recover
+ * pattern: the reading commits metronomically while stats chase within
+ * ~3 frames. Snapshot publishes per completed slot.
+ * Dual-page scoped to the paint CALL (never the pass): both pages get
+ * identical digits every visit (no flip flicker), while the global gate
+ * is already clear again before any unrelated STATUS/INFO/VALUE stage
+ * runs — a pass-scoped gate leaked dual writes across compositions and
+ * rows visibly painted item-by-item; a single-page pass left the pages
+ * with complementary slots (two spectra alternating). */
 static bool reading_only_render_trend_live(void)
 {
     static uint8_t idx;
@@ -4331,14 +4331,18 @@ static bool reading_only_render_trend_live(void)
         uint16_t x = (uint16_t)(MAIN_DISPLAY_TREND_STAT_X0 +
                                 (uint16_t)k * MAIN_DISPLAY_TREND_STAT_PITCH);
         char text[24];
+        bool ok;
         if (k != diff_slot) { diff_slot = k; diff_pos = 0u; }
         trend_live_cell(k, text, sizeof(text));
-        if (!trend_paint_cell_diff(s_trend_stat_snapshot[k], text, x, ty,
+        s_trend_sweep_drawing = true;
+        ok = trend_paint_cell_diff(s_trend_stat_snapshot[k], text, x, ty,
                                    (uint16_t)(MAIN_DISPLAY_TREND_HEADER_H - MAIN_DISPLAY_YELLOW_LINE_H),
                                    MAIN_DISPLAY_COLOR_WHITE,
                                    s_trend_stat_snapshot[k],
                                    sizeof(s_trend_stat_snapshot[k]),
-                                   &diff_pos, 2u))
+                                   &diff_pos, 2u);
+        s_trend_sweep_drawing = false;
+        if (!ok)
         {
             if (s_reading_only_io_error) idx = 0u;
             return false;
