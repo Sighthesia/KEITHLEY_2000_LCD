@@ -4880,11 +4880,11 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-             if (s_trend_rebuild_transaction)
-                 s_reading_only_stage = READING_ONLY_CLEAR;
-             else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
-             else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
-            else s_reading_only_stage = READING_ONLY_CLEAR;
+              if (s_trend_rebuild_transaction)
+                  s_reading_only_stage = READING_ONLY_CLEAR;
+              else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+              else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
+             else s_reading_only_stage = READING_ONLY_CLEAR;
         }
         s_perf_reading_frames_window++;
         return;
@@ -4905,10 +4905,18 @@ static void reading_only_render(void)
         st = lt7680_gfx_select_canvas_page(s_render_page);
         if (st != LT7680_OK ||
             (st == LT7680_OK &&
-             ((READING_ONLY_CLEAR_BAND &&
-               ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, MAIN_DISPLAY_UI_WIDTH,
-                            MAIN_DISPLAY_READING_H, MAIN_DISPLAY_COLOR_BG) !=
-                   LT7680_OK) ||
+              ((READING_ONLY_CLEAR_BAND &&
+                /* Start below the INFO divider (y50 h2): the divider is
+                 * painted by the INFO stage but lives inside the reading
+                 * band's first two rows, so a full-band clear erases it
+                 * every composition and it blinks whenever INFO skips (=
+                 * almost always). Digits start at READING_VALUE_Y below. */
+                ui_fill_rect(0u, (uint16_t)(MAIN_DISPLAY_READING_Y +
+                                              MAIN_DISPLAY_YELLOW_LINE_H),
+                             MAIN_DISPLAY_UI_WIDTH,
+                             (uint16_t)(MAIN_DISPLAY_READING_H -
+                                        MAIN_DISPLAY_YELLOW_LINE_H),
+                             MAIN_DISPLAY_COLOR_BG) != LT7680_OK) ||
               (page_unit_changed &&
                s_reading_only_page_unit_w[s_render_page] != 0u &&
                ui_fill_rect(s_reading_only_page_unit_x[s_render_page],
