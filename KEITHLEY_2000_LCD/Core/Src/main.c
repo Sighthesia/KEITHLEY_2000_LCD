@@ -4971,9 +4971,18 @@ static void reading_only_render(void)
                * honest "--" once the background completes. */
               if (!s_trend_axis_valid && s_trend_rebuild_transaction)
                   info_need = false;
-               if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
-              else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
-             else s_reading_only_stage = READING_ONLY_CLEAR;
+               /* A unit change invalidates the trend scene before the new
+                * status fields have necessarily arrived. Keep the last
+                * committed row on the hidden page while the trend rebuilds;
+                * painting the intermediate row here is what exposed the
+                * MANUAL/blank/AUTO sequence. The completed trend stage will
+                * re-enter STATUS on this same page before presenting it. */
+               if (s_trend_rebuild_transaction || s_initial_page_pending ||
+                   !s_display_enabled)
+                   s_reading_only_stage = READING_ONLY_CLEAR;
+               else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+               else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
+               else s_reading_only_stage = READING_ONLY_CLEAR;
         }
         s_perf_reading_frames_window++;
         return;
@@ -5300,15 +5309,16 @@ static void reading_only_render(void)
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_trend_rebuild_transaction = false;
-            /* Sibling fast-forward: this page now carries the complete
-             * new-unit scene. BTE-clone the whole UI page to the still
-             * invalidated sibling and mirror the row + trend caches, so the
-             * sibling composition diffs forward instead of repainting two
-             * full pages (~1000 fills ≈ the rotation storm window). Reading
-             * digit caches stay stale on purpose: CLEAR erases the band and
-             * the stale caches force a full cheap BTE digit repaint (fresh
-             * caches + erased pixels would leave blank digits). BTE failure
-             * falls back to the normal rebuild path untouched. */
+            /* The row was deliberately deferred while this transaction was
+             * rebuilding. Repaint it before the first commit of the new
+             * unit, so the visible page never contains mixed generations. */
+            s_row_snap_taken = false;
+            /* Do not synchronously clone the whole UI page here. The former
+             * eight-band loop blocked the scheduler for 40+ ms and exposed
+             * the row as a separate visual generation. The next hidden-page
+             * pass synchronizes the changed regions with the normal bounded
+             * renderer. */
+            #if 0
             {
                 /* Full-page BTE exceeds wait_bte_idle (~10-20 ms), so clone
                  * in 8 horizontal bands (~5 ms each). All-or-nothing: caches
@@ -5390,7 +5400,8 @@ static void reading_only_render(void)
                     }
                 }
             }
-            s_reading_only_stage = READING_ONLY_PRESENT;
+            #endif
+            s_reading_only_stage = READING_ONLY_STATUS;
             return;
         }
         /* ADR-0006: plot-only band — the sweep dual-page-writes every pixel,
