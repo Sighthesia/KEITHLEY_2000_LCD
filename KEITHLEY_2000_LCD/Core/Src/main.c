@@ -4307,16 +4307,17 @@ static bool trend_live_due(uint32_t now)
     return false;
 }
 
-/* Live stat refresh: changed glyphs only (≤2 per visit), dual-page so both
- * canvases stay identical without any copy. One slot per visit, and the
- * caller does NOT wait for pass completion — it presents every frame and
- * resumes next frame. That removes the stall-then-recover pattern: the
- * reading commits metronomically while stats chase within ~3 frames.
- * Snapshot publishes per completed slot (not just at pass end), so any cut
- * point leaves both pages showing identical, possibly slightly stale
- * digits. Worst case is a single-glyph single-frame tear mid-slot —
- * far below visibility and self-healing next visit; no sustained flicker
- * or divergence possible by construction. */
+/* Live stat refresh: changed glyphs only (≤2 per visit), hidden-page only.
+ * One slot per visit, and the caller does NOT wait for pass completion —
+ * it presents every frame and resumes next frame. That removes the
+ * stall-then-recover pattern: the reading commits metronomically while
+ * stats chase within ~3 frames. The sibling converges through the same
+ * shared pass (same snapshot digits, painted as compositions alternate),
+ * monotonically and without flicker.
+ * Deliberately NOT dual-page: the dual gate is global and a live pass
+ * spans many compositions, so dual-live dual-writes every unrelated
+ * STATUS/INFO/VALUE stage in between straight onto the visible page —
+ * rows visibly paint item-by-item on every rotation. */
 static bool reading_only_render_trend_live(void)
 {
     static uint8_t idx;
@@ -4324,7 +4325,6 @@ static bool reading_only_render_trend_live(void)
     static uint8_t diff_pos;
     uint16_t ty = (uint16_t)(MAIN_DISPLAY_TREND_HEADER_Y + MAIN_DISPLAY_YELLOW_LINE_H);
 
-    s_trend_sweep_drawing = true;
     if (idx <= 2u)
     {
         uint8_t k = (uint8_t)idx;
@@ -4347,7 +4347,6 @@ static bool reading_only_render_trend_live(void)
         return false;
     }
     s_trend_live_tick = HAL_GetTick();
-    s_trend_sweep_drawing = false;
     idx = 0u;
     return true;
 }

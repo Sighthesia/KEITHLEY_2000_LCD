@@ -110,6 +110,13 @@ flickers at flip rate. Rules, in order:
    the throttle) → PRESENT unreachable → frozen display, silent serial.
    Also gate suspend on both jobs idle, or the resume chain continues a
    stale job (wrong text, poisoned caches).
+8. **Scope the dual-write gate to the turn, never the pass.** The global
+   dual flag (`s_trend_sweep_drawing`) asserted across a multi-visit live
+   pass dual-writes every unrelated STATUS/INFO/VALUE stage in between
+   straight onto the visible page — rows visibly paint item-by-item on
+   every rotation (user-verified). Live stays hidden-page single; the
+   sibling converges via the shared snapshot pass. Sweep keeps its
+   turn-scoped dual (explicit design).
 
 ## Live stat refresh design (2026-09 session)
 
