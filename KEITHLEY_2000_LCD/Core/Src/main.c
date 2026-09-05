@@ -372,6 +372,7 @@ static char s_reading_only_page_rate[2][32];
 static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
+static bool s_trend_rebuild_transaction;
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
  * alternating flips then flicker between two near-identical values. First
@@ -404,6 +405,7 @@ static void reading_only_invalidate_trend_pages(void)
     s_trend_scroll_ms = 0u;
     s_reading_only_trend_column = 0u;
     s_trend_stat_snap_valid = false;
+    s_trend_rebuild_transaction = true;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
@@ -4626,6 +4628,7 @@ static bool reading_only_render_trend_background(void)
            sizeof(s_drawn_trend_occupied[0]));
     s_reading_only_page_trend_curve_valid[s_render_page] = false;
     s_reading_only_page_trend_bg_valid[s_render_page] = true;
+    s_trend_rebuild_transaction = false;
     idx = 0u;
     return true;
 }
@@ -5167,6 +5170,15 @@ static void reading_only_render(void)
     }
     case READING_ONLY_PRESENT:
     {
+        if (s_trend_rebuild_transaction)
+        {
+            /* A range/unit change is a visual transaction: keep the old
+             * visible page until the hidden page contains the complete
+             * trend chrome, axis and plot. Presenting each scheduler slice
+             * exposes the left-to-right/top-to-bottom rebuild. */
+            s_reading_only_stage = READING_ONLY_TREND;
+            return;
+        }
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
         if (st == LT7680_OK)
             st = lt7680_write_reg(0x12u, 0x48u);
