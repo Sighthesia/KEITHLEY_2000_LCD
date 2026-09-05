@@ -4925,6 +4925,16 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                  strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                  s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
+              /* Defer INFO while the axis doesn't exist yet: INFO runs
+               * before TREND recomputes the axis in the pipeline, so the
+               * first post-rotation pass would bake "AUTO --" into pixels
+               * and caches (one flash + one wasted full repaint). The rows
+               * stay complete-but-old for one composition, then paint real
+               * values with the atomic flip. Boot is unaffected (no
+               * transaction there); a truly dataless axis still shows an
+               * honest "--" once the background completes. */
+              if (!s_trend_axis_valid && s_trend_rebuild_transaction)
+                  info_need = false;
               if (s_clone_ok_episode && s_row_episode_done_info)
                   info_need = false;
                if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
