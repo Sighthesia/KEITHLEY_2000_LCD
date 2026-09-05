@@ -2959,7 +2959,10 @@ static bool READING_ONLY_LEGACY trend_join_column(uint16_t column)
  * 16 spreads the same catch-up over a few frames (cursor persists);
  * refill after rotation takes ~1 s instead of one long hitch. */
 #define TREND_SWEEP_BUDGET 8u
-#define TREND_SWEEP_RESCAN_BUDGET 16u
+/* Post-rotation drain: a bigger bite finishes the visible catch-up
+ * sweep faster (fewer replay frames); steady-state incremental visits
+ * still use TREND_SWEEP_BUDGET. */
+#define TREND_SWEEP_RESCAN_BUDGET 32u
 static uint16_t trend_grid_x(uint8_t gi);
 static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1);
 static uint32_t s_sweep_epoch_bucket;
@@ -4785,7 +4788,11 @@ static void reading_only_render(void)
         if (!reading_due && !header_due && !dot_due)
             return;
         /* Header-only: still use hidden page + present to avoid visible tear, but copy reading band. */
-        bool header_only = header_due && !reading_due && !dot_due;
+        /* No header-only presents before the first full reading composition:
+         * at boot that path commits a top-rows-only page while the virgin
+         * pipeline is still building (visible stall on two rows). */
+        bool header_only = header_due && !reading_due && !dot_due &&
+                           s_reading_only_frame_generation != 0u;
         s_is_header_only = header_only;
 
         /* A/B: the direct-DMA diagnostic holds the selected page to determine
@@ -5045,6 +5052,39 @@ static void reading_only_render(void)
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
 
+        /* Stale-composition kill: a rotation sample that lands mid-pipeline
+         * leaves s_frame on the old unit while the trend buffer already
+         * carries the new one. Finishing that composition presents a mixed
+         * page (old rows/reading + new background), and the next fresh
+         * composition presents the new rows again — the visible "second
+         * row paints twice, axis/top update before the reading" sequence.
+         * Abandon back to IDLE for a fresh reformat instead; the partial
+         * hidden work is opaque and gets fully repainted. Bounded cost:
+         * IDLE re-runs within the 33 ms throttle (worst case one extra
+         * partial pipeline, ~50 ms, vs seconds of mixed display).
+         * Stem-to-stem compare: the frame unit has the DC/AC half-height
+         * suffix split off ("VDC"->"V") while the buffer keeps the full
+         * unit — a raw strcmp is true for every VDC-family frame and would
+         * abandon forever (zero commits, silent serial). */
+        {
+            char trend_stem[TREND_UNIT_ID_MAX];
+            size_t stem_n;
+            strncpy(trend_stem, trend_unit, sizeof(trend_stem) - 1u);
+            trend_stem[sizeof(trend_stem) - 1u] = '\0';
+            stem_n = strlen(trend_stem);
+            if (stem_n >= 3u &&
+                ((trend_stem[stem_n - 2u] == 'D' &&
+                  trend_stem[stem_n - 1u] == 'C') ||
+                 (trend_stem[stem_n - 2u] == 'A' &&
+                  trend_stem[stem_n - 1u] == 'C')))
+                trend_stem[stem_n - 2u] = '\0';
+            if (strcmp(trend_stem, s_frame.unit) != 0)
+            {
+                s_reading_only_stage = READING_ONLY_IDLE;
+                return;
+            }
+        }
+
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
             s_trend_axis_valid = false;
@@ -5155,6 +5195,96 @@ static void reading_only_render(void)
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_trend_rebuild_transaction = false;
+            /* Sibling fast-forward: this page now carries the complete
+             * new-unit scene. BTE-clone the whole UI page to the still
+             * invalidated sibling and mirror the row + trend caches, so the
+             * sibling composition diffs forward instead of repainting two
+             * full pages (~1000 fills ≈ the rotation storm window). Reading
+             * digit caches stay stale on purpose: CLEAR erases the band and
+             * the stale caches force a full cheap BTE digit repaint (fresh
+             * caches + erased pixels would leave blank digits). BTE failure
+             * falls back to the normal rebuild path untouched. */
+            {
+                /* Full-page BTE exceeds wait_bte_idle (~10-20 ms), so clone
+                 * in 8 horizontal bands (~5 ms each). All-or-nothing: caches
+                 * mirror only when every band lands. */
+                uint8_t sib = (uint8_t)(s_render_page ^ 1u);
+                lt7680_rect_t full;
+                lt7680_status_t cs = LT7680_ERR_PARAM;
+                uint8_t band;
+                panel_transform_ui_rect_to_fb(0u, 0u, MAIN_DISPLAY_UI_WIDTH,
+                                              MAIN_DISPLAY_UI_HEIGHT,
+                                              &full.x, &full.y,
+                                              &full.w, &full.h);
+                if (full.w != 0u && full.h != 0u)
+                {
+                    cs = LT7680_OK;
+                    for (band = 0u; band < 8u && cs == LT7680_OK; band++)
+                    {
+                        lt7680_rect_t strip = full;
+                        strip.y = (uint16_t)(full.y + band * (full.h / 8u));
+                        strip.h = (uint16_t)(band < 7u ? full.h / 8u
+                                                       : full.h - 7u * (full.h / 8u));
+                        cs = lt7680_gfx_copy_rect(s_render_page, sib, &strip);
+                    }
+                    if (cs == LT7680_OK)
+                    {
+                        s_reading_only_page_status_valid[sib] =
+                            s_reading_only_page_status_valid[s_render_page];
+                        s_reading_only_page_status_lamps[sib] =
+                            s_reading_only_page_status_lamps[s_render_page];
+                    memcpy(s_reading_only_page_row1[sib],
+                           s_reading_only_page_row1[s_render_page],
+                           sizeof(s_reading_only_page_row1[0]));
+                    memcpy(s_reading_only_page_active_status[sib],
+                           s_reading_only_page_active_status[s_render_page],
+                           sizeof(s_reading_only_page_active_status[0]));
+                    memcpy(s_reading_only_page_temperature[sib],
+                           s_reading_only_page_temperature[s_render_page],
+                           sizeof(s_reading_only_page_temperature[0]));
+                    memcpy(s_reading_only_page_uptime[sib],
+                           s_reading_only_page_uptime[s_render_page],
+                           sizeof(s_reading_only_page_uptime[0]));
+                    memcpy(s_reading_only_page_brand[sib],
+                           s_reading_only_page_brand[s_render_page],
+                           sizeof(s_reading_only_page_brand[0]));
+                    memcpy(s_reading_only_page_function[sib],
+                           s_reading_only_page_function[s_render_page],
+                           sizeof(s_reading_only_page_function[0]));
+                    memcpy(s_reading_only_page_impedance[sib],
+                           s_reading_only_page_impedance[s_render_page],
+                           sizeof(s_reading_only_page_impedance[0]));
+                    memcpy(s_reading_only_page_range[sib],
+                           s_reading_only_page_range[s_render_page],
+                           sizeof(s_reading_only_page_range[0]));
+                    memcpy(s_reading_only_page_rate[sib],
+                           s_reading_only_page_rate[s_render_page],
+                           sizeof(s_reading_only_page_rate[0]));
+                    s_reading_only_page_info_lamps[sib] =
+                        s_reading_only_page_info_lamps[s_render_page];
+                    s_reading_only_page_trig_dot[sib] =
+                        s_reading_only_page_trig_dot[s_render_page];
+                    s_reading_only_page_info_valid[sib] =
+                        s_reading_only_page_info_valid[s_render_page];
+                    memcpy(s_reading_only_page_trend_unit[sib],
+                           s_reading_only_page_trend_unit[s_render_page],
+                           sizeof(s_reading_only_page_trend_unit[0]));
+                    s_reading_only_page_trend_bg_valid[sib] = true;
+                    s_reading_only_page_trend_curve_valid[sib] = true;
+                    memcpy(s_drawn_trend_y0[sib],
+                           s_drawn_trend_y0[s_render_page],
+                           sizeof(s_drawn_trend_y0[0]));
+                    memcpy(s_drawn_trend_y1[sib],
+                           s_drawn_trend_y1[s_render_page],
+                           sizeof(s_drawn_trend_y1[0]));
+                    memcpy(s_drawn_trend_occupied[sib],
+                           s_drawn_trend_occupied[s_render_page],
+                           sizeof(s_drawn_trend_occupied[0]));
+                    s_trend_grid_dirty[sib] =
+                        s_trend_grid_dirty[s_render_page];
+                    }
+                }
+            }
             s_reading_only_stage = READING_ONLY_PRESENT;
             return;
         }
@@ -5166,9 +5296,21 @@ static void reading_only_render(void)
          * present — the pass resumes next frame. Blocking present on pass
          * completion froze the reading for the whole pass whenever stats
          * churned (stall-then-recover). Dual-page + per-slot snapshot
-         * publish keep every cut point flicker-free. */
-        if (trend_live_due(now))
-            (void)reading_only_render_trend_live();
+         * publish keep every cut point flicker-free. Skip while the sweep
+         * is draining a post-rotation backlog: the background snapshot is
+         * already fresh, and a wholesale live repaint on top of the drain
+         * just doubles the storm. The due flag stays set, so live resumes
+         * on its own once the cursor catches up (no starvation: drain
+         * outruns arrivals). */
+        {
+            uint32_t sweep_behind =
+                (s_trend.has_sample &&
+                 s_trend.newest_bucket > s_sweep_cursor_bucket)
+                    ? s_trend.newest_bucket - s_sweep_cursor_bucket
+                    : 0u;
+            if (sweep_behind <= 32u && trend_live_due(now))
+                (void)reading_only_render_trend_live();
+        }
         s_reading_only_page_trend_curve_valid[s_render_page] = true;
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
