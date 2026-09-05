@@ -373,6 +373,14 @@ static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static bool s_trend_rebuild_transaction;
+/* Row-calm window: freeze second-scale churn (uptime/temperature/TRIG dot)
+ * across a rotation episode so the two pages paint identical rows. Slow
+ * storm compositions otherwise straddle a clock tick every time (A-rows
+ * show one second, B-rows the next) and every rotation visibly updates
+ * the rows twice. Set at invalidate, extended past the fresh rebuild. */
+static char s_row_frozen_temp[12];
+static char s_row_frozen_uptime[12];
+static uint32_t s_row_calm_until;
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
  * alternating flips then flicker between two near-identical values. First
@@ -411,6 +419,12 @@ static void reading_only_invalidate_trend_pages(void)
      * committed page without its top two rows. */
     if (s_display_enabled)
         s_trend_rebuild_transaction = true;
+    strncpy(s_row_frozen_temp, s_frame.temperature,
+            sizeof(s_row_frozen_temp) - 1u);
+    s_row_frozen_temp[sizeof(s_row_frozen_temp) - 1u] = '\0';
+    strncpy(s_row_frozen_uptime, s_frame.uptime,
+            sizeof(s_row_frozen_uptime) - 1u);
+    s_row_frozen_uptime[sizeof(s_row_frozen_uptime) - 1u] = '\0';
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
@@ -4793,7 +4807,10 @@ static void reading_only_render(void)
         bool header_due = (uint32_t)(now - s_temperature_tick) >= 1000u;
         bool reading_due = s_reading_only_dirty &&
                            (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
-        bool dot_due = s_trig_dot_pending &&
+        /* Row-calm: freeze second-scale churn for a rotation episode (see
+         * decl). Wrap-safe: quiet until the window passes. */
+        bool row_calm = ((int32_t)(now - s_row_calm_until) < 0);
+        bool dot_due = s_trig_dot_pending && !row_calm &&
                        (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
         if (!reading_due && !header_due && !dot_due)
             return;
@@ -4836,6 +4853,17 @@ static void reading_only_render(void)
 #endif
         main_display_format(&s_ui, &s_frame);
         refresh_runtime_snapshot();
+        /* Row-calm: paint the frozen second-scale fields so paint and cache
+         * agree; live values resume automatically when the window passes. */
+        if (row_calm)
+        {
+            strncpy(s_frame.temperature, s_row_frozen_temp,
+                    sizeof(s_frame.temperature) - 1u);
+            s_frame.temperature[sizeof(s_frame.temperature) - 1u] = '\0';
+            strncpy(s_frame.uptime, s_row_frozen_uptime,
+                    sizeof(s_frame.uptime) - 1u);
+            s_frame.uptime[sizeof(s_frame.uptime) - 1u] = '\0';
+        }
         /* Row-2 Range cell shows mode + resident range ("AUTO ±10V");
          * the trend header keeps MAX/AVG/MIN only. Content-driven repaint
          * comes free via the existing range string compare. */
@@ -4870,12 +4898,12 @@ static void reading_only_render(void)
              char cur_row1[MAIN_DISPLAY_META_MAX];
              bool status_need;
              row1_status_text(cur_row1, sizeof(cur_row1));
-             status_need = !s_reading_only_page_status_valid[s_render_page] ||
-                                s_reading_only_page_status_lamps[s_render_page] != cur_status ||
-                                strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0 ||
-                                strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0 ||
-                                strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
-               bool info_need = s_trig_dot_pending ||
+              status_need = !s_reading_only_page_status_valid[s_render_page] ||
+                                 s_reading_only_page_status_lamps[s_render_page] != cur_status ||
+                                 strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0 ||
+                                 (!row_calm && strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0) ||
+                                 (!row_calm && strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0);
+                bool info_need = (s_trig_dot_pending && !row_calm) ||
                                 !s_reading_only_page_info_valid[s_render_page] ||
                                 strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
                                 strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
@@ -5211,6 +5239,7 @@ static void reading_only_render(void)
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_trend_rebuild_transaction = false;
+            s_row_calm_until = now + 1500u;
             /* Sibling fast-forward: this page now carries the complete
              * new-unit scene. BTE-clone the whole UI page to the still
              * invalidated sibling and mirror the row + trend caches, so the
