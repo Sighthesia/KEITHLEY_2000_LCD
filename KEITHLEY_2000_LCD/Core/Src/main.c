@@ -405,7 +405,12 @@ static void reading_only_invalidate_trend_pages(void)
     s_trend_scroll_ms = 0u;
     s_reading_only_trend_column = 0u;
     s_trend_stat_snap_valid = false;
-    s_trend_rebuild_transaction = true;
+    /* No transaction before the first present: the visible page is still
+     * boot-black, so there is nothing to preserve — and starting one here
+     * freezes STATUS/INFO out of the virgin pipeline, leaving the first
+     * committed page without its top two rows. */
+    if (s_display_enabled)
+        s_trend_rebuild_transaction = true;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
