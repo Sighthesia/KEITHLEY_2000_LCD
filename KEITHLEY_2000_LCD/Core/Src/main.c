@@ -373,13 +373,16 @@ static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static bool s_trend_rebuild_transaction;
-/* Row-calm window: freeze second-scale churn (uptime/temperature/TRIG dot)
- * across a rotation episode so the two pages paint identical rows. Slow
- * storm compositions otherwise straddle a clock tick every time (A-rows
- * show one second, B-rows the next) and every rotation visibly updates
- * the rows twice. Set at invalidate, extended past the fresh rebuild. */
-static char s_row_frozen_temp[12];
-static char s_row_frozen_uptime[12];
+/* Row-episode rule: one rotation paints the rows once. Slow storm
+ * compositions otherwise straddle a clock tick every time (A-rows show one
+ * second, B-rows the next) and every rotation visibly updates the rows
+ * twice. done_* latch per completed pass; the latch masks only when the
+ * sibling clone landed (pixels guaranteed), so a BTE failure still falls
+ * back to a normal repaint. calm_until spans the episode past the fresh
+ * rebuild (covers the sibling composition + drain); quiet IDLE clears. */
+static bool s_row_episode_done_status;
+static bool s_row_episode_done_info;
+static bool s_clone_ok_episode;
 static uint32_t s_row_calm_until;
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
@@ -419,12 +422,9 @@ static void reading_only_invalidate_trend_pages(void)
      * committed page without its top two rows. */
     if (s_display_enabled)
         s_trend_rebuild_transaction = true;
-    strncpy(s_row_frozen_temp, s_frame.temperature,
-            sizeof(s_row_frozen_temp) - 1u);
-    s_row_frozen_temp[sizeof(s_row_frozen_temp) - 1u] = '\0';
-    strncpy(s_row_frozen_uptime, s_frame.uptime,
-            sizeof(s_row_frozen_uptime) - 1u);
-    s_row_frozen_uptime[sizeof(s_row_frozen_uptime) - 1u] = '\0';
+    s_row_episode_done_status = false;
+    s_row_episode_done_info = false;
+    s_clone_ok_episode = false;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
@@ -3885,6 +3885,7 @@ static bool reading_only_render_status_bar(void)
     for (uint8_t i = 0u; i < 5u; i++) if (s_frame.status_active[status_bits[i]]) cur |= (1u<<i);
         s_reading_only_page_status_lamps[s_render_page] = cur;
     }
+    s_row_episode_done_status = true;
     return true;
 }
 /* Row-2 geometry (ADR-0004): green badge, stats-style cells, right trigger. */
@@ -4113,6 +4114,7 @@ static bool reading_only_render_info_panel(void)
     s_trig_dot_pending = false;
     s_reading_only_page_info_valid[s_render_page] = true;
     idx = 0u;
+    s_row_episode_done_info = true;
     return true;
 }
 
@@ -4807,10 +4809,7 @@ static void reading_only_render(void)
         bool header_due = (uint32_t)(now - s_temperature_tick) >= 1000u;
         bool reading_due = s_reading_only_dirty &&
                            (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
-        /* Row-calm: freeze second-scale churn for a rotation episode (see
-         * decl). Wrap-safe: quiet until the window passes. */
-        bool row_calm = ((int32_t)(now - s_row_calm_until) < 0);
-        bool dot_due = s_trig_dot_pending && !row_calm &&
+        bool dot_due = s_trig_dot_pending &&
                        (uint32_t)(now - s_display_due_tick) >= DISPLAY_FRAME_PERIOD_MS;
         if (!reading_due && !header_due && !dot_due)
             return;
@@ -4853,17 +4852,6 @@ static void reading_only_render(void)
 #endif
         main_display_format(&s_ui, &s_frame);
         refresh_runtime_snapshot();
-        /* Row-calm: paint the frozen second-scale fields so paint and cache
-         * agree; live values resume automatically when the window passes. */
-        if (row_calm)
-        {
-            strncpy(s_frame.temperature, s_row_frozen_temp,
-                    sizeof(s_frame.temperature) - 1u);
-            s_frame.temperature[sizeof(s_frame.temperature) - 1u] = '\0';
-            strncpy(s_frame.uptime, s_row_frozen_uptime,
-                    sizeof(s_frame.uptime) - 1u);
-            s_frame.uptime[sizeof(s_frame.uptime) - 1u] = '\0';
-        }
         /* Row-2 Range cell shows mode + resident range ("AUTO ±10V");
          * the trend header keeps MAX/AVG/MIN only. Content-driven repaint
          * comes free via the existing range string compare. */
@@ -4898,19 +4886,33 @@ static void reading_only_render(void)
              char cur_row1[MAIN_DISPLAY_META_MAX];
              bool status_need;
              row1_status_text(cur_row1, sizeof(cur_row1));
+              /* Episode rule: after one completed pass with a landed clone,
+               * the sibling shows identical pixels — mask further passes
+               * until the episode span passes (quiet IDLE clears below). */
+              bool row_episode = s_trend_rebuild_transaction ||
+                                 ((int32_t)(now - s_row_calm_until) < 0);
+              if (!row_episode)
+              {
+                  s_row_episode_done_status = false;
+                  s_row_episode_done_info = false;
+              }
               status_need = !s_reading_only_page_status_valid[s_render_page] ||
                                  s_reading_only_page_status_lamps[s_render_page] != cur_status ||
                                  strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0 ||
-                                 (!row_calm && strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0) ||
-                                 (!row_calm && strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0);
-                bool info_need = (s_trig_dot_pending && !row_calm) ||
+                                 strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0 ||
+                                 strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
+              if (s_clone_ok_episode && s_row_episode_done_status)
+                  status_need = false;
+                bool info_need = s_trig_dot_pending ||
                                 !s_reading_only_page_info_valid[s_render_page] ||
                                 strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
                                 strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
-                                strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
-                                s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-              if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
+                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
+                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
+              if (s_clone_ok_episode && s_row_episode_done_info)
+                  info_need = false;
+               if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
               else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
              else s_reading_only_stage = READING_ONLY_CLEAR;
         }
@@ -5274,6 +5276,7 @@ static void reading_only_render(void)
                     }
                     if (cs == LT7680_OK)
                     {
+                        s_clone_ok_episode = true;
                         s_reading_only_page_status_valid[sib] =
                             s_reading_only_page_status_valid[s_render_page];
                         s_reading_only_page_status_lamps[sib] =
