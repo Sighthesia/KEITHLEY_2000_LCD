@@ -378,20 +378,18 @@ static bool s_trend_rebuild_transaction;
  * correct) is exactly the cache-match below, so the mask was either a
  * no-op or poison (post-defer stale caches protected from repainting:
  * old-badge/new-badge alternation). Cache-match alone is complete. */
-/* Row snapshot: rotation values arrive in one message but status
- * (AUTO/lamps/rate) trickles in on later 2 s ticks, so the model steps
- * through MANUAL+blank, MANUAL+value, AUTO+value... and every step gets
- * faithfully painted (3 flickers). Freeze the row fields at the first
- * axis-valid frame of the episode; reading + trend stay live. Cleared
- * when quiet; a dataless axis never snapshots (honest live rows). */
+/* Row snapshot: second-scale churn (uptime/temperature/lamp bits/measured
+ * rate) straddles the two pages' row paints during slow storm compositions,
+ * so every rotation visibly updates the rows twice. Freeze just the churn
+ * fields at the first post-invalidate frame; rotation content (function /
+ * impedance / range / brand) stays live — it changes once and both pages
+ * converge on it via cache-match. Reading + trend stay live. No axis
+ * requirement (axis-independence is the point: temp/uptime/bits need no
+ * axis, and waiting for it deadlocks past the transaction window). Cleared
+ * when quiet; pre-data frames never snapshot (temp/uptime empty). */
 static bool s_row_snap_taken;
 static bool s_row_snap_active[STATUS_BAR_CORE_COUNT];
-static char s_row_snap_function[MAIN_DISPLAY_FUNCTION_MAX];
-static char s_row_snap_impedance[MAIN_DISPLAY_META_MAX];
-static char s_row_snap_range[MAIN_DISPLAY_META_MAX];
 static char s_row_snap_rate[MAIN_DISPLAY_META_MAX];
-static char s_row_snap_brand[20];
-static char s_row_snap_active_status[MAIN_DISPLAY_META_MAX];
 static char s_row_snap_temperature[12];
 static char s_row_snap_uptime[12];
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
@@ -4917,23 +4915,14 @@ static void reading_only_render(void)
             else
             {
                 if (s_trend_rebuild_transaction && !s_row_snap_taken &&
-                    s_trend_axis_valid)
+                    s_ui.any_message && s_frame.temperature[0] != '\0' &&
+                    s_frame.uptime[0] != '\0')
                 {
                     uint8_t i;
                     for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
                         s_row_snap_active[i] = s_frame.status_active[i];
-                    memcpy(s_row_snap_function, s_frame.function,
-                           sizeof(s_row_snap_function));
-                    memcpy(s_row_snap_impedance, s_frame.impedance,
-                           sizeof(s_row_snap_impedance));
-                    memcpy(s_row_snap_range, s_frame.range,
-                           sizeof(s_row_snap_range));
                     memcpy(s_row_snap_rate, s_frame.rate,
                            sizeof(s_row_snap_rate));
-                    memcpy(s_row_snap_brand, s_frame.brand,
-                           sizeof(s_row_snap_brand));
-                    memcpy(s_row_snap_active_status, s_frame.active_status,
-                           sizeof(s_row_snap_active_status));
                     memcpy(s_row_snap_temperature, s_frame.temperature,
                            sizeof(s_row_snap_temperature));
                     memcpy(s_row_snap_uptime, s_frame.uptime,
@@ -4945,18 +4934,8 @@ static void reading_only_render(void)
                     uint8_t i;
                     for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
                         s_frame.status_active[i] = s_row_snap_active[i];
-                    memcpy(s_frame.function, s_row_snap_function,
-                           sizeof(s_frame.function));
-                    memcpy(s_frame.impedance, s_row_snap_impedance,
-                           sizeof(s_frame.impedance));
-                    memcpy(s_frame.range, s_row_snap_range,
-                           sizeof(s_frame.range));
                     memcpy(s_frame.rate, s_row_snap_rate,
                            sizeof(s_frame.rate));
-                    memcpy(s_frame.brand, s_row_snap_brand,
-                           sizeof(s_frame.brand));
-                    memcpy(s_frame.active_status, s_row_snap_active_status,
-                           sizeof(s_frame.active_status));
                     memcpy(s_frame.temperature, s_row_snap_temperature,
                            sizeof(s_frame.temperature));
                     memcpy(s_frame.uptime, s_row_snap_uptime,
