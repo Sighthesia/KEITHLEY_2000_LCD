@@ -378,12 +378,13 @@ static bool s_trend_rebuild_transaction;
  * second, B-rows the next) and every rotation visibly updates the rows
  * twice. done_* latch per completed pass; the latch masks only when the
  * sibling clone landed (pixels guaranteed), so a BTE failure still falls
- * back to a normal repaint. calm_until spans the episode past the fresh
- * rebuild (covers the sibling composition + drain); quiet IDLE clears. */
+ * back to a normal repaint. The episode spans the transaction plus the
+ * sweep drain (behind>8 buckets): a fixed timer cannot cover slow storms,
+ * while the drain backlog is the exact remaining exposure. Quiet IDLE
+ * clears. */
 static bool s_row_episode_done_status;
 static bool s_row_episode_done_info;
 static bool s_clone_ok_episode;
-static uint32_t s_row_calm_until;
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
  * alternating flips then flicker between two near-identical values. First
@@ -4903,9 +4904,14 @@ static void reading_only_render(void)
              row1_status_text(cur_row1, sizeof(cur_row1));
               /* Episode rule: after one completed pass with a landed clone,
                * the sibling shows identical pixels — mask further passes
-               * until the episode span passes (quiet IDLE clears below). */
+               * until the drain backlog is gone (quiet IDLE clears below). */
+              uint32_t sweep_behind =
+                  (s_trend.has_sample &&
+                   s_trend.newest_bucket > s_sweep_cursor_bucket)
+                      ? s_trend.newest_bucket - s_sweep_cursor_bucket
+                      : 0u;
               bool row_episode = s_trend_rebuild_transaction ||
-                                 ((int32_t)(now - s_row_calm_until) < 0);
+                                 sweep_behind > 8u;
               if (!row_episode)
               {
                   s_row_episode_done_status = false;
@@ -5266,7 +5272,6 @@ static void reading_only_render(void)
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_trend_rebuild_transaction = false;
-            s_row_calm_until = now + 1500u;
             /* Sibling fast-forward: this page now carries the complete
              * new-unit scene. BTE-clone the whole UI page to the still
              * invalidated sibling and mirror the row + trend caches, so the
