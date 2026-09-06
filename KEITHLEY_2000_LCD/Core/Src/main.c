@@ -355,6 +355,13 @@ static uint32_t s_dbg_function_change_window;
 static uint32_t s_dbg_info_repaint_window;
 static uint32_t s_dbg_stale_kill_window;
 static uint32_t s_dbg_present_hold_window;
+/* Per-stage main-loop cost (ms) attributed to the stage active during each
+ * interval between reading_only_render() entries. IDLE=0..PRESENT=8 in enum
+ * order. Printed with PERF; pinpoints which stage owns a long frame. */
+static uint32_t s_dbg_stage_ms_window[9];
+static uint32_t s_dbg_last_render_tick;
+static uint8_t s_dbg_last_stage;
+static bool s_dbg_stage_armed;
 
 #if K2000_READING_ONLY_BASELINE
 typedef enum {
@@ -796,8 +803,9 @@ static void perf_record_frame(void)
          s_perf_trend_columns_window = 0u;
              s_dbg_function_change_window = 0u;
              s_dbg_info_repaint_window = 0u;
-             s_dbg_stale_kill_window = 0u;
-             s_dbg_present_hold_window = 0u;
+            s_dbg_stale_kill_window = 0u;
+            s_dbg_present_hold_window = 0u;
+            memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
             return;
         }
         hal_uart_send_text("PERF fps=");
@@ -842,8 +850,18 @@ static void perf_record_frame(void)
          perf_send_u32(s_dbg_info_repaint_window);
          hal_uart_send_text(" dbg_stale_kill=");
          perf_send_u32(s_dbg_stale_kill_window);
-         hal_uart_send_text(" dbg_present_hold=");
-         perf_send_u32(s_dbg_present_hold_window);
+        hal_uart_send_text(" dbg_present_hold=");
+        perf_send_u32(s_dbg_present_hold_window);
+        hal_uart_send_text(" stg=");
+        {
+            uint8_t si;
+            for (si = 0u; si < 9u; si++)
+            {
+                perf_send_u32(s_dbg_stage_ms_window[si]);
+                if (si < 8u)
+                    hal_uart_send_text(",");
+            }
+        }
         hal_uart_send_text(" sw_behind=");
         perf_send_u32(s_trend.has_sample
                           ? (s_trend.newest_bucket > s_sweep_cursor_bucket
@@ -879,6 +897,7 @@ static void perf_record_frame(void)
          s_dbg_info_repaint_window = 0u;
          s_dbg_stale_kill_window = 0u;
          s_dbg_present_hold_window = 0u;
+         memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
      }
 }
 static uint16_t s_render_column;
@@ -4892,6 +4911,21 @@ static void reading_only_render(void)
 
     if (!s_display_ready)
         return;
+    {
+        uint8_t cur = (uint8_t)s_reading_only_stage;
+        if (!s_dbg_stage_armed)
+        {
+            s_dbg_stage_armed = true;
+        }
+        else if (cur < 9u && s_dbg_last_stage < 9u)
+        {
+            uint32_t dt = now - s_dbg_last_render_tick;
+            if (dt < 5000u)
+                s_dbg_stage_ms_window[s_dbg_last_stage] += dt;
+        }
+        s_dbg_last_stage = cur < 9u ? cur : 0u;
+        s_dbg_last_render_tick = now;
+    }
     if (s_reading_only_stage == READING_ONLY_STATUS) {
         if (!reading_only_render_status_bar()) {
             if (s_reading_only_io_error)
