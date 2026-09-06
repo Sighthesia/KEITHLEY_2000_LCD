@@ -200,6 +200,32 @@ flickers at flip rate. Rules, in order:
   TREND background+rescan ~450 ms + one full row paint per page. Rows settle
   in one version, `missed=0` throughout. Further squeezing needs glyph
   pipeline work — not worth it pre-host-integration.
+- **Range must be IN the snapshot (2026-09-07).** The axis transition mints
+  a different range string per composition (`--`, AUTO-bit flips, unit
+  change); pages then paint different ranges and alternate visibly on slow
+  flips. Snapshot range at the first axis-valid frame of the episode
+  (INFO-defer guarantees `--` is never baked); core fields stay
+  axis-independent.
+- **Episode must survive re-anchor (2026-09-07).** Re-anchor snaps
+  `behind` to ~0, so a `behind>8`-only episode ends mid-storm and live
+  churn alternates across pages. Extend with last-frame-ms > 100 ms (only
+  extends an existing snapshot — taking still needs a transaction, so
+  steady state can never freeze) + 5 s refresh cap. Never clear the
+  snapshot at fresh-background; the deferred paint + drain must share it
+  (quiet IDLE clears).
+- **Union-erase rule (2026-09-07).** Badge: fill max(old,new) width — a
+  narrower new badge otherwise leaves the old tail permanently (repaints
+  only on the next function change). Value cells: full-zone erase covers
+  same-start tails; text longer than its zone forces the neighbour cell
+  (or lamps) to repaint too, else spills sit on static text forever.
+  `ui_measure_text` must count every 2-byte symbol (`°µΩ±`) as one cell —
+  the missing `±` (C2 B1) once over-measured every range by 12 px.
+- **String-duplication class (2026-09-07).** `trend_range_text` printed the
+  SI step twice when the unit carried its own prefix (`5kkHz`, `10MMΩ`,
+  `500kMHz`): strip the unit's prefix only when the magnitude engaged one
+  (`µ` steps down to `m`). Row-2 Rate zone fits 5 glyphs — `500 Read/s`
+  (120 px) structurally overflowed into the lamp zone, so rate text is now
+  `500/s`-style short form (mirrored to `firmware/src`, tests, sim).
 
 ## Gear-change diagnostics (2026-09-06 session, permanent counters)
 
