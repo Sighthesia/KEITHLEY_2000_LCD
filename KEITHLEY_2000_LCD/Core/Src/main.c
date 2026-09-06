@@ -4049,6 +4049,38 @@ static bool reading_only_render_info_panel(void)
     bool lamps_dirty = !page_valid ||
                        s_reading_only_page_info_lamps[s_render_page] !=
                            row2_info_lamps();
+    /* Values are strictly left-anchored at a fixed origin (left-aligned):
+     * same-start overwrite is exact, so only a longer old tail or text
+     * past the zone can ghost. A value longer than its zone spills into
+     * the neighbour cell — force that neighbour to repaint as well,
+     * otherwise spilled pixels sit on static text forever. */
+    bool lamps_overflow = false;
+    {
+        const char *old_vals[3] = {
+            s_reading_only_page_impedance[s_render_page],
+            s_reading_only_page_range[s_render_page],
+            s_reading_only_page_rate[s_render_page]};
+        const char *new_vals[3] = {s_frame.impedance, s_frame.range,
+                                   s_frame.rate};
+        uint8_t k;
+        for (k = 0u; k < 3u; k++)
+        {
+            uint16_t zw = (uint16_t)(cell_w[k] -
+                (strlen(cell_names[k]) * FONT_TEXT_WIDTH +
+                 2u * MAIN_DISPLAY_ROW2_CELL_PAD_X));
+            uint16_t ow = page_valid ? ui_measure_text(old_vals[k]) : 0u;
+            uint16_t nw = ui_measure_text(new_vals[k]);
+            if (ow > zw || nw > zw)
+            {
+                if (k < 2u)
+                    cell_dirty[k + 1u] = true;
+                else
+                    lamps_dirty = true;
+                if (k == 2u)
+                    lamps_overflow = true;
+            }
+        }
+    }
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
     {
         uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
@@ -4101,11 +4133,26 @@ static bool reading_only_render_info_panel(void)
     if (idx == 1u) {
         if (!function_dirty) { idx++; return false; }
         uint16_t fw = ui_measure_text(s_frame.function);
+        /* Union erase: a narrower new badge must also cover the old badge's
+         * tail, otherwise the old function text ghosts permanently (it only
+         * repaints on the next function change). badge_w keeps the new
+         * width for the text step below. */
+        uint16_t clear_w;
+        uint16_t old_w = 0u;
+        if (page_valid)
+        {
+            old_w = ui_measure_text(
+                s_reading_only_page_function[s_render_page]);
+            old_w = (uint16_t)(old_w + 2u * MAIN_DISPLAY_BADGE_PAD_X);
+            if (old_w < 80u) old_w = 80u;
+            if (old_w > 220u) old_w = 220u;
+        }
         badge_w = (uint16_t)(fw + 2u * MAIN_DISPLAY_BADGE_PAD_X);
         if (badge_w < 80u) badge_w = 80u;
         if (badge_w > 220u) badge_w = 220u;
+        clear_w = old_w > badge_w ? old_w : badge_w;
         if (ui_fill_rect(MAIN_DISPLAY_BADGE_X, MAIN_DISPLAY_INFO_BAR_Y,
-                         badge_w, MAIN_DISPLAY_INFO_BAR_H,
+                         clear_w, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_BADGE_BG) != LT7680_OK) return false;
         idx++; return false;
     }
@@ -4138,13 +4185,15 @@ static bool reading_only_render_info_panel(void)
             idx++; return false;
         }
         if (sub == 1u) {
-            if (page_valid) { idx++; return false; }
+            if (page_valid && !cell_dirty[b]) { idx++; return false; }
             if (!ui_draw_text((uint16_t)(cx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
                               cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
             idx++; return false;
         }
         if (sub == 2u) {
             if (!cell_dirty[b]) { idx++; return false; }
+            /* Left-aligned by construction: fixed origin, never centered or
+             * right-aligned; keep this x constant so overwrites stay exact. */
             if (!ui_draw_text((uint16_t)(cx + name_w + MAIN_DISPLAY_ROW2_CELL_PAD_X),
                               row2_text_y(), val, val_color)) return false;
             idx++; return false;
@@ -4155,14 +4204,14 @@ static bool reading_only_render_info_panel(void)
              * short line (idx 15), same language as the row-1 brand sep. */
             idx++; return false;
         }
-        if (page_valid) { idx++; return false; }
+        /* Unconditional: the value-zone erase above covers this pixel, so
+         * gating it on !page_valid ate the separator on every repaint. */
         if (ui_fill_rect((uint16_t)(cx + cell_w[b] - 1u), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
         idx++; return false;
     }
     if (idx == 15u) {
-        if (page_valid) { idx++; return false; }
         if (ui_fill_rect(ROW2_X_SHORT_SEP,
                          (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
                                     (MAIN_DISPLAY_INFO_BAR_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
@@ -4177,8 +4226,11 @@ static bool reading_only_render_info_panel(void)
         while (idx <= 18u && !s_frame.status_active[lamp_bits[idx - 16u]]) {
             uint8_t lamp = (uint8_t)(idx - 16u);
             uint8_t bit = lamp_bits[lamp];
+            /* lamps_overflow also erases never-active slots: a spilled Rate
+             * tail may sit on them and no lamp event will ever clean it. */
             if (page_valid &&
-                (s_reading_only_page_info_lamps[s_render_page] & (1u << bit)) != 0u &&
+                (lamps_overflow ||
+                 ((s_reading_only_page_info_lamps[s_render_page] & (1u << bit)) != 0u)) &&
                 (s_frame.status_active[bit] == false))
             {
                 if (ui_fill_rect(row2_lamp_x[lamp], MAIN_DISPLAY_INFO_BAR_Y,
@@ -4200,13 +4252,19 @@ static bool reading_only_render_info_panel(void)
             uint16_t lx = row2_lamp_x[lamp];
             uint16_t end_x = (uint16_t)(lx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
             if (end_x > row2_trig_sep_x()) { idx = 19u; return false; }
+            /* Pre-erase on overflow frames: lamp text must not mix with a
+             * spilled Rate tail underneath it. */
+            if (lamps_overflow && page_valid &&
+                ui_fill_rect(lx, MAIN_DISPLAY_INFO_BAR_Y,
+                             (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH),
+                             MAIN_DISPLAY_INFO_BAR_H,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
             if (!ui_draw_text(lx, row2_text_y(), lamps[lamp],
                               MAIN_DISPLAY_COLOR_GREEN)) return false;
             idx++; return false;
         }
     }
     if (idx == 19u) {
-        if (page_valid) { idx++; return false; }
         /* TRIGGER block is always present; only its color/dot follow state. */
         if (ui_fill_rect(row2_trig_sep_x(), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
