@@ -428,9 +428,9 @@ static bool s_deferred_row_pending;
  * rate) straddles the two pages' row paints during slow storm compositions,
  * so every rotation visibly updates the rows twice. Freeze just the churn
  * fields at the first post-invalidate frame; rotation content (function /
- * impedance / range / brand) stays live — it changes once and both pages
- * converge on it via cache-match. Reading + trend stay live. No axis
- * requirement (axis-independence is the point: temp/uptime/bits need no
+ * impedance / brand) stays live — it changes once and both pages converge
+ * on it via cache-match. Reading + trend stay live. No axis requirement
+ * for the core (axis-independence is the point: temp/uptime/bits need no
  * axis, and waiting for it deadlocks past the transaction window). Cleared
  * when quiet; pre-data frames never snapshot (temp/uptime empty). */
 static bool s_row_snap_taken;
@@ -438,6 +438,14 @@ static bool s_row_snap_active[STATUS_BAR_CORE_COUNT];
 static char s_row_snap_rate[MAIN_DISPLAY_META_MAX];
 static char s_row_snap_temperature[20];
 static char s_row_snap_uptime[12];
+/* Range joins the snapshot at the first axis-valid frame of the episode.
+ * The axis transition mints a different range string per composition
+ * ("--", AUTO-bit flips, unit change), and without this the two pages
+ * paint different ranges and alternate visibly on slow storm flips.
+ * INFO-defer covers the axis-less first pass, so "--" is never baked. */
+static bool s_row_snap_range_taken;
+static char s_row_snap_range[MAIN_DISPLAY_META_MAX];
+static uint32_t s_row_snap_tick;
 /* Shared stat-slot snapshot: the two pages build one frame apart and the
  * sliding window would otherwise mint different last digits per page —
  * alternating flips then flicker between two near-identical values. First
@@ -477,6 +485,7 @@ static void reading_only_invalidate_trend_pages(void)
     if (s_display_enabled)
         s_trend_rebuild_transaction = true;
     s_row_snap_taken = false;
+    s_row_snap_range_taken = false;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
      * unit tells the background pass this is a rotation (targeted repaint
      * of dynamic strips) rather than a virgin page (full build). Boot pages
@@ -5138,13 +5147,27 @@ static void reading_only_render(void)
                  s_trend.newest_bucket > s_sweep_cursor_bucket)
                     ? s_trend.newest_bucket - s_sweep_cursor_bucket
                     : 0u;
-            bool row_episode = s_trend_rebuild_transaction || behind > 8u;
+            /* Slow storm flips (> 100 ms) extend the episode: re-anchor
+             * snaps `behind` to zero, so backlog alone cannot hold it, and
+             * live churn would alternate across pages visibly. The frame-ms
+             * gate only extends an existing snapshot (taking still needs a
+             * transaction), so it cannot freeze steady-state rows. 5 s cap
+             * against freezing rows forever in a pathological regime. */
+            bool row_episode = s_trend_rebuild_transaction || behind > 8u ||
+                               s_perf_last_frame_ms > 100u;
             if (!row_episode)
             {
                 s_row_snap_taken = false;
+                s_row_snap_range_taken = false;
             }
             else
             {
+                if (s_row_snap_taken &&
+                    (uint32_t)(now - s_row_snap_tick) >= 5000u)
+                {
+                    s_row_snap_taken = false;
+                    s_row_snap_range_taken = false;
+                }
                 if (s_trend_rebuild_transaction && !s_row_snap_taken &&
                     s_ui.any_message && s_frame.temperature[0] != '\0' &&
                     s_frame.uptime[0] != '\0')
@@ -5159,6 +5182,13 @@ static void reading_only_render(void)
                     memcpy(s_row_snap_uptime, s_frame.uptime,
                            sizeof(s_row_snap_uptime));
                     s_row_snap_taken = true;
+                    s_row_snap_tick = now;
+                }
+                if (!s_row_snap_range_taken && s_trend_axis_valid)
+                {
+                    memcpy(s_row_snap_range, s_frame.range,
+                           sizeof(s_row_snap_range));
+                    s_row_snap_range_taken = true;
                 }
                 if (s_row_snap_taken)
                 {
@@ -5171,6 +5201,11 @@ static void reading_only_render(void)
                            sizeof(s_frame.temperature));
                     memcpy(s_frame.uptime, s_row_snap_uptime,
                            sizeof(s_frame.uptime));
+                }
+                if (s_row_snap_range_taken)
+                {
+                    memcpy(s_frame.range, s_row_snap_range,
+                           sizeof(s_frame.range));
                 }
             }
         }
@@ -5550,8 +5585,11 @@ static void reading_only_render(void)
             s_trend_rebuild_transaction = false;
             /* The row was deliberately deferred while this transaction was
              * rebuilding. Repaint it before the first commit of the new
-             * unit, so the visible page never contains mixed generations. */
-            s_row_snap_taken = false;
+             * unit, so the visible page never contains mixed generations.
+             * The snapshot is deliberately NOT cleared here: the deferred
+             * paint and the following drain must use the same frozen rows,
+             * otherwise churn lands between the two pages' paints and they
+             * alternate visibly on slow flips. Quiet IDLE clears it. */
             if (s_deferred_row_pending)
             {
                 /* VALUE/UNIT/SUFFIX already completed on this page. The row

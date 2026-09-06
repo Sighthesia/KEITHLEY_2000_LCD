@@ -8,6 +8,7 @@ uint16_t ui_measure_text(const char *text){
     while(*text){
         if((uint8_t)text[0]==0xC2u && (uint8_t)text[1]==0xB0u){ n+=FONT_TEXT_WIDTH; text+=2; continue; }
         if((uint8_t)text[0]==0xC2u && (uint8_t)text[1]==0xB5u){ n+=FONT_TEXT_WIDTH; text+=2; continue; }
+        if((uint8_t)text[0]==0xC2u && (uint8_t)text[1]==0xB1u){ n+=FONT_TEXT_WIDTH; text+=2; continue; }
         if((uint8_t)text[0]==0xCEu && (uint8_t)text[1]==0xA9u){ n+=FONT_TEXT_WIDTH; text+=2; continue; }
         n+=FONT_TEXT_WIDTH; text++;
     }
