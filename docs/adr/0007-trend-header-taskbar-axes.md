@@ -7,6 +7,12 @@
 - 读数仍按 33ms 节流实时提交，趋势后台可继续分片；新旧单位不会在同一可见页混合。
 - 实测目标板：`missed=0`，稳态 `fps=30~31`，`frame-ms=11~15`，`reading_errors=0`。
 
+## 换挡诊断埋点（2026-09-06）
+
+- PERF 新增四个无 UART 热路径开销的 RAM 计数器：`dbg_func_change`、`dbg_info_repaint`、`dbg_stale_kill`、`dbg_present_hold`。
+- 目标板换挡窗口实测：`frame-ms=762`、`max-ms=1157`、`fps=11`，但 `gap=27`、`missed=0`；同窗口 `dbg_func_change=2`、`dbg_info_repaint=1`、`dbg_stale_kill=1`、`dbg_present_hold=1`。
+- 结论：该卡顿不是主循环失控或输入丢失，而是换挡重建路径的长渲染/事务回退；功能行确实被判定为两次变化，且存在一次 stale-kill。下一步应沿 `stale-kill -> 重启 IDLE -> 再次格式化/INFO` 路径做定向修复。
+
 - 状态：已接受（2026-09-03）
 - 前置：ADR-0006（底部只留绘图区）被本决策部分取代——绘图区让出 header / 任务栏 / Y 沟槽。
 

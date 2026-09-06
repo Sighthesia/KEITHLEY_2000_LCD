@@ -349,6 +349,12 @@ static uint32_t s_perf_reading_frames_window;
 static uint32_t s_perf_display_commits_window;
 static uint32_t s_perf_axis_rebuilds_window;
 static uint32_t s_perf_trend_columns_window;
+/* Low-cost diagnosis counters. They are printed with the existing PERF
+ * record so the probes do not add UART work to the render path. */
+static uint32_t s_dbg_function_change_window;
+static uint32_t s_dbg_info_repaint_window;
+static uint32_t s_dbg_stale_kill_window;
+static uint32_t s_dbg_present_hold_window;
 
 #if K2000_READING_ONLY_BASELINE
 typedef enum {
@@ -782,8 +788,12 @@ static void perf_record_frame(void)
             s_perf_fields_window = 0u;
             s_perf_reading_frames_window = 0u;
             s_perf_display_commits_window = 0u;
-            s_perf_axis_rebuilds_window = 0u;
-            s_perf_trend_columns_window = 0u;
+         s_perf_axis_rebuilds_window = 0u;
+         s_perf_trend_columns_window = 0u;
+             s_dbg_function_change_window = 0u;
+             s_dbg_info_repaint_window = 0u;
+             s_dbg_stale_kill_window = 0u;
+             s_dbg_present_hold_window = 0u;
             return;
         }
         hal_uart_send_text("PERF fps=");
@@ -820,8 +830,16 @@ static void perf_record_frame(void)
         perf_send_u32(s_perf_display_commits_window);
         hal_uart_send_text(" trend_axis_rebuilds=");
         perf_send_u32(s_perf_axis_rebuilds_window);
-        hal_uart_send_text(" trend_column_updates=");
-        perf_send_u32(s_perf_trend_columns_window);
+         hal_uart_send_text(" trend_column_updates=");
+         perf_send_u32(s_perf_trend_columns_window);
+         hal_uart_send_text(" dbg_func_change=");
+         perf_send_u32(s_dbg_function_change_window);
+         hal_uart_send_text(" dbg_info_repaint=");
+         perf_send_u32(s_dbg_info_repaint_window);
+         hal_uart_send_text(" dbg_stale_kill=");
+         perf_send_u32(s_dbg_stale_kill_window);
+         hal_uart_send_text(" dbg_present_hold=");
+         perf_send_u32(s_dbg_present_hold_window);
         hal_uart_send_text(" sw_behind=");
         perf_send_u32(s_trend.has_sample
                           ? (s_trend.newest_bucket > s_sweep_cursor_bucket
@@ -851,9 +869,13 @@ static void perf_record_frame(void)
         s_perf_fields_window = 0u;
         s_perf_reading_frames_window = 0u;
         s_perf_display_commits_window = 0u;
-        s_perf_axis_rebuilds_window = 0u;
-        s_perf_trend_columns_window = 0u;
-    }
+         s_perf_axis_rebuilds_window = 0u;
+         s_perf_trend_columns_window = 0u;
+         s_dbg_function_change_window = 0u;
+         s_dbg_info_repaint_window = 0u;
+         s_dbg_stale_kill_window = 0u;
+         s_dbg_present_hold_window = 0u;
+     }
 }
 static uint16_t s_render_column;
 static uint8_t s_render_item;
@@ -3987,6 +4009,8 @@ static bool reading_only_render_info_panel(void)
     static const uint16_t cell_x[3] = {ROW2_X_ZIN, ROW2_X_RANGE, ROW2_X_RATE};
     static const uint16_t cell_w[3] = {ROW2_W_ZIN, ROW2_W_RANGE, ROW2_W_RATE};
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
+    if (idx == 0u)
+        s_dbg_info_repaint_window++;
     {
         uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
         bool fit = ui_layout_second_row(s_frame.function, s_frame.impedance, s_frame.range, s_frame.rate, &fw, &zx, &ix, &rlx, &rx, &atlx, &atx, &lx);
@@ -4990,6 +5014,10 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                  strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                  s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
+               if (!s_reading_only_page_info_valid[s_render_page] ||
+                   strcmp(s_reading_only_page_function[s_render_page],
+                          s_frame.function) != 0)
+                   s_dbg_function_change_window++;
               /* Defer INFO while the axis doesn't exist yet: INFO runs
                * before TREND recomputes the axis in the pipeline, so the
                * first post-rotation pass would bake "AUTO --" into pixels
@@ -5209,8 +5237,8 @@ static void reading_only_render(void)
          * suffix split off ("VDC"->"V") while the buffer keeps the full
          * unit — a raw strcmp is true for every VDC-family frame and would
          * abandon forever (zero commits, silent serial). */
-        {
-            char trend_stem[TREND_UNIT_ID_MAX];
+    {
+        char trend_stem[TREND_UNIT_ID_MAX];
             size_t stem_n;
             strncpy(trend_stem, trend_unit, sizeof(trend_stem) - 1u);
             trend_stem[sizeof(trend_stem) - 1u] = '\0';
@@ -5223,6 +5251,7 @@ static void reading_only_render(void)
                 trend_stem[stem_n - 2u] = '\0';
             if (strcmp(trend_stem, s_frame.unit) != 0)
             {
+                s_dbg_stale_kill_window++;
                 s_reading_only_stage = READING_ONLY_IDLE;
                 return;
             }
@@ -5464,6 +5493,7 @@ static void reading_only_render(void)
     {
         if (s_trend_rebuild_transaction)
         {
+            s_dbg_present_hold_window++;
             /* A range/unit change is a visual transaction: keep the old
              * visible page until the hidden page contains the complete
              * trend chrome, axis and plot. Presenting each scheduler slice
