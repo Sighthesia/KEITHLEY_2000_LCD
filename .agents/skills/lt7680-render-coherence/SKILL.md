@@ -162,6 +162,74 @@ flickers at flip rate. Rules, in order:
   before commit. Never commit instrumentation.
 - Full story: `docs/adr/0007-trend-header-taskbar-axes.md`.
 
+## Gear-change atomic rows (2026-09-06 session)
+
+- **Symptom:** one rotation flashes the function row 3×
+  (`MANUAL+blank` → `MANUAL+value` → `AUTO+value+RATE`), plus a ~700 ms
+  visible freeze. Boot flashes 3× (one-time transient, accepted as-is).
+- **Root cause (data path, not renderer):** rotation value+unit arrive in
+  one message, but status (AUTO/lamps/rate) trickles in on later 2 s ticks
+  — the model legitimately steps through 3 states and every one got
+  painted. `TREND`-stage stale-kill then discarded the in-flight frame back
+  to `IDLE`, replaying the whole STATUS/INFO/VALUE pipeline (~700 ms).
+- **Fixes that stuck:**
+  1. stale-kill removed — never discard completed reading work; the next
+     33 ms snapshot picks up the newer trend identity.
+  2. Deferred rows (`s_deferred_row_pending`): while
+     `s_trend_rebuild_transaction`, IDLE goes straight to CLEAR (rows keep
+     last committed); after the fresh trend background, STATUS→INFO→PRESENT
+     directly, skipping the second CLEAR/VALUE/UNIT/SUFFIX pass. Abort
+     clears the flag.
+  3. INFO field-level diff (badge/cells/lamps/TRIGGER/seps each gated on
+     its own page cache); full-band clear only when the page was invalid.
+  4. PRESENT transaction hold kept — it is the atomicity gate, not the
+     stall (verified `dbg_present_hold≈0` in steady state).
+  5. `TREND_SWEEP_RESCAN_BUDGET` 32→16 (drain 160 slots/s still 6× the
+     25 buckets/s arrival rate); halves worst single-visit rescan.
+- **Do NOT (all verified on-target):**
+  - Lower the text slice budget (64→8 stretches one gear change over ~8×
+    frames: `gap` looks better, `frame-ms`/visible freeze gets ~8× worse).
+  - Cross-page visible→hidden row copy in IDLE (drags stale pixels into the
+    transaction + extra BTE block; violates the hidden-page invariant).
+  - Sibling row mirror with deferred `valid` — the mirror-then-commit
+    ordering is mutually exclusive with cache-match timing: every page
+    reads perpetually dirty, steady state collapses to fps=5. Reverted.
+    Two-pages-paint-once-each (identical content) is structural cost;
+    accept it, it is invisible.
+- **Residual (accepted):** ~1 s fps dip (down to 2–24) per 20–30 s rotation:
+  TREND background+rescan ~450 ms + one full row paint per page. Rows settle
+  in one version, `missed=0` throughout. Further squeezing needs glyph
+  pipeline work — not worth it pre-host-integration.
+
+## Gear-change diagnostics (2026-09-06 session, permanent counters)
+
+- PERF carries `dbg_func_change/dbg_info_repaint/dbg_stale_kill/
+  dbg_present_hold` (RAM counters, zero render-path UART cost) plus
+  `stg=` — 9 per-stage ms accumulators in enum order
+  IDLE/STATUS/INFO/CLEAR/VALUE/UNIT/SUFFIX/TREND/PRESENT.
+- Healthy gear window: `func_change=1~2, info_repaint=1~2` (one per page,
+  identical content), `stale_kill=0, present_hold≈0`.
+  Deep-window example: `stg=21,190,424,1,7,4,69,445,0` = rows ~600 ms both
+  pages + TREND background/rescan ~445 ms.
+- Rule-outs from data: `gap` small + `missed=0` ⇒ not main-loop stall or
+  input loss; `dbg_*=0` with a long frame ⇒ outside the row path (look at
+  `stg` TREND/SUFFIX).
+- OpenOCD capture (no firmware change): 1 kHz DWT PC ring
+  `s_irq_pc_ring[16]` + `s_reading_only_stage` /
+  `s_trend_rebuild_transaction` / page caches. Get addresses per build via
+  `arm-none-eabi-nm ...elf | grep <symbol>`, then
+  `openocd -f openocd.cfg -c "init" -c "halt" -c "mdw <addr> <n>" -c "resume"
+  -c "shutdown"` (halt-read-resume inside ~1 s; never gdb
+  interrupt/detach — leaves target halted). Decode PCs with
+  `arm-none-eabi-addr2line -e <elf> -f -C <pc>`. Sample twice inside a long
+  frame window; same function twice = target.
+- Steady-state health: `fps 52~59, frame-ms 11~22, missed=0`,
+  all `dbg_*=0`, `reading_errors=0`. `max-ms` is a boot-cumulative max —
+  ignore it for window analysis, use `frame-ms` + `stg`.
+- Counter discipline (amends §Perf playbook): the `dbg_*`/`stg` RAM
+  counters are permanent diagnostics, not throwaway instrumentation —
+  keep them; never add per-glyph UART or MRWDP reads to the hot path.
+
 ## Verification & Diagnostic Checklist
 - [ ] `grep -n "s_bitmap_job.active" Core/Src/main.c` shows fill guarded before each `ui_draw_text` in header.
 - [ ] `grep -n "reading_only_page_brand" Core/Src/main.c` shows per-field cache and first-boot full fill at `idx==0`.
@@ -169,3 +237,6 @@ flickers at flip rate. Rules, in order:
 - [ ] Range switch VDC→mVDC: `trend_buffer_display_scale` changes, `s_reading_only_page_trend_bg_valid` cleared, rebuild runs in `READING_ONLY_TREND` slices (<8 cols/slice), FPS stays ~10 not collapsed.
 - [ ] No visible-page writes during trend: `READING_ONLY_PAGE_FLIP` no longer forces `s_render_page = s_visible_page`; header/info always on hidden page.
 - [ ] Build: `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf` no `Werror`; `node sim/verify.js` and `firmware/tests/run_tests.sh` pass.
+- [ ] Gear change (demo rotates units): one PERF window shows `func_change≤2, info_repaint≤2, stale_kill=0`; rows settle in one version, no MANUAL/blank/AUTO sequence; `missed=0` across the window.
+- [ ] `grep -n "s_deferred_row_pending" Core/Src/main.c` shows set-at-IDLE, consume-at-INFO-completion→PRESENT, clear-on-abort; no path replays CLEAR/VALUE after a completed reading pass.
+- [ ] `grep -n "TREND_SWEEP_RESCAN_BUDGET" Core/Src/main.c` is 16u; text slice budget (`ui_draw_bitmap_slice`) is 64u for mode 0, not 8u.

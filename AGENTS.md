@@ -89,4 +89,5 @@
 - `docs/`：确定性网表 `KEITHLEY2000_2026-08-08.tel`（权威）、ODS 协议表、`adr/` 决策记录、`superpowers/plans|specs/` 范围与验收、2026-08-14 仿真器 vs ODS 核对笔记。
 - **RIF 资源镜像约定**：U5 挂在 LT7680 SPI 上、不经 STM32；实物以 flashrom 的 `EF4017` 识别为 W25Q64JV（8MiB），尽管网表记录 W25Q128JV。`tools/pack_resource_flash.py` 从 `tools/font_source` 的归档大数字位图与 `firmware/src` 的半高字库产出 RGB565 瓦片镜像（4 KiB 对齐，自描述头 + 目录 + CRC32）。运行时由 LT7680 SPI-master FIFO 只读目录和瓦片；写入前必须先备份原片并确认 `--base-offset`，验收见 `tools/README.md`。
 - `Firmware STM32_K2000 DisplayBoard TFT_V16/`：上游 V16 HEX 与变更日志；根目录另有 V15 Flash 数据与 ODS。
-- 自研技能在 `.agents/skills/`（lt7680-st7701、openocd-stm32-flash 等）。
+- 自研技能在 `.agents/skills/`（lt7680-st7701、openocd-stm32-flash、lt7680-render-coherence 等）。渲染一致性经验（换挡原子行、失败的镜像实验、阶段计时诊断）沉淀在 `lt7680-render-coherence/SKILL.md`，动渲染前先读。
+- PERF 常驻换挡诊断字段：`dbg_func_change/dbg_info_repaint/dbg_stale_kill/dbg_present_hold` ＋九阶段累计 `stg=`（IDLE/STATUS/INFO/CLEAR/VALUE/UNIT/SUFFIX/TREND/PRESENT）。健康换挡：`func_change≤2/info_repaint≤2/stale_kill=0`、`missed=0`；`max-ms` 为启动累计最大值，窗口分析看 `frame-ms`＋`stg`。
