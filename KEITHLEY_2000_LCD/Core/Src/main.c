@@ -126,6 +126,13 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 1U
 
+/* Diagnostic SHT3x probe: every SHT3X_PROBE_PERIOD_MS the main loop does one
+ * blocking single-shot read (PB15=SCL/PB14=SDA) and prints ok/temp/rh over
+ * UART. Temporary bring-up aid for the "no traffic after reset" symptom;
+ * set to 0 once the sensor link is validated (each probe blocks ~17 ms). */
+#define SHT3X_PROBE 1U
+#define SHT3X_PROBE_PERIOD_MS 2000u
+
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
  * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
@@ -635,6 +642,24 @@ static void perf_send_u32(uint32_t value)
     for (i = first; i > 0u; i--)
         hal_uart_send(&((uint8_t *)text)[i - 1u], 1u);
 }
+
+#if SHT3X_PROBE
+static void sht3x_probe_send_i32(int32_t value)
+{
+    uint32_t mag;
+
+    if (value < 0)
+    {
+        hal_uart_send_text("-");
+        mag = (uint32_t)(-(value + 1)) + 1u;
+    }
+    else
+    {
+        mag = (uint32_t)value;
+    }
+    perf_send_u32(mag);
+}
+#endif
 
 static void READING_ONLY_LEGACY perf_format_display(char *out)
 {
@@ -6452,6 +6477,32 @@ int main(void)
                 hal_uart_send(&b, 1);
             }
         }
+#if SHT3X_PROBE
+        /* Bring-up probe: one blocking read per period, UART reports the
+         * outcome so a single number distinguishes the failure mode:
+         * ok=1 with sane temp/rh = link good; ok=0 = NACK/CRC (wiring,
+         * address, power); line stops = probe never reached (boot hang). */
+        {
+            static uint32_t s_sht3x_last_ms;
+            uint32_t now_probe = HAL_GetTick();
+
+            if ((now_probe - s_sht3x_last_ms) >= SHT3X_PROBE_PERIOD_MS)
+            {
+                int32_t t_mc = 0;
+                int32_t rh_m = 0;
+                bool ok = hal_sht3x_read_milli(&t_mc, &rh_m);
+
+                s_sht3x_last_ms = now_probe;
+                hal_uart_send_text("SHT3X ok=");
+                perf_send_u32(ok ? 1u : 0u);
+                hal_uart_send_text(" t_mC=");
+                sht3x_probe_send_i32(t_mc);
+                hal_uart_send_text(" rh_m=");
+                sht3x_probe_send_i32(rh_m);
+                hal_uart_send_text("\r\n");
+            }
+        }
+#endif
 
         {
             uint32_t now_loop = HAL_GetTick();
