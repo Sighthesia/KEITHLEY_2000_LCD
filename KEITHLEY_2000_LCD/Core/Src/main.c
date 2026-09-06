@@ -3059,10 +3059,12 @@ static bool READING_ONLY_LEGACY trend_join_column(uint16_t column)
  * 16 spreads the same catch-up over a few frames (cursor persists);
  * refill after rotation takes ~1 s instead of one long hitch. */
 #define TREND_SWEEP_BUDGET 8u
-/* Post-rotation drain: a bigger bite finishes the visible catch-up
- * sweep faster (fewer replay frames); steady-state incremental visits
- * still use TREND_SWEEP_BUDGET. */
-#define TREND_SWEEP_RESCAN_BUDGET 32u
+/* Post-rotation drain: 32 slots/visit cost ~400+ ms of TREND stage per
+ * gear-change window (fps dips to single digits). 16 halves the per-visit
+ * cost while drain (160 slots/s) still outruns arrivals (25 buckets/s at
+ * 500 Hz input); the visible catch-up takes a few more frames instead of
+ * one long hitch. Steady-state visits still use TREND_SWEEP_BUDGET. */
+#define TREND_SWEEP_RESCAN_BUDGET 16u
 static uint16_t trend_grid_x(uint8_t gi);
 static bool trend_sweep_restore_verticals(uint16_t x0, uint16_t x1);
 static uint32_t s_sweep_epoch_bucket;
