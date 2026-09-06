@@ -23,3 +23,6 @@ bool hal_uart_rx_recovering(void);
  * or 0 when no key is pressed. Drives each column low in turn and reads the
  * row inputs (pull-up). Position codes feed keypad_scan() for debounce. */
 int hal_keypad_read_code(void);
+
+/* SHT3x temperature/humidity over soft-I2C (PB15=SCL/PB14=SDA). Millidegrees C / milli-pct RH; false on NACK/CRC. */
+bool hal_sht3x_read_milli(int32_t *temp_milli_c, int32_t *rh_milli_pct);

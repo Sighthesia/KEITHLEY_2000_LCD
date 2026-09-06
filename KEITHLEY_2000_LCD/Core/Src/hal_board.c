@@ -2,6 +2,7 @@
 
 #include "keypad.h"
 #include "lt7680_bus.h"
+#include "sht3x.h"
 #include "stm32f1xx_hal.h"
 #include "uart_rx_queue.h"
 
@@ -36,6 +37,11 @@
 #define UART_RX_GPIO_PORT GPIOA
 #define UART_RX_PIN GPIO_PIN_10
 
+/* SHT3x soft-I2C: PB15=SCL, PB14=SDA, open-drain with 4.7k pull-ups. */
+#define SHT3X_GPIO_PORT GPIOB
+#define SHT3X_SCL_PIN GPIO_PIN_15
+#define SHT3X_SDA_PIN GPIO_PIN_14
+
 #define KEY_COL_GPIO_PORT GPIOB
 #define KEY_COL_PIN_MASK (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | \
                           GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7)
@@ -60,6 +66,57 @@ static void hal_delay_ms(uint32_t ms)
 {
     HAL_Delay(ms);
 }
+
+static void sht3x_sda_high(void)
+{
+    HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SDA_PIN, GPIO_PIN_SET);
+}
+
+static void sht3x_sda_low(void)
+{
+    HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SDA_PIN, GPIO_PIN_RESET);
+}
+
+static void sht3x_scl_high(void)
+{
+    HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SCL_PIN, GPIO_PIN_SET);
+}
+
+static void sht3x_scl_low(void)
+{
+    HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SCL_PIN, GPIO_PIN_RESET);
+}
+
+static bool sht3x_sda_read(void)
+{
+    return HAL_GPIO_ReadPin(SHT3X_GPIO_PORT, SHT3X_SDA_PIN) == GPIO_PIN_SET;
+}
+
+static void sht3x_delay_us(uint32_t us)
+{
+    /* Crude ~1 us per 8 NOPs at 8 MHz SYSCLK; I2C timing is tolerant
+     * (sensor supports up to 1 MHz, we run near 100 kHz). */
+    volatile uint32_t n = us * 8u;
+
+    while (n-- > 0u) {
+        __NOP();
+    }
+}
+
+static void sht3x_delay_ms_wrap(uint32_t ms)
+{
+    HAL_Delay(ms);
+}
+
+static const sht3x_io_t s_sht3x_io = {
+    .sda_high = sht3x_sda_high,
+    .sda_low = sht3x_sda_low,
+    .scl_high = sht3x_scl_high,
+    .scl_low = sht3x_scl_low,
+    .sda_read = sht3x_sda_read,
+    .delay_us = sht3x_delay_us,
+    .delay_ms = sht3x_delay_ms_wrap,
+};
 
 static uint8_t hal_spi_xfer(uint8_t byte)
 {
@@ -195,6 +252,16 @@ static void init_gpio(void)
     gpio.Pin = KEY_ROW1_PIN | KEY_ROW2_PIN | KEY_ROW3_PIN;
     HAL_GPIO_Init(GPIOC, &gpio);
 
+    /* SHT3x soft-I2C on PB15=SCL/PB14=SDA: open-drain, idle released high.
+     * External 4.7k pull-ups to 3.3V are required; internal pull-up backs up. */
+    gpio.Mode = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Pin = SHT3X_SCL_PIN | SHT3X_SDA_PIN;
+    HAL_GPIO_Init(SHT3X_GPIO_PORT, &gpio);
+    HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SCL_PIN | SHT3X_SDA_PIN,
+                      GPIO_PIN_SET);
+
     /* Defaults: both chip selects idle high, LT7680 reset released. */
     HAL_GPIO_WritePin(LCD_CS_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LT7680_CS_GPIO_PORT, LT7680_CS_PIN, GPIO_PIN_SET);
@@ -263,6 +330,15 @@ void hal_board_init(void)
     init_spi1();
 #endif
     lt7680_bus_init(&s_lt7680_io);
+    sht3x_init(&s_sht3x_io, SHT3X_ADDR_DEFAULT);
+}
+
+bool hal_sht3x_read_milli(int32_t *temp_milli_c, int32_t *rh_milli_pct)
+{
+    if (temp_milli_c == NULL || rh_milli_pct == NULL) {
+        return false;
+    }
+    return sht3x_measure_milli(temp_milli_c, rh_milli_pct) == SHT3X_OK;
 }
 
 void hal_panel_init(void)
