@@ -9,7 +9,7 @@
 #define UI_MODEL_MAX_UNIT 16u
 
 /* Integration rate (0x08 FAST/MED/SLOW), derived from the status bits so the
- * footer spec (Read/s or AC bandwidth) can be chosen. */
+ * footer spec (N/s or AC bandwidth) can be chosen. */
 typedef enum {
     UI_RATE_NONE = 0,
     UI_RATE_FAST,

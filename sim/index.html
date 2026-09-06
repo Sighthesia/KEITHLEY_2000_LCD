@@ -84,7 +84,7 @@ function render(){
    const trigDotX=960-12-8, trigDotY=L.infoBarY+Math.floor((L.infoBarH-8)/2);
    const trigX=trigDotX-8-7*TEXT_W, trigSepX=trigX-10;
    let bx=L.badgeX+badgeW+18;
-   const cells=[["Zin","--",COLORS.muted],["Range",(demo.on?demo.rangeVal:"AUTO")+" "+rangeTxt,COLORS.white],["Rate",demo.on?demo.rateVal:"500 Read/s",COLORS.white]];
+   const cells=[["Zin","--",COLORS.muted],["Range",(demo.on?demo.rangeVal:"AUTO")+" "+rangeTxt,COLORS.white],["Rate",demo.on?demo.rateVal:"500/s",COLORS.white]];
    cells.forEach(([nm,val,vc],bi)=>{
      const nw=nm.length*TEXT_W+8, vw=val.length*TEXT_W+8;
      ctx.fillStyle=COLORS.bar2;ctx.fillRect(bx+nw,L.infoBarY,vw,L.infoBarH);
@@ -176,8 +176,8 @@ const DEMO_UNITS=[
   {unit:"°CEL",int:2,frac:3,lo:1000,hi:50000,s9:0x30,s8:0x01},
 ];
 const DEMO_UNIT_COUNT=DEMO_UNITS.length,DEMO_SAMPLES_PER_UNIT=40,DEMO_FEED_PERIOD_MS=100;
-const DEMO_RATE_TEXT={0x04:"500 Read/s",0x02:"50 Read/s",0x01:"5 Read/s"};
-const demo={on:false,timer:null,sample:0,rangeVal:"AUTO",rateVal:"500 Read/s",filt:false,rel:false,math:false,trend:[]};
+const DEMO_RATE_TEXT={0x04:"500/s",0x02:"50/s",0x01:"5/s"};
+const demo={on:false,timer:null,sample:0,rangeVal:"AUTO",rateVal:"500/s",filt:false,rel:false,math:false,trend:[]};
 function demoPad(v,d){return String(v).padStart(d,"0")}
 function demoAxisUnit(){const u=document.getElementById("unit").value;const b=u.replace(/(DC|AC)$/,"");if(b.includes("V"))return "V";if(b.includes("A"))return "A";if(b.includes("Ω"))return "Ω";if(b.endsWith("Hz"))return "Hz";if(b.includes("°"))return "°C";if(b.includes("s"))return "s";return ""}
 function demoStep(){
@@ -188,7 +188,7 @@ const value="+"+demoPad(Math.floor(mant/div),u.int)+"."+demoPad(mant%div,u.frac)
   document.getElementById("reading").value=value;
   document.getElementById("unit").value=normalizeUnit(u.unit);
   demo.rangeVal=(u.s9&0x10)?"AUTO":"MANUAL";
-  demo.rateVal=DEMO_RATE_TEXT[u.s8&0x07]||"-- Read/s";
+  demo.rateVal=DEMO_RATE_TEXT[u.s8&0x07]||"--/s";
  demo.filt=!!(u.s9&0x20);demo.rel=!!(u.s9&0x40);
  demo.math=Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%4===3;
  demo.trend.push(parseFloat(value));

@@ -4367,13 +4367,35 @@ static void trend_range_text(char *out, uint8_t size)
     }
     while (*pre != '\0' && n + 1u < size) out[n++] = *pre++;
     {
+        const char *u = unit;
         size_t ulen = strlen(unit);
         size_t i;
         if (ulen >= 2u &&
             ((unit[ulen - 2u] == 'D' && unit[ulen - 1u] == 'C') ||
              (unit[ulen - 2u] == 'A' && unit[ulen - 1u] == 'C')))
             ulen -= 2u;
-        for (i = 0u; i < ulen && n + 1u < size; i++) out[n++] = unit[i];
+        /* The magnitude already carries the SI step (pre): a unit with its
+         * own prefix would print it twice ("5kkHz", "10MMΩ", "500kMHz").
+         * Drop the unit's prefix only when pre is engaged; small magnitudes
+         * keep their native unit ("40mV", "500kHz"). Micro steps down to
+         * milli, the rest strip to the bare stem. */
+        if (*pre != '\0' && ulen > 1u &&
+            (u[0] == 'm' || u[0] == 'k' || u[0] == 'M'))
+        {
+            u++; ulen--;
+        }
+        else if (*pre != '\0' && u[0] == 'u' && ulen > 1u)
+        {
+            if (n + 1u < size) out[n++] = 'm';
+            u++; ulen--;
+        }
+        else if (*pre != '\0' && ulen > 2u &&
+                 (uint8_t)u[0] == 0xC2u && (uint8_t)u[1] == 0xB5u)
+        {
+            if (n + 1u < size) out[n++] = 'm';
+            u += 2u; ulen -= 2u;
+        }
+        for (i = 0u; i < ulen && n + 1u < size; i++) out[n++] = u[i];
     }
     out[n] = '\0';
 }

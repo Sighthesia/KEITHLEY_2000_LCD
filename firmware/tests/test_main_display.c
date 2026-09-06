@@ -62,9 +62,9 @@ int main(void)
     assert(!main_display_layout_value(11u, 12u, 10u).valid);
     assert(main_display_special_color(0u) == MAIN_DISPLAY_COLOR_GREEN);
     assert(main_display_special_color(1u) == MAIN_DISPLAY_COLOR_RED);
-    assert(strcmp(main_display_rate_text(UI_RATE_FAST), "500 Read/s") == 0);
-    assert(strcmp(main_display_rate_text(UI_RATE_MED), "50 Read/s") == 0);
-    assert(strcmp(main_display_rate_text(UI_RATE_SLOW), "5 Read/s") == 0);
+    assert(strcmp(main_display_rate_text(UI_RATE_FAST), "500/s") == 0);
+    assert(strcmp(main_display_rate_text(UI_RATE_MED), "50/s") == 0);
+    assert(strcmp(main_display_rate_text(UI_RATE_SLOW), "5/s") == 0);
 
     ui_model_init(&model);
     ui_model_apply_reading(&model, "+03.68900", 9u, "VDC", 3u, 0u);
@@ -85,7 +85,7 @@ int main(void)
     assert(strcmp(frame.impedance, "--") == 0);
     assert(strcmp(frame.range, "AUTO") == 0);
     assert(strcmp(frame.filter, "Filter: ON") == 0);
-    assert(strcmp(frame.rate, "500 Read/s") == 0);
+    assert(strcmp(frame.rate, "500/s") == 0);
     assert(strcmp(frame.gpib, "GPIB: --") == 0);
     assert(strcmp(frame.buffer, "BUFFER: RECALL") == 0);
     assert(frame.status_active[0] && frame.status_active[1] &&

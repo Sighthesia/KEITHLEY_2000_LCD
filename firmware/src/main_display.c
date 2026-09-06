@@ -141,10 +141,12 @@ uint16_t main_display_special_color(uint8_t special)
 const char *main_display_rate_text(ui_rate_t rate)
 {
     switch (rate) {
-    case UI_RATE_FAST: return "500 Read/s";
-    case UI_RATE_MED: return "50 Read/s";
-    case UI_RATE_SLOW: return "5 Read/s";
-    default: return "-- Read/s";
+    /* Short form: the row-2 Rate value zone fits 5 glyphs (64px); the long
+     * form overflowed into the lamp zone and collided with FILT/REL/MATH. */
+    case UI_RATE_FAST: return "500/s";
+    case UI_RATE_MED: return "50/s";
+    case UI_RATE_SLOW: return "5/s";
+    default: return "--/s";
     }
 }
 
