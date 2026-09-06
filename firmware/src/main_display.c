@@ -22,6 +22,7 @@ static void append_text(char *out, uint8_t size, const char *text)
 static void format_runtime_text(char *temperature, uint8_t temperature_size,
                                 char *uptime, uint8_t uptime_size,
                                 int16_t temperature_tenths_c,
+                                int16_t humidity_percent,
                                 uint32_t uptime_ms)
 {
     uint32_t seconds = uptime_ms / 1000u;
@@ -42,6 +43,34 @@ static void format_runtime_text(char *temperature, uint8_t temperature_size,
     } else {
         (void)snprintf(temperature, temperature_size, "%c%u.%u\xC2\xB0" "C",
                        sign, magnitude / 10u, magnitude % 10u);
+    }
+    /* Humidity rides on the temperature field (no extra header cell):
+     * integer percent, "--%" while the SHT3x has no valid sample. Manual
+     * digits keep -Werror quiet where snprintf %d into a fixed buffer
+     * would trip -Wformat-truncation. */
+    append_text(temperature, temperature_size, " ");
+    if (humidity_percent < 0 || humidity_percent > 100) {
+        append_text(temperature, temperature_size, "--%");
+    } else {
+        char digits[4];
+        uint8_t n = 0u;
+        uint16_t rest = (uint16_t)humidity_percent;
+        uint16_t div = 100u;
+        bool started = false;
+
+        while (div > 0u) {
+            uint8_t d = (uint8_t)(rest / div);
+
+            if (d != 0u || started || div == 1u) {
+                digits[n++] = (char)('0' + d);
+                started = true;
+            }
+            rest %= div;
+            div /= 10u;
+        }
+        digits[n] = '\0';
+        append_text(temperature, temperature_size, digits);
+        append_text(temperature, temperature_size, "%RH");
     }
     (void)snprintf(uptime, uptime_size, "%02lu:%02u:%02u",
                    (unsigned long)(hours > 99u ? 99u : hours), minutes, secs);
@@ -363,17 +392,19 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     }
     format_active_status(frame, frame->active_status, sizeof(frame->active_status));
     format_runtime_text(frame->temperature, sizeof(frame->temperature),
-                        frame->uptime, sizeof(frame->uptime), INT16_MIN, 0u);
+                        frame->uptime, sizeof(frame->uptime), INT16_MIN,
+                        INT16_MIN, 0u);
 }
 
 void main_display_format_runtime(main_display_frame_t *frame,
                                  int16_t temperature_tenths_c,
+                                 int16_t humidity_percent,
                                  uint32_t uptime_ms)
 {
     if (frame == 0) return;
     format_runtime_text(frame->temperature, sizeof(frame->temperature),
                         frame->uptime, sizeof(frame->uptime),
-                        temperature_tenths_c, uptime_ms);
+                        temperature_tenths_c, humidity_percent, uptime_ms);
 }
 
 void main_display_get_trend_axis(const main_display_frame_t *frame,

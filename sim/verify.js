@@ -21,7 +21,7 @@ check("resistance unit normalizer",e.normalizeUnit("OHM")==="Ω"&&e.normalizeUni
 check("digit unit symbols",["µ","°","Ω"].every(c=>e.digitBitmap(c)!=null));
 check("half-height suffix font",["D","C","A"].every(c=>e.halfBitmap(c)!=null));
 check("DC/AC baseline hits reading ink bottom",e.baselineAligned);
-check("header brand and runtime",html.includes("KEITHLEY 2000")&&html.includes("demoUptime")&&html.includes("+25.0°C"));
+check("header brand and runtime",html.includes("KEITHLEY 2000")&&html.includes("demoUptime")&&html.includes("+25.0°C")&&html.includes("45%RH"));
 check("no horizontal info-bar hairlines",!html.includes("L.infoBarY,960,1")&&!html.includes("L.infoBarH-1,960"));
 check("row1 de-duplicated left lamps",html.includes('["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]')&&!html.includes("STATUS.forEach"));
 check("row1 brand separator",html.includes("brandEnd+10")&&html.includes("Math.floor((L.statusH-12)/2)"));

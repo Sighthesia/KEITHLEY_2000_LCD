@@ -96,9 +96,13 @@ int main(void)
            frame.status_active[12]);
     assert(strstr(frame.active_status, "REM") != 0);
     assert(strstr(frame.active_status, "TALK") != 0);
-    main_display_format_runtime(&frame, 250, 62000u);
-    assert(strcmp(frame.temperature, "+25.0\xC2\xB0" "C") == 0);
+    main_display_format_runtime(&frame, 250, 45, 62000u);
+    assert(strcmp(frame.temperature, "+25.0\xC2\xB0" "C 45%RH") == 0);
     assert(strcmp(frame.uptime, "00:01:02") == 0);
+    main_display_format_runtime(&frame, INT16_MIN, INT16_MIN, 0u);
+    assert(strcmp(frame.temperature, "--.-\xC2\xB0" "C --%") == 0);
+    main_display_format_runtime(&frame, -53, 100, 0u);
+    assert(strcmp(frame.temperature, "-5.3\xC2\xB0" "C 100%RH") == 0);
     assert(strcmp(frame.x_labels[0], "10.00s") == 0);
     assert(strcmp(frame.x_labels[4], "0.00s") == 0);
 

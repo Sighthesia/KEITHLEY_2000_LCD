@@ -10,7 +10,7 @@ html,body{margin:0;background:#0A1316;color:#B0BEC5;font:13px ui-monospace,monos
 <body>
 <div><canvas id="panel" width="960" height="320"></canvas><p style="color:#607D8B;font-size:11px;margin:6px 0 0">逻辑显示 960×320 · 品牌/运行信息顶栏 · 两行档位 · 趋势轴沟槽</p><canvas class="fb" id="fb" width="320" height="960"></canvas></div>
 <div class="side"><h2 style="color:#ECEFF1;margin:0 0 8px;font-size:15px;letter-spacing:0.5px">Keithley 2000 工业趋势预览 v2</h2>
-<p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏显示品牌、激活状态、内部温度与运行时间；第二行显示当前档位</p>
+<p style="color:#4DD0E1;font-size:11px;margin:0 0 6px">顶栏显示品牌、激活状态、SHT3x温湿度与运行时间；第二行显示当前档位</p>
 <label>读数 <input id="reading" value="+03.68900"></label>
 <label>单位 <input id="unit" value="V"></label>
 <label><input id="overflow" type="checkbox"> OVERFLOW</label>
@@ -61,7 +61,7 @@ function render(){
   const activeAll=demo.on?["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]:[];
   const row1x=brandEnd+10+1+10;
   {let ax=row1x;for(const s of activeAll){text(ctx,s,ax,0,COLORS.green);ax+=s.length*TEXT_W+TEXT_W;}}
-  const runtime="+25.0°C  "+demoUptime();
+  const runtime="+25.0°C 45%RH  "+demoUptime();
   text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
   // 趋势数据与档位范围（行2 Range 单元格与趋势 header 共用）
   const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;

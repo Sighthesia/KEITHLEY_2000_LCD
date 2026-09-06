@@ -173,7 +173,9 @@ typedef struct {
     char function_line1[MAIN_DISPLAY_FUNCTION_MAX];
     char function_line2[MAIN_DISPLAY_FUNCTION_MAX];
     char brand[20];
-    char temperature[12];
+    /* Top-right header value: "+27.3°C 71%RH" (SHT3x) or "--.-°C --%"
+     * before the first valid sample. Sized for "-99.9°C 100%RH". */
+    char temperature[20];
     char uptime[12];
     char active_status[MAIN_DISPLAY_META_MAX];
     char impedance[MAIN_DISPLAY_META_MAX];
@@ -225,8 +227,9 @@ const char *main_display_rate_text(ui_rate_t rate);
 const char *main_display_function_text(ui_function_t function);
 void main_display_format(const ui_model_t *model, main_display_frame_t *frame);
 void main_display_format_runtime(main_display_frame_t *frame,
-                                  int16_t temperature_tenths_c,
-                                  uint32_t uptime_ms);
+                                   int16_t temperature_tenths_c,
+                                   int16_t humidity_percent,
+                                   uint32_t uptime_ms);
 /* Extracts the axis identity a frame was rendered with, for use as the
  * resident axis of the next frame. */
 void main_display_get_trend_axis(const main_display_frame_t *frame,
