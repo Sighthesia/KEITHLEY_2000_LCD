@@ -408,6 +408,10 @@ static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static bool s_trend_rebuild_transaction;
+/* The new reading is painted before the new trend background. Once the
+ * background is ready, only the deferred rows need painting; replaying
+ * CLEAR/VALUE/UNIT/SUFFIX doubled the gear-change work. */
+static bool s_deferred_row_pending;
 /* NOTE (tautology audit): an earlier done/clone_ok mask ("skip when the
  * sibling was painted") was removed — any SOUND skip (pixels already
  * correct) is exactly the cache-match below, so the mask was either a
@@ -937,6 +941,7 @@ static void reading_only_abort_frame(lt7680_status_t error)
     s_reading_only_last_error = error;
     s_reading_only_dirty = true;
     s_reading_only_stage = READING_ONLY_IDLE;
+    s_deferred_row_pending = false;
     s_display_due_tick = HAL_GetTick();
     s_frame_rendering = false;
     s_renderer.phase = RENDER_PHASE_IDLE;
@@ -3944,6 +3949,7 @@ static bool reading_only_render_status_bar(void)
     }
     return true;
 }
+
 /* Row-2 geometry (ADR-0004): green badge, stats-style cells, right trigger. */
 static uint16_t row2_text_y(void)
 {
@@ -4008,9 +4014,21 @@ static bool reading_only_render_info_panel(void)
     static const char *const cell_names[3] = {"Zin", "Range", "Rate"};
     static const uint16_t cell_x[3] = {ROW2_X_ZIN, ROW2_X_RANGE, ROW2_X_RATE};
     static const uint16_t cell_w[3] = {ROW2_W_ZIN, ROW2_W_RANGE, ROW2_W_RATE};
+    bool page_valid = s_reading_only_page_info_valid[s_render_page];
+    bool function_dirty = !page_valid ||
+                          strcmp(s_reading_only_page_function[s_render_page],
+                                 s_frame.function) != 0;
+    bool cell_dirty[3] = {
+        !page_valid || strcmp(s_reading_only_page_impedance[s_render_page],
+                              s_frame.impedance) != 0,
+        !page_valid || strcmp(s_reading_only_page_range[s_render_page],
+                              s_frame.range) != 0,
+        !page_valid || strcmp(s_reading_only_page_rate[s_render_page],
+                              s_frame.rate) != 0};
+    bool lamps_dirty = !page_valid ||
+                       s_reading_only_page_info_lamps[s_render_page] !=
+                           row2_info_lamps();
     if (s_reading_only_stage != READING_ONLY_INFO) idx = 0u;
-    if (idx == 0u)
-        s_dbg_info_repaint_window++;
     {
         uint16_t fw, zx, ix, rlx, rx, atlx, atx, lx;
         bool fit = ui_layout_second_row(s_frame.function, s_frame.impedance, s_frame.range, s_frame.rate, &fw, &zx, &ix, &rlx, &rx, &atlx, &atx, &lx);
@@ -4049,11 +4067,18 @@ static bool reading_only_render_info_panel(void)
         s_trig_dot_pending = false;
         return true;
     }
-    if (idx == 0u && ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y,
-                                   MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_INFO_BAR_H,
-                                   MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+    if (idx == 0u)
+        s_dbg_info_repaint_window++;
+    if (idx == 0u) {
+        if (!page_valid && ui_fill_rect(0u, MAIN_DISPLAY_INFO_BAR_Y,
+                                        MAIN_DISPLAY_UI_WIDTH,
+                                        MAIN_DISPLAY_INFO_BAR_H,
+                                        MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+            return false;
+    }
     if (idx == 0u) { idx++; return false; }
     if (idx == 1u) {
+        if (!function_dirty) { idx++; return false; }
         uint16_t fw = ui_measure_text(s_frame.function);
         badge_w = (uint16_t)(fw + 2u * MAIN_DISPLAY_BADGE_PAD_X);
         if (badge_w < 80u) badge_w = 80u;
@@ -4064,6 +4089,7 @@ static bool reading_only_render_info_panel(void)
         idx++; return false;
     }
     if (idx == 2u) {
+        if (!function_dirty) { idx++; return false; }
         uint16_t text_x = (uint16_t)(MAIN_DISPLAY_BADGE_X + MAIN_DISPLAY_BADGE_PAD_X);
         if (!ui_draw_text(text_x, row2_text_y(),
                           s_frame.function, MAIN_DISPLAY_COLOR_BADGE_TEXT)) return false;
@@ -4084,17 +4110,20 @@ static bool reading_only_render_info_panel(void)
         uint16_t val_zone = (uint16_t)(cell_w[b] - name_w);
         uint16_t cx = cell_x[b];
         if (sub == 0u) {
+            if (!cell_dirty[b]) { idx++; return false; }
             if (ui_fill_rect((uint16_t)(cx + name_w), MAIN_DISPLAY_INFO_BAR_Y,
                              val_zone, MAIN_DISPLAY_INFO_BAR_H,
                              MAIN_DISPLAY_COLOR_BAR_ALT) != LT7680_OK) return false;
             idx++; return false;
         }
         if (sub == 1u) {
+            if (page_valid) { idx++; return false; }
             if (!ui_draw_text((uint16_t)(cx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
                               cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
             idx++; return false;
         }
         if (sub == 2u) {
+            if (!cell_dirty[b]) { idx++; return false; }
             if (!ui_draw_text((uint16_t)(cx + name_w + MAIN_DISPLAY_ROW2_CELL_PAD_X),
                               row2_text_y(), val, val_color)) return false;
             idx++; return false;
@@ -4105,12 +4134,14 @@ static bool reading_only_render_info_panel(void)
              * short line (idx 15), same language as the row-1 brand sep. */
             idx++; return false;
         }
+        if (page_valid) { idx++; return false; }
         if (ui_fill_rect((uint16_t)(cx + cell_w[b] - 1u), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
                          MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
         idx++; return false;
     }
     if (idx == 15u) {
+        if (page_valid) { idx++; return false; }
         if (ui_fill_rect(ROW2_X_SHORT_SEP,
                          (uint16_t)(MAIN_DISPLAY_INFO_BAR_Y +
                                     (MAIN_DISPLAY_INFO_BAR_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
@@ -4122,10 +4153,29 @@ static bool reading_only_render_info_panel(void)
         /* Active-only right statuses in fixed slots: inactive lamps vanish
          * in place (no muted text, no neighbor shift), and must never
          * cross the trigger separator. */
-        while (idx <= 18u && !s_frame.status_active[lamp_bits[idx - 16u]]) idx++;
+        while (idx <= 18u && !s_frame.status_active[lamp_bits[idx - 16u]]) {
+            uint8_t lamp = (uint8_t)(idx - 16u);
+            uint8_t bit = lamp_bits[lamp];
+            if (page_valid &&
+                (s_reading_only_page_info_lamps[s_render_page] & (1u << bit)) != 0u &&
+                (s_frame.status_active[bit] == false))
+            {
+                if (ui_fill_rect(row2_lamp_x[lamp], MAIN_DISPLAY_INFO_BAR_Y,
+                                 (uint16_t)(strlen(lamps[lamp]) * FONT_TEXT_WIDTH),
+                                 MAIN_DISPLAY_INFO_BAR_H,
+                                 MAIN_DISPLAY_COLOR_BAR) != LT7680_OK)
+                    return false;
+            }
+            idx++;
+        }
         if (idx > 18u) return false;
         {
             uint8_t lamp = (uint8_t)(idx - 16u);
+            if (page_valid && !lamps_dirty)
+            {
+                idx++;
+                return false;
+            }
             uint16_t lx = row2_lamp_x[lamp];
             uint16_t end_x = (uint16_t)(lx + strlen(lamps[lamp]) * FONT_TEXT_WIDTH);
             if (end_x > row2_trig_sep_x()) { idx = 19u; return false; }
@@ -4135,6 +4185,7 @@ static bool reading_only_render_info_panel(void)
         }
     }
     if (idx == 19u) {
+        if (page_valid) { idx++; return false; }
         /* TRIGGER block is always present; only its color/dot follow state. */
         if (ui_fill_rect(row2_trig_sep_x(), MAIN_DISPLAY_INFO_BAR_Y,
                          1u, MAIN_DISPLAY_INFO_BAR_H,
@@ -4142,6 +4193,9 @@ static bool reading_only_render_info_panel(void)
         idx++; return false;
     }
     if (idx == 20u) {
+        if (page_valid &&
+            ((s_reading_only_page_info_lamps[s_render_page] & 8u) != 0u) ==
+                s_frame.status_active[5u]) { idx++; return false; }
         bool trig = s_frame.status_active[5u];
         if (!ui_draw_text(row2_trig_text_x(), row2_text_y(), "TRIGGER",
                           trig ? MAIN_DISPLAY_COLOR_GREEN :
@@ -4873,7 +4927,15 @@ static void reading_only_render(void)
                 s_reading_only_stage = READING_ONLY_CLEAR;
             return;
         }
-        s_reading_only_stage = READING_ONLY_CLEAR;
+        if (s_deferred_row_pending)
+        {
+            s_deferred_row_pending = false;
+            s_reading_only_stage = READING_ONLY_PRESENT;
+        }
+        else
+        {
+            s_reading_only_stage = READING_ONLY_CLEAR;
+        }
         return;
     }
     if (s_reading_only_stage == READING_ONLY_IDLE)
@@ -5014,11 +5076,11 @@ static void reading_only_render(void)
                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                  strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                  s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-               if (!s_reading_only_page_info_valid[s_render_page] ||
-                   strcmp(s_reading_only_page_function[s_render_page],
-                          s_frame.function) != 0)
-                   s_dbg_function_change_window++;
-              /* Defer INFO while the axis doesn't exist yet: INFO runs
+                if (!s_reading_only_page_info_valid[s_render_page] ||
+                    strcmp(s_reading_only_page_function[s_render_page],
+                           s_frame.function) != 0)
+                    s_dbg_function_change_window++;
+               /* Defer INFO while the axis doesn't exist yet: INFO runs
                * before TREND recomputes the axis in the pipeline, so the
                * first post-rotation pass would bake "AUTO --" into pixels
                * and caches (one flash + one wasted full repaint). The rows
@@ -5036,7 +5098,11 @@ static void reading_only_render(void)
                 * re-enter STATUS on this same page before presenting it. */
                if (s_trend_rebuild_transaction || s_initial_page_pending ||
                    !s_display_enabled)
+               {
+                   if (s_trend_rebuild_transaction)
+                       s_deferred_row_pending = true;
                    s_reading_only_stage = READING_ONLY_CLEAR;
+               }
                else if (status_need) s_reading_only_stage = READING_ONLY_STATUS;
                else if (info_need) s_reading_only_stage = READING_ONLY_INFO;
                else s_reading_only_stage = READING_ONLY_CLEAR;
@@ -5249,12 +5315,11 @@ static void reading_only_render(void)
                  (trend_stem[stem_n - 2u] == 'A' &&
                   trend_stem[stem_n - 1u] == 'C')))
                 trend_stem[stem_n - 2u] = '\0';
-            if (strcmp(trend_stem, s_frame.unit) != 0)
-            {
-                s_dbg_stale_kill_window++;
-                s_reading_only_stage = READING_ONLY_IDLE;
-                return;
-            }
+            /* The trend buffer may advance while this cooperative frame is
+             * being painted. Do not discard completed reading work and replay
+             * STATUS/INFO/VALUE here: that was the source of the long gear
+             * change stall. The frame snapshot owns the reading; the next
+             * 33 ms snapshot will pick up the newer trend identity. */
         }
 
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
@@ -5371,6 +5436,14 @@ static void reading_only_render(void)
              * rebuilding. Repaint it before the first commit of the new
              * unit, so the visible page never contains mixed generations. */
             s_row_snap_taken = false;
+            if (s_deferred_row_pending)
+            {
+                /* VALUE/UNIT/SUFFIX already completed on this page. The row
+                 * is the only stale band left, so skip the second reading
+                 * pass and continue directly with the atomic row update. */
+                s_reading_only_stage = READING_ONLY_STATUS;
+                return;
+            }
             /* Do not synchronously clone the whole UI page here. The former
              * eight-band loop blocked the scheduler for 40+ ms and exposed
              * the row as a separate visual generation. The next hidden-page

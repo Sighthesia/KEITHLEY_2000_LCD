@@ -13,6 +13,15 @@
 - 目标板换挡窗口实测：`frame-ms=762`、`max-ms=1157`、`fps=11`，但 `gap=27`、`missed=0`；同窗口 `dbg_func_change=2`、`dbg_info_repaint=1`、`dbg_stale_kill=1`、`dbg_present_hold=1`。
 - 结论：该卡顿不是主循环失控或输入丢失，而是换挡重建路径的长渲染/事务回退；功能行确实被判定为两次变化，且存在一次 stale-kill。下一步应沿 `stale-kill -> 重启 IDLE -> 再次格式化/INFO` 路径做定向修复。
 
+## 换挡长帧修复（2026-09-06）
+
+- stale-kill 不再丢弃已完成的读数工作，也不回到 `IDLE` 重放整条 STATUS/INFO/VALUE 流水线；当前帧完成后由下一次 33ms 快照自然收敛。
+- 换挡事务完成后使用 `s_deferred_row_pending` 直接进入 `STATUS/INFO/PRESENT`，跳过第二次 `CLEAR/VALUE/UNIT/SUFFIX`，避免重复 GE 填充。
+- INFO 采用字段级差分：功能徽标、Zin、Range、Rate、状态灯和固定分隔线只有在页面缓存不一致时绘制；固定标签不会随每次换挡重复重画。
+- 曾尝试的可见页到隐藏页顶部复制已撤回；它会把旧行拖入事务并增加 BTE 阻塞，不符合隐藏页不变式。
+- 普通文字 bitmap slice 保持 64 个墨点段预算；降至 8 会把一次换挡拆成过多合作访次，反而将可见页冻结拉长。
+- 目标板复测：常规窗口 `frame-ms=13~23ms`、`missed=0`，`dbg_stale_kill=0`、`dbg_present_hold=0`；换挡窗口功能计数降至一次。仍观测到偶发 `frame-ms≈449ms` 且 `dbg_*` 全为 0，归类为独立后台 BTE 峰值，保留埋点继续追踪。
+
 - 状态：已接受（2026-09-03）
 - 前置：ADR-0006（底部只留绘图区）被本决策部分取代——绘图区让出 header / 任务栏 / Y 沟槽。
 
