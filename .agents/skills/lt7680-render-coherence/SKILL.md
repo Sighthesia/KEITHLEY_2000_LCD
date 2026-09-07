@@ -160,6 +160,12 @@ flickers at flip rate. Rules, in order:
   occasional longer interval); demo status flips drive paired dual-page
   row repaints (~70–140 ms/page over 2 frames, slow-mo-visible — demo
   tick is 10 s, real host drives status rarely so it is a non-issue).
+- **Header-tick freeze trap (2026-09-08):** `header_due` derived from a
+  tick that is only written on one temperature-source branch freezes when
+  the other source is active → header-only filler frames bypass the
+  display throttle (`display_commits` ≈ 2× the throttle cap is the
+  tell-tale) with a 2-quick + 1-long slow-motion rhythm. Keep-alive tick
+  must be stamped on EVERY composition, ADC cadence on its own tick.
 - **Demo-rate discipline:** 500 Hz sustained + 30 fps display. Catch-up
   budget must cover ~17 samples/turn at 30 fps (64 used). Acceptance is
   `input_hz≈500, missed=0` — check this before suspecting the renderer.
