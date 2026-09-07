@@ -117,7 +117,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * UART->proto->reading_split->ui_model->trend_buffer->render pipeline can be
  * verified on the bench without an instrument. Values ramp up/down while the
  * unit/range table rotates (VDC/VAC/ADC/AAC/mVDC/mVAC/mADC/mAAC/OHM/kOHM/MOHM/
- * Hz/kHz/MHz/CEL), exercising the split DC/AC half-height suffix, the
+ * Hz/kHz/MHz/°C), exercising the split DC/AC half-height suffix, the
  * digit-size unit letters and the info panel lamps (REL/FILT/AUTO/MATH,
  * HOLD/TRIG, FAST/MED/SLOW rate). Units are limited to the 64x128 digit
  * charset (no U/Z/S glyphs; Flash too tight to add them). The DC/AC suffix is
@@ -1065,7 +1065,7 @@ static const demo_unit_t s_demo_units[] = {
     {"kHz", 3u, 3u, 20000u, 40000u, 0x00u, 0x14u},
     {"MHz", 2u, 3u, 20000u, 40000u, 0x40u, 0x02u},
     {"\xC2\xB0"
-     "CEL",
+     "C",
      2u, 3u, 1000u, 50000u, 0x30u, 0x01u},
 };
 #define DEMO_UNIT_COUNT \

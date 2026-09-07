@@ -17,13 +17,13 @@
 
 static const char *const units[] = {
     "VDC","VAC","ADC","AAC","mVDC","mVAC","mADC","mAAC",
-    "OHM","kOHM","MOHM","Hz","kHz","MHz","\xC2\xB0""CEL"
+    "OHM","kOHM","MOHM","Hz","kHz","MHz","\xC2\xB0""C"
 };
 /* Expected model.unit after ui_model resistance normalization (OHM -> Ohm
  * sign); every other unit passes through unchanged. */
 static const char *const expect_units[] = {
     "VDC","VAC","ADC","AAC","mVDC","mVAC","mADC","mAAC",
-    "\xCE\xA9","k\xCE\xA9","M\xCE\xA9","Hz","kHz","MHz","\xC2\xB0""CEL"
+    "\xCE\xA9","k\xCE\xA9","M\xCE\xA9","Hz","kHz","MHz","\xC2\xB0""C"
 };
 static const unsigned char intd[] = {2,3,2,2,3,3,2,2,4,3,3,3,3,2,2};
 static const unsigned char fracd[] = {5,5,5,5,5,5,5,5,4,4,4,3,3,3,3};
