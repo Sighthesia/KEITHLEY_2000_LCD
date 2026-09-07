@@ -828,27 +828,11 @@ typedef struct {
     uint32_t stgm[9];
     uint32_t sw_behind, sw_scale, sw_reset, pxok, pxmiss;
     uint32_t reading_errors, last_error;
-    uint32_t jd_d, jd_stg, jd_behind;
-    uint32_t jh[6];
-    uint32_t js[9];
     char axu[TREND_UNIT_ID_MAX];
     char rng[MAIN_DISPLAY_META_MAX];
 } perf_snapshot_t;
 static perf_snapshot_t s_perf_tx_snap;
 static uint8_t s_perf_tx_step;  /* 0 = idle, 1..4 = emitting */
-/* Per-frame stage sums, reset at every present: lets a stretched present
- * interval point at its dominant stage (temporary jitter autopsy). */
-static uint32_t s_frame_stage_ms[9];
-/* Last stretched interval autopsy (sticky until snapshotted into PERF):
- * interval ms, dominant stage 0..8 (IDLE..PRESENT), sweep behind. */
-static uint32_t s_jit_last_d;
-static uint8_t s_jit_last_stg;
-static uint8_t s_jit_last_behind;
-/* Fine interval histogram (temporary slow-motion uniformity forensics):
- * jh bands (ms): [0,20],(20,28],(28,36],(36,50],(50,100],>100.
- * js counts dominant stage for intervals >28 ms only. */
-static uint32_t s_hist_window[6];
-static uint32_t s_hist_dom_window[9];
 
 static void perf_note_present(void)
 {
@@ -856,30 +840,10 @@ static void perf_note_present(void)
     if (s_perf_last_present_tick != 0u)
     {
         uint32_t d = now - s_perf_last_present_tick;
-        uint8_t bi = 0u, si;
-        for (si = 1u; si < 9u; si++)
-            if (s_frame_stage_ms[si] > s_frame_stage_ms[bi]) bi = si;
-        if (d <= 20u) s_hist_window[0]++;
-        else if (d <= 28u) s_hist_window[1]++;
-        else if (d <= 36u) s_hist_window[2]++;
-        else if (d <= 50u) s_hist_window[3]++;
-        else if (d <= 100u) s_hist_window[4]++;
-        else s_hist_window[5]++;
-        if (d > 28u)
-            s_hist_dom_window[bi]++;
-        if (d > 50u)
-        {
-            s_jit_last_d = d;
-            s_jit_last_stg = bi;
-            s_jit_last_behind = (uint8_t)((s_trend.has_sample &&
-                s_trend.newest_bucket > s_sweep_cursor_bucket)
-                ? s_trend.newest_bucket - s_sweep_cursor_bucket : 0u);
-            if (d > 100u) s_perf_jit_big_window++;
-            else s_perf_jit_mid_window++;
-        }
+        if (d > 100u) s_perf_jit_big_window++;
+        else if (d > 50u) s_perf_jit_mid_window++;
     }
     s_perf_last_present_tick = now;
-    memset(s_frame_stage_ms, 0, sizeof(s_frame_stage_ms));
 }
 
 static void perf_record_frame(void)
@@ -926,11 +890,7 @@ static void perf_record_frame(void)
              * << 1 s); if it ever crosses a boundary, keep draining below
              * instead of stalling the line until the next print window. */
             if (s_perf_tx_step == 0u)
-            {
-                memset(s_hist_window, 0, sizeof(s_hist_window));
-                memset(s_hist_dom_window, 0, sizeof(s_hist_dom_window));
                 return;
-            }
         }
         if (print_this)
         {
@@ -979,20 +939,6 @@ static void perf_record_frame(void)
                 s_perf_tx_snap.pxmiss = s_sweep_px_missed;
                 s_perf_tx_snap.reading_errors = s_reading_only_render_errors;
                 s_perf_tx_snap.last_error = (uint32_t)s_reading_only_last_error;
-                s_perf_tx_snap.jd_d = s_jit_last_d;
-                s_perf_tx_snap.jd_stg = s_jit_last_stg;
-                s_perf_tx_snap.jd_behind = s_jit_last_behind;
-                s_jit_last_d = 0u;
-                for (i = 0u; i < 6u; i++)
-                {
-                    s_perf_tx_snap.jh[i] = s_hist_window[i];
-                    s_hist_window[i] = 0u;
-                }
-                for (i = 0u; i < 9u; i++)
-                {
-                    s_perf_tx_snap.js[i] = s_hist_dom_window[i];
-                    s_hist_dom_window[i] = 0u;
-                }
                 p = s_trend_axis_unit;
                 for (i = 0u; i < TREND_UNIT_ID_MAX - 1u && p[i] != '\0'; i++)
                     s_perf_tx_snap.axu[i] = p[i];
@@ -1146,32 +1092,6 @@ static void perf_record_frame(void)
             perf_send_u32(s_perf_tx_snap.reading_errors);
             hal_uart_send_text(" last_error=");
             perf_send_u32(s_perf_tx_snap.last_error);
-            hal_uart_send_text(" jd=");
-            perf_send_u32(s_perf_tx_snap.jd_d);
-            hal_uart_send_text(",");
-            perf_send_u32(s_perf_tx_snap.jd_stg);
-            hal_uart_send_text(",");
-            perf_send_u32(s_perf_tx_snap.jd_behind);
-            hal_uart_send_text(" jh=");
-            {
-                uint8_t ji;
-                for (ji = 0u; ji < 6u; ji++)
-                {
-                    perf_send_u32(s_perf_tx_snap.jh[ji]);
-                    if (ji < 5u)
-                        hal_uart_send_text(",");
-                }
-            }
-            hal_uart_send_text(" js=");
-            {
-                uint8_t ji;
-                for (ji = 0u; ji < 9u; ji++)
-                {
-                    perf_send_u32(s_perf_tx_snap.js[ji]);
-                    if (ji < 8u)
-                        hal_uart_send_text(",");
-                }
-            }
             hal_uart_send_text("\r\n");
             s_perf_tx_step = 0u;
             break;
@@ -5342,7 +5262,6 @@ static void reading_only_render(void)
                 s_dbg_stage_ms_window[s_dbg_last_stage] += dt;
                 if (dt > s_dbg_stage_max_window[s_dbg_last_stage])
                     s_dbg_stage_max_window[s_dbg_last_stage] = dt;
-                s_frame_stage_ms[s_dbg_last_stage] += dt;
             }
         }
         s_dbg_last_stage = cur < 9u ? cur : 0u;
