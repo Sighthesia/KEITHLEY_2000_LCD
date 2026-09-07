@@ -148,15 +148,18 @@ flickers at flip rate. Rules, in order:
   then `PERF`/`gap`: healthy = `input_hz≈500, missed=0, fps≈30,
   frame-ms~10, gap<40, reading_errors=0`. Plus `node sim/verify.js` and
   `firmware/tests/run_tests.sh`.
-- **Known costs, measured on-target:** UART PERF line ~450 B ≈ 35–40 ms
-  blocking per print (print every 5th window, count every window);
-  MRWDP peek per slot ≈ ms-scale (gate `TREND_SWEEP_PROBE` off except
+- **Known costs, measured on-target:** UART PERF line ~440 B snapshot +
+  4-frame chunked emit (~10 ms/frame, no present-interval hitch — never
+  emit it at once: 38 ms straight stretched one interval past 50 ms every
+  5 s); MRWDP peek per slot ≈ ms-scale (gate `TREND_SWEEP_PROBE` off except
   when chasing landing faults); Flash-DMA glyph ≈ 7 ms vs SDRAM-cache
   BTE blit ≈ 1 ms (`READING_ONLY_DIRECT_DMA` must stay 0); full header
   repaint ≈ 1400 GE fills; text run ≈ 0.3 ms/fill; SHT3x ambient read
   ≈ 6 ms every 30 s (low repeatability — high costs ≈ 17 ms and
   stretched one reading frame per period, seen in slow-motion as an
-  occasional longer interval).
+  occasional longer interval); demo status flips drive paired dual-page
+  row repaints (~70–140 ms/page over 2 frames, slow-mo-visible — demo
+  tick is 10 s, real host drives status rarely so it is a non-issue).
 - **Demo-rate discipline:** 500 Hz sustained + 30 fps display. Catch-up
   budget must cover ~17 samples/turn at 30 fps (64 used). Acceptance is
   `input_hz≈500, missed=0` — check this before suspecting the renderer.

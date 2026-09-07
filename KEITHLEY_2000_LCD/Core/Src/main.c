@@ -799,6 +799,27 @@ static uint32_t s_sweep_epoch_resets;
 static uint32_t s_sweep_px_ok;
 static uint32_t s_sweep_px_missed;
 
+/* Chunked PERF emitter. The full line is ~440 B ~= 38 ms of blocking
+ * UART: emitting it at once stretched one present interval past 50 ms
+ * every 5 s (slow-motion-visible mid-jitter). Window counters are
+ * snapshotted once, then emitted ~110 B per frame over the next 4 frames
+ * so no single present interval grows past ~30 ms. ~240 B static. */
+typedef struct {
+    uint32_t fps, frame_ms, max_ms, samples, missed;
+    uint32_t bte_hit, bte_miss, fl_ms, fl_n, dm_ms, dm_n;
+    uint32_t gap, jit_mid, jit_big;
+    uint32_t fields, reading_frames, commits, rebuilds, columns;
+    uint32_t func, info, stale, hold;
+    uint32_t stg[9];
+    uint32_t stgm[9];
+    uint32_t sw_behind, sw_scale, sw_reset, pxok, pxmiss;
+    uint32_t reading_errors, last_error;
+    char axu[TREND_UNIT_ID_MAX];
+    char rng[MAIN_DISPLAY_META_MAX];
+} perf_snapshot_t;
+static perf_snapshot_t s_perf_tx_snap;
+static uint8_t s_perf_tx_step;  /* 0 = idle, 1..4 = emitting */
+
 static void perf_note_present(void)
 {
     uint32_t now = HAL_GetTick();
@@ -841,158 +862,228 @@ static void perf_record_frame(void)
             s_perf_fields_window = 0u;
             s_perf_reading_frames_window = 0u;
             s_perf_display_commits_window = 0u;
-         s_perf_axis_rebuilds_window = 0u;
-         s_perf_trend_columns_window = 0u;
-             s_dbg_function_change_window = 0u;
-             s_dbg_info_repaint_window = 0u;
+            s_perf_axis_rebuilds_window = 0u;
+            s_perf_trend_columns_window = 0u;
+            s_dbg_function_change_window = 0u;
+            s_dbg_info_repaint_window = 0u;
             s_dbg_stale_kill_window = 0u;
             s_dbg_present_hold_window = 0u;
             memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
             memset(s_dbg_stage_max_window, 0, sizeof(s_dbg_stage_max_window));
             s_perf_jit_mid_window = 0u;
             s_perf_jit_big_window = 0u;
-            return;
+            /* A 4-frame drain always finishes inside its window (4 frames
+             * << 1 s); if it ever crosses a boundary, keep draining below
+             * instead of stalling the line until the next print window. */
+            if (s_perf_tx_step == 0u)
+                return;
         }
-        hal_uart_send_text("PERF fps=");
-        perf_send_u32(s_perf_fps);
-        hal_uart_send_text(" frame-ms=");
-        perf_send_u32(s_perf_last_frame_ms);
-        hal_uart_send_text(" max-ms=");
-        perf_send_u32(s_perf_max_frame_ms);
-        hal_uart_send_text(" samples=");
-        perf_send_u32(s_perf_sample_count);
-        hal_uart_send_text(" missed=");
-        perf_send_u32(s_perf_sample_missed);
-        hal_uart_send_text(" bte-hit=");
-        perf_send_u32(s_rif_bte_hits);
-        hal_uart_send_text(" bte-miss=");
-        perf_send_u32(s_rif_bte_misses);
-        hal_uart_send_text(" fl=");
-        perf_send_u32(s_prof_fill_ms);
-        hal_uart_send_text("/");
-        perf_send_u32(s_prof_fill_n);
-        hal_uart_send_text(" dm=");
-        perf_send_u32(s_prof_dma_ms);
-        hal_uart_send_text("/");
-        perf_send_u32(s_prof_dma_n);
-        hal_uart_send_text(" gap=");
-        perf_send_u32(s_loop_max_gap_ms);
-        s_loop_max_gap_ms = 0u;
-        hal_uart_send_text(" jit=");
-        perf_send_u32(s_perf_jit_mid_window);
-        hal_uart_send_text("/");
-        perf_send_u32(s_perf_jit_big_window);
-
-        hal_uart_send_text(" input_hz=");
-        perf_send_u32(s_perf_fields_window);
-        hal_uart_send_text(" reading_frames=");
-        perf_send_u32(s_perf_reading_frames_window);
-        hal_uart_send_text(" display_commits=");
-        perf_send_u32(s_perf_display_commits_window);
-        hal_uart_send_text(" trend_axis_rebuilds=");
-        perf_send_u32(s_perf_axis_rebuilds_window);
-         hal_uart_send_text(" trend_column_updates=");
-         perf_send_u32(s_perf_trend_columns_window);
-         hal_uart_send_text(" dbg_func_change=");
-         perf_send_u32(s_dbg_function_change_window);
-         hal_uart_send_text(" dbg_info_repaint=");
-         perf_send_u32(s_dbg_info_repaint_window);
-         hal_uart_send_text(" dbg_stale_kill=");
-         perf_send_u32(s_dbg_stale_kill_window);
-        hal_uart_send_text(" dbg_present_hold=");
-        perf_send_u32(s_dbg_present_hold_window);
-        hal_uart_send_text(" stg=");
+        if (print_this)
         {
-            uint8_t si;
-            for (si = 0u; si < 9u; si++)
+            /* Snapshot once, emit over the next 4 frames (see below).
+             * Overlap is impossible by construction (4 frames << 5 s); if
+             * it ever happened, keep window cadence and drop the print. */
+            if (s_perf_tx_step == 0u)
             {
-                perf_send_u32(s_dbg_stage_ms_window[si]);
-                if (si < 8u)
-                    hal_uart_send_text(",");
+                uint8_t i;
+                const char *p;
+                s_perf_tx_snap.fps = s_perf_fps;
+                s_perf_tx_snap.frame_ms = s_perf_last_frame_ms;
+                s_perf_tx_snap.max_ms = s_perf_max_frame_ms;
+                s_perf_tx_snap.samples = s_perf_sample_count;
+                s_perf_tx_snap.missed = s_perf_sample_missed;
+                s_perf_tx_snap.bte_hit = s_rif_bte_hits;
+                s_perf_tx_snap.bte_miss = s_rif_bte_misses;
+                s_perf_tx_snap.fl_ms = s_prof_fill_ms;
+                s_perf_tx_snap.fl_n = s_prof_fill_n;
+                s_perf_tx_snap.dm_ms = s_prof_dma_ms;
+                s_perf_tx_snap.dm_n = s_prof_dma_n;
+                s_perf_tx_snap.gap = s_loop_max_gap_ms;
+                s_perf_tx_snap.jit_mid = s_perf_jit_mid_window;
+                s_perf_tx_snap.jit_big = s_perf_jit_big_window;
+                s_perf_tx_snap.fields = s_perf_fields_window;
+                s_perf_tx_snap.reading_frames = s_perf_reading_frames_window;
+                s_perf_tx_snap.commits = s_perf_display_commits_window;
+                s_perf_tx_snap.rebuilds = s_perf_axis_rebuilds_window;
+                s_perf_tx_snap.columns = s_perf_trend_columns_window;
+                s_perf_tx_snap.func = s_dbg_function_change_window;
+                s_perf_tx_snap.info = s_dbg_info_repaint_window;
+                s_perf_tx_snap.stale = s_dbg_stale_kill_window;
+                s_perf_tx_snap.hold = s_dbg_present_hold_window;
+                for (i = 0u; i < 9u; i++)
+                {
+                    s_perf_tx_snap.stg[i] = s_dbg_stage_ms_window[i];
+                    s_perf_tx_snap.stgm[i] = s_dbg_stage_max_window[i];
+                }
+                s_perf_tx_snap.sw_behind = s_trend.has_sample
+                    ? (s_trend.newest_bucket > s_sweep_cursor_bucket
+                        ? s_trend.newest_bucket - s_sweep_cursor_bucket : 0u)
+                    : 0u;
+                s_perf_tx_snap.sw_scale = s_sweep_scale_changes;
+                s_perf_tx_snap.sw_reset = s_sweep_epoch_resets;
+                s_perf_tx_snap.pxok = s_sweep_px_ok;
+                s_perf_tx_snap.pxmiss = s_sweep_px_missed;
+                s_perf_tx_snap.reading_errors = s_reading_only_render_errors;
+                s_perf_tx_snap.last_error = (uint32_t)s_reading_only_last_error;
+                p = s_trend_axis_unit;
+                for (i = 0u; i < TREND_UNIT_ID_MAX - 1u && p[i] != '\0'; i++)
+                    s_perf_tx_snap.axu[i] = p[i];
+                s_perf_tx_snap.axu[i] = '\0';
+                p = s_frame.range;
+                for (i = 0u; i < MAIN_DISPLAY_META_MAX - 1u && p[i] != '\0'; i++)
+                    s_perf_tx_snap.rng[i] = p[i];
+                s_perf_tx_snap.rng[i] = '\0';
+                s_perf_tx_step = 1u;
             }
+            s_loop_max_gap_ms = 0u;
+            s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
+            s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
+            s_perf_fields_window = 0u;
+            s_perf_reading_frames_window = 0u;
+            s_perf_display_commits_window = 0u;
+            s_perf_axis_rebuilds_window = 0u;
+            s_perf_trend_columns_window = 0u;
+            s_dbg_function_change_window = 0u;
+            s_dbg_info_repaint_window = 0u;
+            s_dbg_stale_kill_window = 0u;
+            s_dbg_present_hold_window = 0u;
+            memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
+            memset(s_dbg_stage_max_window, 0, sizeof(s_dbg_stage_max_window));
+            s_perf_jit_mid_window = 0u;
+            s_perf_jit_big_window = 0u;
+            s_sweep_px_ok = 0u;
+            s_sweep_px_missed = 0u;
         }
-        hal_uart_send_text(" stgm=");
+    }
+    /* Emit at most one part per frame (runs on EVERY present, not just on
+     * window boundaries): each part is ~110 B ~= 10 ms, so the present
+     * interval never notices. Parts must stay in order; "\r\n"
+     * terminates the line in the last part. */
+    switch (s_perf_tx_step)
         {
-            uint8_t si;
-            for (si = 0u; si < 9u; si++)
+        case 1u:
+            hal_uart_send_text("PERF fps=");
+            perf_send_u32(s_perf_tx_snap.fps);
+            hal_uart_send_text(" frame-ms=");
+            perf_send_u32(s_perf_tx_snap.frame_ms);
+            hal_uart_send_text(" max-ms=");
+            perf_send_u32(s_perf_tx_snap.max_ms);
+            hal_uart_send_text(" samples=");
+            perf_send_u32(s_perf_tx_snap.samples);
+            hal_uart_send_text(" missed=");
+            perf_send_u32(s_perf_tx_snap.missed);
+            hal_uart_send_text(" bte-hit=");
+            perf_send_u32(s_perf_tx_snap.bte_hit);
+            hal_uart_send_text(" bte-miss=");
+            perf_send_u32(s_perf_tx_snap.bte_miss);
+            s_perf_tx_step = 2u;
+            break;
+        case 2u:
+            hal_uart_send_text(" fl=");
+            perf_send_u32(s_perf_tx_snap.fl_ms);
+            hal_uart_send_text("/");
+            perf_send_u32(s_perf_tx_snap.fl_n);
+            hal_uart_send_text(" dm=");
+            perf_send_u32(s_perf_tx_snap.dm_ms);
+            hal_uart_send_text("/");
+            perf_send_u32(s_perf_tx_snap.dm_n);
+            hal_uart_send_text(" gap=");
+            perf_send_u32(s_perf_tx_snap.gap);
+            hal_uart_send_text(" jit=");
+            perf_send_u32(s_perf_tx_snap.jit_mid);
+            hal_uart_send_text("/");
+            perf_send_u32(s_perf_tx_snap.jit_big);
+            hal_uart_send_text(" input_hz=");
+            perf_send_u32(s_perf_tx_snap.fields);
+            hal_uart_send_text(" reading_frames=");
+            perf_send_u32(s_perf_tx_snap.reading_frames);
+            hal_uart_send_text(" display_commits=");
+            perf_send_u32(s_perf_tx_snap.commits);
+            s_perf_tx_step = 3u;
+            break;
+        case 3u:
+            hal_uart_send_text(" trend_axis_rebuilds=");
+            perf_send_u32(s_perf_tx_snap.rebuilds);
+            hal_uart_send_text(" trend_column_updates=");
+            perf_send_u32(s_perf_tx_snap.columns);
+            hal_uart_send_text(" dbg_func_change=");
+            perf_send_u32(s_perf_tx_snap.func);
+            hal_uart_send_text(" dbg_info_repaint=");
+            perf_send_u32(s_perf_tx_snap.info);
+            hal_uart_send_text(" dbg_stale_kill=");
+            perf_send_u32(s_perf_tx_snap.stale);
+            hal_uart_send_text(" dbg_present_hold=");
+            perf_send_u32(s_perf_tx_snap.hold);
+            hal_uart_send_text(" stg=");
             {
-                perf_send_u32(s_dbg_stage_max_window[si]);
-                if (si < 8u)
-                    hal_uart_send_text(",");
+                uint8_t si;
+                for (si = 0u; si < 9u; si++)
+                {
+                    perf_send_u32(s_perf_tx_snap.stg[si]);
+                    if (si < 8u)
+                        hal_uart_send_text(",");
+                }
             }
-        }
-        /* String self-check: prints the resident axis unit + last row-2
-         * range so a doubled prefix ("kkHz") or stuck text can be told
-         * apart from a pixel remnant without seeing the screen. Bounded
-         * sends only (a blocking UART must never run away). */
-        {
-            const char *p;
-            uint8_t n;
-            hal_uart_send_text(" axu=");
-            p = s_trend_axis_unit; n = 0u;
-            while (*p != '\0' && n < TREND_UNIT_ID_MAX)
+            s_perf_tx_step = 4u;
+            break;
+        case 4u:
+            hal_uart_send_text(" stgm=");
             {
-                hal_uart_send((const uint8_t *)p, 1u); p++; n++;
+                uint8_t si;
+                for (si = 0u; si < 9u; si++)
+                {
+                    perf_send_u32(s_perf_tx_snap.stgm[si]);
+                    if (si < 8u)
+                        hal_uart_send_text(",");
+                }
             }
-            hal_uart_send_text(" rng=");
-            p = s_frame.range; n = 0u;
-            while (*p != '\0' && n < MAIN_DISPLAY_META_MAX)
+            /* String self-check: resident axis unit + last row-2 range.
+             * Bounded sends only (a blocking UART must never run away). */
             {
-                hal_uart_send((const uint8_t *)p, 1u); p++; n++;
+                const char *p;
+                hal_uart_send_text(" axu=");
+                p = s_perf_tx_snap.axu;
+                while (*p != '\0') { hal_uart_send((const uint8_t *)p, 1u); p++; }
+                hal_uart_send_text(" rng=");
+                p = s_perf_tx_snap.rng;
+                while (*p != '\0') { hal_uart_send((const uint8_t *)p, 1u); p++; }
             }
-        }
 #if K2000_ROW_DUMP
-        {
-            /* Late one-shot: the first PERF fires mid virgin-build (STATUS
-             * done, INFO still composing) — useless as ground truth. Wait
-             * for post-rotation steady state. */
-            static bool rowdump_done = false;
-            if (!rowdump_done && HAL_GetTick() > 30000u)
             {
-                rowdump_done = true;
-                row_debug_dump();
+                /* Late one-shot: the first PERF fires mid virgin-build
+                 * (STATUS done, INFO still composing) — useless as ground
+                 * truth. Wait for post-rotation steady state. */
+                static bool rowdump_done = false;
+                if (!rowdump_done && HAL_GetTick() > 30000u)
+                {
+                    rowdump_done = true;
+                    row_debug_dump();
+                }
             }
-        }
 #endif
-        hal_uart_send_text(" sw_behind=");
-        perf_send_u32(s_trend.has_sample
-                          ? (s_trend.newest_bucket > s_sweep_cursor_bucket
-                                 ? s_trend.newest_bucket - s_sweep_cursor_bucket
-                                 : 0u)
-                          : 0u);
-        hal_uart_send_text(" sw_scale=");
-        perf_send_u32(s_sweep_scale_changes);
-        hal_uart_send_text(" sw_reset=");
-        perf_send_u32(s_sweep_epoch_resets);
-        hal_uart_send_text(" sw_pxok=");
-        perf_send_u32(s_sweep_px_ok);
-        hal_uart_send_text("/");
-        perf_send_u32(s_sweep_px_missed);
-        s_sweep_px_ok = 0u;
-        s_sweep_px_missed = 0u;
+            hal_uart_send_text(" sw_behind=");
+            perf_send_u32(s_perf_tx_snap.sw_behind);
+            hal_uart_send_text(" sw_scale=");
+            perf_send_u32(s_perf_tx_snap.sw_scale);
+            hal_uart_send_text(" sw_reset=");
+            perf_send_u32(s_perf_tx_snap.sw_reset);
+            hal_uart_send_text(" sw_pxok=");
+            perf_send_u32(s_perf_tx_snap.pxok);
+            hal_uart_send_text("/");
+            perf_send_u32(s_perf_tx_snap.pxmiss);
 #if K2000_TREND_DUMP
-        trend_debug_dump();
+            trend_debug_dump();
 #endif
-        hal_uart_send_text(" reading_errors=");
-        perf_send_u32(s_reading_only_render_errors);
-        hal_uart_send_text(" last_error=");
-        perf_send_u32((uint32_t)s_reading_only_last_error);
-        hal_uart_send_text("\r\n");
-        s_prof_fill_ms = 0u; s_prof_fill_n = 0u;
-        s_prof_dma_ms = 0u; s_prof_dma_n = 0u;
-        s_perf_fields_window = 0u;
-        s_perf_reading_frames_window = 0u;
-        s_perf_display_commits_window = 0u;
-         s_perf_axis_rebuilds_window = 0u;
-         s_perf_trend_columns_window = 0u;
-         s_dbg_function_change_window = 0u;
-         s_dbg_info_repaint_window = 0u;
-         s_dbg_stale_kill_window = 0u;
-         s_dbg_present_hold_window = 0u;
-         memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
-         s_perf_jit_mid_window = 0u;
-         s_perf_jit_big_window = 0u;
-     }
+            hal_uart_send_text(" reading_errors=");
+            perf_send_u32(s_perf_tx_snap.reading_errors);
+            hal_uart_send_text(" last_error=");
+            perf_send_u32(s_perf_tx_snap.last_error);
+            hal_uart_send_text("\r\n");
+            s_perf_tx_step = 0u;
+            break;
+        default:
+            break;
+        }
 }
 static uint16_t s_render_column;
 static uint8_t s_render_item;
@@ -1212,7 +1303,12 @@ static void k2000_demo_feed(void)
         for (p = text; *p != '\0'; p++)
             k2000_proto_feed((uint8_t)*p);
         demo_feed_unit(u->unit);
-        if ((uint16_t)(now - s_demo_status_tick) >= 2000u)
+        /* Artificial status churn shaping: every flip repaints the rows on
+         * both pages (paired stretched frames). The real host drives
+         * status rarely; the demo does not need 2 s flips to exercise
+         * lamp rendering, so 10 s keeps coverage while staying out of
+         * the slow-motion picture. */
+        if ((uint16_t)(now - s_demo_status_tick) >= 10000u)
         {
             k2000_proto_feed(K2000_TAG_STATUS_REL);
             k2000_proto_feed(u->status09);
