@@ -242,7 +242,7 @@ static uint32_t s_temperature_tick;
 static int16_t s_sht_temp_tenths = INT16_MIN;
 static int16_t s_sht_rh_pct = INT16_MIN;
 static uint32_t s_sht_tick;
-#define SHT3X_SENSOR_PERIOD_MS 5000u
+#define SHT3X_SENSOR_PERIOD_MS 30000u
 static bool s_is_header_only;
 
 static uint8_t s_ui_dirty_regions;
@@ -288,8 +288,12 @@ static void refresh_runtime_snapshot(void)
     int16_t temp_tenths;
 
     /* SHT3x ambient sensor (PB15=SCL/PB14=SDA) at a slow cadence: one
-     * blocking single-shot read costs ~17 ms, so it runs every 5 s --
-     * far below the 200 ms stall threshold and off every frame budget.
+     * blocking single-shot read costs ~6 ms (low repeatability), so it
+     * runs every 30 s -- far below the 33 ms display budget and the
+     * 200 ms stall threshold, and off every frame budget. High
+     * repeatability (≈17 ms every 5 s) stretched one reading frame per
+     * period, visible in slow-motion as an occasional longer interval
+     * (same hitch class as the PERF UART print, fixed by 5-div).
      * A failed read keeps the last good sample; boards without the
      * sensor fall back to the MCU internal temperature with "--%" RH. */
     if ((uint32_t)(now - s_sht_tick) >= SHT3X_SENSOR_PERIOD_MS ||

@@ -8,14 +8,21 @@
  * Reference: Sensirion/embedded-i2c-sht3x (commands, CRC, conversion)
  * and henriheimann/stm32-hal-sht3x (CRC8 poly 0x31, init 0xFF).
  * Only the subset needed for temperature/humidity readout is kept so the
- * 64 KiB Flash budget is not blown: soft-reset + 0x2400 high-repeatability
+ * 64 KiB Flash budget is not blown: soft-reset + 0x2416 low-repeatability
  * no-stretch measurement + CRC + integer (milli) conversion. No heater,
- * no periodic mode, no float. */
+ * no periodic mode, no float. Low repeatability (≈4 ms) is plenty for an
+ * ambient header field and keeps the blocking read far below the 33 ms
+ * display budget (high repeatability costs ≈15 ms and stretched one
+ * reading frame every period -- visible as a longer interval in
+ * slow-motion footage). */
 
 #define SHT3X_ADDR_DEFAULT 0x44u
 #define SHT3X_ADDR_ALT 0x45u
 
-/* Single-shot high-repeatability, clock-stretching disabled. */
+/* Single-shot low-repeatability, clock-stretching disabled. */
+#define SHT3X_CMD_MEASURE_L 0x2416u
+/* Single-shot high-repeatability, clock-stretching disabled (kept for
+ * reference; the runtime uses MEASURE_L to stay inside the frame budget). */
 #define SHT3X_CMD_MEASURE_H 0x2400u
 #define SHT3X_CMD_SOFT_RESET 0x30A2u
 

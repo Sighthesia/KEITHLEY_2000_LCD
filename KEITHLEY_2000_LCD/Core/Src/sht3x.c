@@ -1,7 +1,7 @@
 #include "sht3x.h"
 
 #define SHT3X_HALF_US 5u
-#define SHT3X_MEAS_MS 15u
+#define SHT3X_MEAS_MS 4u
 
 static const sht3x_io_t *s_io = NULL;
 static uint8_t s_addr = SHT3X_ADDR_DEFAULT;
@@ -176,7 +176,7 @@ sht3x_status_t sht3x_measure_ticks(uint16_t *temp_ticks, uint16_t *rh_ticks)
     if (s_io == NULL || temp_ticks == NULL || rh_ticks == NULL) {
         return SHT3X_ERR_PARAM;
     }
-    st = write_command(SHT3X_CMD_MEASURE_H);
+    st = write_command(SHT3X_CMD_MEASURE_L);
     if (st != SHT3X_OK) {
         return st;
     }

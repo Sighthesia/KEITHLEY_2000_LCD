@@ -153,7 +153,10 @@ flickers at flip rate. Rules, in order:
   MRWDP peek per slot ≈ ms-scale (gate `TREND_SWEEP_PROBE` off except
   when chasing landing faults); Flash-DMA glyph ≈ 7 ms vs SDRAM-cache
   BTE blit ≈ 1 ms (`READING_ONLY_DIRECT_DMA` must stay 0); full header
-  repaint ≈ 1400 GE fills; text run ≈ 0.3 ms/fill.
+  repaint ≈ 1400 GE fills; text run ≈ 0.3 ms/fill; SHT3x ambient read
+  ≈ 6 ms every 30 s (low repeatability — high costs ≈ 17 ms and
+  stretched one reading frame per period, seen in slow-motion as an
+  occasional longer interval).
 - **Demo-rate discipline:** 500 Hz sustained + 30 fps display. Catch-up
   budget must cover ~17 samples/turn at 30 fps (64 used). Acceptance is
   `input_hz≈500, missed=0` — check this before suspecting the renderer.
