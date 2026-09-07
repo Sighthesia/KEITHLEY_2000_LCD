@@ -715,6 +715,15 @@ static void READING_ONLY_LEGACY perf_format_display(char *out)
 static uint16_t trend_sweep_slot_of_bucket(uint32_t bucket);
 static uint32_t s_sweep_cycle;
 #define K2000_TREND_DUMP 0
+/* One-shot row-band pixel dump (default OFF): reads the VISIBLE page's
+ * status/info text rows via MRWDP and prints raw RGB565 per 4 UI px, so a
+ * covered glyph ("Range" missing "Ran") can be located without a camera.
+ * Enable temporarily, capture one dump, disable again — hundreds of slow
+ * reads stall the pipeline while active. */
+#define K2000_ROW_DUMP 0
+#if K2000_ROW_DUMP
+static void row_debug_dump(void);
+#endif
 
 #if K2000_TREND_DUMP
 static void trend_debug_dump(void)
@@ -891,6 +900,19 @@ static void perf_record_frame(void)
                 hal_uart_send((const uint8_t *)p, 1u); p++; n++;
             }
         }
+#if K2000_ROW_DUMP
+        {
+            /* Late one-shot: the first PERF fires mid virgin-build (STATUS
+             * done, INFO still composing) — useless as ground truth. Wait
+             * for post-rotation steady state. */
+            static bool rowdump_done = false;
+            if (!rowdump_done && HAL_GetTick() > 30000u)
+            {
+                rowdump_done = true;
+                row_debug_dump();
+            }
+        }
+#endif
         hal_uart_send_text(" sw_behind=");
         perf_send_u32(s_trend.has_sample
                           ? (s_trend.newest_bucket > s_sweep_cursor_bucket
@@ -4007,6 +4029,37 @@ static uint16_t row2_text_y(void)
                       (MAIN_DISPLAY_INFO_BAR_H - FONT_TEXT_HEIGHT) / 2u);
 }
 
+#if K2000_ROW_DUMP
+static void row_debug_dump(void)
+{
+    uint16_t ys[3];
+    uint8_t r;
+    ys[0] = 12u;
+    ys[1] = (uint16_t)(row2_text_y() + 6u);
+    ys[2] = (uint16_t)(row2_text_y() + 18u);
+    (void)lt7680_gfx_select_canvas_page(s_visible_page);
+    (void)lt7680_gfx_set_canvas_width(320u);
+    for (r = 0u; r < 3u; r++)
+    {
+        uint16_t x;
+        hal_uart_send_text("\r\nROWDUMP y=");
+        perf_send_u32(ys[r]);
+        hal_uart_send_text(" ");
+        for (x = 0u; x < MAIN_DISPLAY_UI_WIDTH; x += 4u)
+        {
+            uint16_t fx, fy, px = 0xFFFFu;
+            panel_transform_ui_to_fb(x, ys[r], &fx, &fy);
+            (void)lt7680_gfx_peek_pixel(fx, fy, &px);
+            hal_uart_send_hex8((uint8_t)(px >> 8));
+            hal_uart_send_hex8((uint8_t)px);
+        }
+        hal_uart_send_text("\r\n");
+    }
+    (void)lt7680_gfx_select_canvas_page(s_render_page);
+    (void)lt7680_gfx_set_canvas_width(320u);
+}
+#endif
+
 static uint16_t row2_trig_dot_x(void)
 {
     return (uint16_t)(MAIN_DISPLAY_UI_WIDTH - MAIN_DISPLAY_TRIG_MARGIN_R -
@@ -4217,10 +4270,15 @@ static bool reading_only_render_info_panel(void)
             if (page_valid && !cell_dirty[b]) { idx++; return false; }
             /* The value-zone fill never touches the name area: a
              * neighbour's spilled tail under the name would survive the
-             * name redraw. Erase first. */
-            if (ui_fill_rect(cx, MAIN_DISPLAY_INFO_BAR_Y,
-                             name_w, MAIN_DISPLAY_INFO_BAR_H,
-                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+             * name redraw. Erase first — but ONLY when the shared bitmap
+             * job is idle: on resume visits this erase would wipe the
+             * already-drawn head while the job redraws just the tail
+             * ("Ran" gone, "ge" stays). Same guard as the status bar. */
+            if (!s_bitmap_job.active) {
+                if (ui_fill_rect(cx, MAIN_DISPLAY_INFO_BAR_Y,
+                                 name_w, MAIN_DISPLAY_INFO_BAR_H,
+                                 MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            }
             if (!ui_draw_text((uint16_t)(cx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
                               cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
             idx++; return false;

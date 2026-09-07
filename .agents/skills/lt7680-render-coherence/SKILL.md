@@ -220,6 +220,15 @@ flickers at flip rate. Rules, in order:
   (or lamps) to repaint too, else spills sit on static text forever.
   `ui_measure_text` must count every 2-byte symbol (`°µΩ±`) as one cell —
   the missing `±` (C2 B1) once over-measured every range by 12 px.
+- **Resume-wipe: never erase unconditionally before a resumable text
+  (2026-09-07).** The name-area erase ran on EVERY sub1 visit; on resume
+  visits it wiped the drawn head while the shared job redrew just the
+  tail (`Ran` gone, `ge` stays — both glyph rows, so not sampling).
+  Short names (single visit) and fills (no resume) were immune, which is
+  why only some cells ate. Guard is `!s_bitmap_job.active`, same as the
+  status bar. Pixel-proved via one-shot MRWDP row dump (`K2000_ROW_DUMP`:
+  late trigger past virgin-build, 4 px step, run-decode vs layout — mind
+  1 px bearings + thin-stroke sampling gaps, verify on TWO glyph rows).
 - **String-duplication class (2026-09-07).** `trend_range_text` printed the
   SI step twice when the unit carried its own prefix (`5kkHz`, `10MMΩ`,
   `500kMHz`): strip the unit's prefix only when the magnitude engaged one
