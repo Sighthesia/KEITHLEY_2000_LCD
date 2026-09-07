@@ -229,6 +229,12 @@ flickers at flip rate. Rules, in order:
   status bar. Pixel-proved via one-shot MRWDP row dump (`K2000_ROW_DUMP`:
   late trigger past virgin-build, 4 px step, run-decode vs layout — mind
   1 px bearings + thin-stroke sampling gaps, verify on TWO glyph rows).
+- **Consume-then-test pointer (2026-09-07).** The prefix strip tested
+  `*pre` AFTER the `*pre++` emit loop had consumed it — always false, so
+  the strip silently never ran while code review kept "proving" it correct
+  (`5kkHz`/`10MMΩ` shipped). Latch `has_pre` BEFORE emitting. The 7-minute
+  `axu/rng` rotation capture is the ground truth for all unit strings —
+  short captures never reach the kΩ/MΩ/MHz windows.
 - **String-duplication class (2026-09-07).** `trend_range_text` printed the
   SI step twice when the unit carried its own prefix (`5kkHz`, `10MMΩ`,
   `500kMHz`): strip the unit's prefix only when the magnitude engaged one

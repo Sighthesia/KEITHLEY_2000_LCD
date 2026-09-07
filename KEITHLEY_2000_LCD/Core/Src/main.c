@@ -4439,12 +4439,16 @@ static void trend_range_text(char *out, uint8_t size)
         return;
     }
     /* Temperature never takes an SI prefix ("k°C" is nonsense): keep the
-     * raw magnitude with its native unit. */
+     * raw magnitude with its native unit. has_pre is latched BEFORE the
+     * `*pre++` emit loop below consumes the pointer — testing `*pre`
+     * afterwards is always false (the strip silently never ran). */
+    bool has_pre = false;
     if (strstr(unit, "\xC2\xB0") == 0)
     {
         if (v >= 1000000.0f) { v /= 1000000.0f; pre = "M"; }
         else if (v >= 1000.0f) { v /= 1000.0f; pre = "k"; }
     }
+    has_pre = (*pre != '\0');
     h = (uint32_t)(v * 100.0f + 0.5f);
     if (s_trend_axis_min < 0.0f && n + 2u < size) { memcpy(&out[n], "\xC2\xB1", 2u); n += 2u; }
     {
@@ -4477,17 +4481,17 @@ static void trend_range_text(char *out, uint8_t size)
          * Drop the unit's prefix only when pre is engaged; small magnitudes
          * keep their native unit ("40mV", "500kHz"). Micro steps down to
          * milli, the rest strip to the bare stem. */
-        if (*pre != '\0' && ulen > 1u &&
+        if (has_pre && ulen > 1u &&
             (u[0] == 'm' || u[0] == 'k' || u[0] == 'M'))
         {
             u++; ulen--;
         }
-        else if (*pre != '\0' && u[0] == 'u' && ulen > 1u)
+        else if (has_pre && u[0] == 'u' && ulen > 1u)
         {
             if (n + 1u < size) out[n++] = 'm';
             u++; ulen--;
         }
-        else if (*pre != '\0' && ulen > 2u &&
+        else if (has_pre && ulen > 2u &&
                  (uint8_t)u[0] == 0xC2u && (uint8_t)u[1] == 0xB5u)
         {
             if (n + 1u < size) out[n++] = 'm';
