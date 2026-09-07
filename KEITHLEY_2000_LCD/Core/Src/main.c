@@ -366,6 +366,13 @@ static uint32_t s_dbg_stage_ms_window[9];
 static uint32_t s_dbg_last_render_tick;
 static uint8_t s_dbg_last_stage;
 static bool s_dbg_stage_armed;
+/* Present-to-present jitter tap (slow-motion interval diagnosis, 2026-09-08):
+ * counts display-commit intervals above the normal 33 ms cadence. mid =
+ * (50,100] ms (one stretched frame, slow-mo only), big = >100 ms (a real
+ * stall). No UART on the hot path; printed with PERF. */
+static uint32_t s_perf_last_present_tick;
+static uint32_t s_perf_jit_mid_window;
+static uint32_t s_perf_jit_big_window;
 
 #if K2000_READING_ONLY_BASELINE
 typedef enum {
@@ -791,6 +798,18 @@ static uint32_t s_sweep_epoch_resets;
 static uint32_t s_sweep_px_ok;
 static uint32_t s_sweep_px_missed;
 
+static void perf_note_present(void)
+{
+    uint32_t now = HAL_GetTick();
+    if (s_perf_last_present_tick != 0u)
+    {
+        uint32_t d = now - s_perf_last_present_tick;
+        if (d > 100u) s_perf_jit_big_window++;
+        else if (d > 50u) s_perf_jit_mid_window++;
+    }
+    s_perf_last_present_tick = now;
+}
+
 static void perf_record_frame(void)
 {
     uint32_t now = HAL_GetTick();
@@ -828,6 +847,8 @@ static void perf_record_frame(void)
             s_dbg_stale_kill_window = 0u;
             s_dbg_present_hold_window = 0u;
             memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
+            s_perf_jit_mid_window = 0u;
+            s_perf_jit_big_window = 0u;
             return;
         }
         hal_uart_send_text("PERF fps=");
@@ -855,6 +876,10 @@ static void perf_record_frame(void)
         hal_uart_send_text(" gap=");
         perf_send_u32(s_loop_max_gap_ms);
         s_loop_max_gap_ms = 0u;
+        hal_uart_send_text(" jit=");
+        perf_send_u32(s_perf_jit_mid_window);
+        hal_uart_send_text("/");
+        perf_send_u32(s_perf_jit_big_window);
 
         hal_uart_send_text(" input_hz=");
         perf_send_u32(s_perf_fields_window);
@@ -953,6 +978,8 @@ static void perf_record_frame(void)
          s_dbg_stale_kill_window = 0u;
          s_dbg_present_hold_window = 0u;
          memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
+         s_perf_jit_mid_window = 0u;
+         s_perf_jit_big_window = 0u;
      }
 }
 static uint16_t s_render_column;
@@ -5835,6 +5862,7 @@ static void reading_only_render(void)
         }
         s_display_enabled = true;
         s_visible_page = s_render_page;
+        perf_note_present();
         s_reading_only_dirty =
             s_reading_only_generation != s_reading_only_frame_generation;
         s_frame_rendering = false;
