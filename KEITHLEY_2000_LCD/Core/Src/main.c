@@ -363,6 +363,7 @@ static uint32_t s_dbg_present_hold_window;
  * interval between reading_only_render() entries. IDLE=0..PRESENT=8 in enum
  * order. Printed with PERF; pinpoints which stage owns a long frame. */
 static uint32_t s_dbg_stage_ms_window[9];
+static uint32_t s_dbg_stage_max_window[9];
 static uint32_t s_dbg_last_render_tick;
 static uint8_t s_dbg_last_stage;
 static bool s_dbg_stage_armed;
@@ -847,6 +848,7 @@ static void perf_record_frame(void)
             s_dbg_stale_kill_window = 0u;
             s_dbg_present_hold_window = 0u;
             memset(s_dbg_stage_ms_window, 0, sizeof(s_dbg_stage_ms_window));
+            memset(s_dbg_stage_max_window, 0, sizeof(s_dbg_stage_max_window));
             s_perf_jit_mid_window = 0u;
             s_perf_jit_big_window = 0u;
             return;
@@ -905,6 +907,16 @@ static void perf_record_frame(void)
             for (si = 0u; si < 9u; si++)
             {
                 perf_send_u32(s_dbg_stage_ms_window[si]);
+                if (si < 8u)
+                    hal_uart_send_text(",");
+            }
+        }
+        hal_uart_send_text(" stgm=");
+        {
+            uint8_t si;
+            for (si = 0u; si < 9u; si++)
+            {
+                perf_send_u32(s_dbg_stage_max_window[si]);
                 if (si < 8u)
                     hal_uart_send_text(",");
             }
@@ -5136,7 +5148,11 @@ static void reading_only_render(void)
         {
             uint32_t dt = now - s_dbg_last_render_tick;
             if (dt < 5000u)
+            {
                 s_dbg_stage_ms_window[s_dbg_last_stage] += dt;
+                if (dt > s_dbg_stage_max_window[s_dbg_last_stage])
+                    s_dbg_stage_max_window[s_dbg_last_stage] = dt;
+            }
         }
         s_dbg_last_stage = cur < 9u ? cur : 0u;
         s_dbg_last_render_tick = now;
