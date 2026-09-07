@@ -871,6 +871,26 @@ static void perf_record_frame(void)
                     hal_uart_send_text(",");
             }
         }
+        /* String self-check: prints the resident axis unit + last row-2
+         * range so a doubled prefix ("kkHz") or stuck text can be told
+         * apart from a pixel remnant without seeing the screen. Bounded
+         * sends only (a blocking UART must never run away). */
+        {
+            const char *p;
+            uint8_t n;
+            hal_uart_send_text(" axu=");
+            p = s_trend_axis_unit; n = 0u;
+            while (*p != '\0' && n < TREND_UNIT_ID_MAX)
+            {
+                hal_uart_send((const uint8_t *)p, 1u); p++; n++;
+            }
+            hal_uart_send_text(" rng=");
+            p = s_frame.range; n = 0u;
+            while (*p != '\0' && n < MAIN_DISPLAY_META_MAX)
+            {
+                hal_uart_send((const uint8_t *)p, 1u); p++; n++;
+            }
+        }
         hal_uart_send_text(" sw_behind=");
         perf_send_u32(s_trend.has_sample
                           ? (s_trend.newest_bucket > s_sweep_cursor_bucket
@@ -4195,6 +4215,12 @@ static bool reading_only_render_info_panel(void)
         }
         if (sub == 1u) {
             if (page_valid && !cell_dirty[b]) { idx++; return false; }
+            /* The value-zone fill never touches the name area: a
+             * neighbour's spilled tail under the name would survive the
+             * name redraw. Erase first. */
+            if (ui_fill_rect(cx, MAIN_DISPLAY_INFO_BAR_Y,
+                             name_w, MAIN_DISPLAY_INFO_BAR_H,
+                             MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
             if (!ui_draw_text((uint16_t)(cx + MAIN_DISPLAY_ROW2_CELL_PAD_X), row2_text_y(),
                               cell_names[b], MAIN_DISPLAY_COLOR_MUTED)) return false;
             idx++; return false;
@@ -4354,8 +4380,13 @@ static void trend_range_text(char *out, uint8_t size)
         if (size > 2u) memcpy(out, "--", 3u);
         return;
     }
-    if (v >= 1000000.0f) { v /= 1000000.0f; pre = "M"; }
-    else if (v >= 1000.0f) { v /= 1000.0f; pre = "k"; }
+    /* Temperature never takes an SI prefix ("k°C" is nonsense): keep the
+     * raw magnitude with its native unit. */
+    if (strstr(unit, "\xC2\xB0") == 0)
+    {
+        if (v >= 1000000.0f) { v /= 1000000.0f; pre = "M"; }
+        else if (v >= 1000.0f) { v /= 1000.0f; pre = "k"; }
+    }
     h = (uint32_t)(v * 100.0f + 0.5f);
     if (s_trend_axis_min < 0.0f && n + 2u < size) { memcpy(&out[n], "\xC2\xB1", 2u); n += 2u; }
     {
