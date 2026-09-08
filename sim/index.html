@@ -61,8 +61,12 @@ function render(){
   const activeAll=demo.on?["REM","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]:[];
   const row1x=brandEnd+10+1+10;
   {let ax=row1x;for(const s of activeAll){text(ctx,s,ax,0,COLORS.green);ax+=s.length*TEXT_W+TEXT_W;}}
-  const runtime="+25.0°C 45%RH  "+demoUptime();
-  text(ctx,runtime,960-runtime.length*TEXT_W-12,0,COLORS.cyan);
+  const tempTxt="+25.0°C 45%RH", upTxt=demoUptime();
+  const rightW=(tempTxt.length+2+upTxt.length)*TEXT_W, rightX=960-rightW-12;
+  text(ctx,tempTxt,rightX,0,COLORS.white);
+  text(ctx,upTxt,rightX+(tempTxt.length+2)*TEXT_W,0,COLORS.white);
+  // 右侧淡半高竖线：温湿度与运行时间之间（1x12 居中，同品牌分隔线语言）
+  ctx.fillStyle=COLORS.grid;ctx.fillRect(rightX+tempTxt.length*TEXT_W+11,Math.floor((L.statusH-12)/2),1,12);
   // 趋势数据与档位范围（行2 Range 单元格与趋势 header 共用）
   const data=(demo.on&&demo.trend.length>1)?demo.trend:traceData(),lo=Math.min(...data),hi=Math.max(...data),rawSpan=hi-lo,span=rawSpan>0?rawSpan:Math.max(Math.abs(hi)*.02,0.000001),pad=span*.1,ylo=lo-pad,yhi=hi+pad;
   const axisUnit=demo.on?demoAxisUnit():"V";

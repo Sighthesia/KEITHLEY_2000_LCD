@@ -4108,12 +4108,36 @@ static bool reading_only_render_status_bar(void)
             }
             uint16_t n_right_w2 = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
             uint16_t n_right_x2 = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w2 - 12u);
-            if (!ui_draw_text(n_right_x2, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_CYAN)) return false;
+            if (!ui_draw_text(n_right_x2, 0u, s_frame.temperature, MAIN_DISPLAY_COLOR_WHITE)) return false;
             idx++;
             return false;
         }
     }
     if (idx == 7u) {
+        /* Right-side half-height separator between temperature and uptime
+         * (1x12 grid, same language as the brand separator). The column
+         * tracks the right-aligned block; erase the union of the old and
+         * new columns so a width change leaves no stale pixel. */
+        if (s_reading_only_page_status_valid[s_render_page] &&
+            !temp_dirty && !uptime_dirty) { idx++; } else {
+            uint16_t n_tw = (uint16_t)(strlen(s_frame.temperature) * FONT_TEXT_WIDTH);
+            uint16_t o_tw = (uint16_t)(strlen(s_reading_only_page_temperature[s_render_page]) * FONT_TEXT_WIDTH);
+            uint16_t n_rw = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
+            uint16_t o_rw = (uint16_t)((strlen(s_reading_only_page_temperature[s_render_page]) + 2u + strlen(s_reading_only_page_uptime[s_render_page])) * FONT_TEXT_WIDTH);
+            uint16_t n_sx = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_rw - 12u + n_tw + 11u);
+            uint16_t o_sx = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - o_rw - 12u + o_tw + 11u);
+            uint16_t fx = n_sx < o_sx ? n_sx : o_sx;
+            uint16_t xe = (uint16_t)((n_sx > o_sx ? n_sx : o_sx) + 1u);
+            if (!s_reading_only_page_status_valid[s_render_page]) { fx = n_sx; xe = (uint16_t)(n_sx + 1u); }
+            if (ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(n_sx, (uint16_t)((MAIN_DISPLAY_STATUS_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
+                             MAIN_DISPLAY_ROW1_SEP_W, MAIN_DISPLAY_ROW1_SEP_H,
+                             MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 8u) {
         if (!uptime_dirty) { idx++; uptime_diff_pos = 0u; } else {
             uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
             uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
@@ -4151,7 +4175,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 8u) { idx++; }
+    if (idx == 9u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
     strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
