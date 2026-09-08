@@ -7153,7 +7153,23 @@ int main(void)
             uint16_t rx_budget = 128u;
             int ch;
             while (rx_budget-- > 0u && (ch = hal_uart_receive_byte()) >= 0)
+            {
+                /* V16 handshake (reverse-engineered): the host polls with a
+                 * single 0x0F and expects the 12-byte identity string
+                 * "2000 V16  \x80\x00" back before it starts streaming
+                 * frames. Intercepted here so the parser never sees 0x0F
+                 * (it would open a bogus field tag). */
+                if (ch == 0x0F)
+                {
+                    static const uint8_t k2000_id[12] = {
+                        '2', '0', '0', '0', ' ', 'V', '1', '6',
+                        ' ', ' ', 0x80u, 0x00u
+                    };
+                    hal_uart_send(k2000_id, (uint16_t)sizeof(k2000_id));
+                    continue;
+                }
                 k2000_proto_feed((uint8_t)ch);
+            }
         }
 #else
         /* Demo mode is a no-host bench mode: skip UART RX so a floating RX

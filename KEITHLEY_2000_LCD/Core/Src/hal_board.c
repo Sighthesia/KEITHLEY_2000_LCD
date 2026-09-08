@@ -6,7 +6,11 @@
 #include "stm32f1xx_hal.h"
 #include "uart_rx_queue.h"
 
-#define UART_BAUD 115200u
+/* V16-reverse-engineered link rate: the upstream firmware computes
+ * BRR = (25*fclk/baud/100)<<4|frac for nominal 38400 (its CR1 bit15 test
+ * always reads 0), which lands on USARTDIV=468.75 at 72 MHz = exactly
+ * 9600 baud, 8N1, no flow control. The host speaks 9600; do not change. */
+#define UART_BAUD 9600u
 
 /* LT7680 SPI transport: 1 = SPI1 hardware (PA4 CS, PA5 SCK, PA6 MISO,
  * PA7 MOSI), 0 = software bit-bang fallback. Hardware SPI is ~25-30x faster;
