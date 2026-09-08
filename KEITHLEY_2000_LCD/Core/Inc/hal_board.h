@@ -23,7 +23,7 @@ bool hal_uart_rx_recovering(void);
  * unwired cells as "r3c0"; "-" when idle; change-reported, so a shorted
  * pair shows as e.g. "KEYS OHM OHM4W"). For matrix bring-up only;
  * normal/host builds keep 0. */
-#define K2000_KEY_DEBUG 1U
+#define K2000_KEY_DEBUG 0U
 
 /* Scan the 4x8 key matrix (rows PB0..PB3 x cols PB4..PB11, col0=R9=PB11 ...
  * col7=R16=PB4) and report the contact set as KEYPAD_CELL bits in *mask
