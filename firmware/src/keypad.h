@@ -2,8 +2,10 @@
 
 #include <stdint.h>
 
-/* 4x8 key matrix, rows PC13/PC14/PC15/PB10 (row 0..3) x cols PB0..PB7
- * (col 0..7). Pure logic only: no HAL, no GPIO. */
+/* 4x8 key matrix, rows PB0..PB3 (row 0..3, outputs, idle high) x cols
+ * PB4..PB11 (col 0..7 = R1..R8 = PB11..PB4 reversed, inputs, 33k pull-up).
+ * Logical (row,col) codes follow the ODS TX table; the physical pin order
+ * lives in hal_board.c. Pure logic only: no HAL, no GPIO. */
 #define KEYPAD_ROWS 4u
 #define KEYPAD_COLS 8u
 #define KEYPAD_DEBOUNCE_MS 20u

@@ -42,13 +42,11 @@
 #define SHT3X_SCL_PIN GPIO_PIN_15
 #define SHT3X_SDA_PIN GPIO_PIN_14
 
+#define KEY_ROW_GPIO_PORT GPIOB
+#define KEY_ROW_PIN_MASK (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3)
 #define KEY_COL_GPIO_PORT GPIOB
-#define KEY_COL_PIN_MASK (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3 | \
-                          GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7)
-#define KEY_ROW1_PIN GPIO_PIN_13
-#define KEY_ROW2_PIN GPIO_PIN_14
-#define KEY_ROW3_PIN GPIO_PIN_15
-#define KEY_ROW4_PIN GPIO_PIN_10
+#define KEY_COL_PIN_MASK (GPIO_PIN_4 | GPIO_PIN_5 | GPIO_PIN_6 | GPIO_PIN_7 | \
+                          GPIO_PIN_8 | GPIO_PIN_9 | GPIO_PIN_10 | GPIO_PIN_11)
 
 static void hal_cs(bool level)
 {
@@ -236,21 +234,22 @@ static void init_gpio(void)
     gpio.Pin = LCM_SDO_PIN | LCM_INT_PIN;
     HAL_GPIO_Init(GPIOA, &gpio);
 
-    /* Keyboard columns are outputs, driven low when not scanning. */
+    /* Key matrix (schematic screenshot + ODS TX table): 4 row lines are
+     * outputs on PB0..PB3 (idle high, one driven low at a time), 8 column
+     * lines are inputs on PB4..PB11 with 33k external pull-ups (R1..R8).
+     * Internal pull-up backs up the external one. PC13/PC14/PC15 are free. */
     gpio.Mode = GPIO_MODE_OUTPUT_PP;
     gpio.Pull = GPIO_NOPULL;
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
-    gpio.Pin = KEY_COL_PIN_MASK;
-    HAL_GPIO_Init(KEY_COL_GPIO_PORT, &gpio);
-    HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, KEY_COL_PIN_MASK, GPIO_PIN_RESET);
+    gpio.Pin = KEY_ROW_PIN_MASK;
+    HAL_GPIO_Init(KEY_ROW_GPIO_PORT, &gpio);
+    HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
 
-    /* Keyboard rows are inputs with pull-up. */
+    /* Keyboard columns are inputs with pull-up. */
     gpio.Mode = GPIO_MODE_INPUT;
     gpio.Pull = GPIO_PULLUP;
-    gpio.Pin = KEY_ROW4_PIN;
-    HAL_GPIO_Init(GPIOB, &gpio);
-    gpio.Pin = KEY_ROW1_PIN | KEY_ROW2_PIN | KEY_ROW3_PIN;
-    HAL_GPIO_Init(GPIOC, &gpio);
+    gpio.Pin = KEY_COL_PIN_MASK;
+    HAL_GPIO_Init(KEY_COL_GPIO_PORT, &gpio);
 
     /* SHT3x soft-I2C on PB15=SCL/PB14=SDA: open-drain, idle released high.
      * External 4.7k pull-ups to 3.3V are required; internal pull-up backs up. */
@@ -482,31 +481,43 @@ bool hal_uart_rx_recovering(void)
 
 int hal_keypad_read_code(void)
 {
+    /* Logical row r = PB(r) (PB0->row0 ... PB3->row3, top to bottom).
+     * If rows come back vertically flipped on the real board, swap this
+     * table end-for-end (do NOT touch keypad.c or the ODS code table). */
     static const uint16_t s_row_pin[KEYPAD_ROWS] = {
-        KEY_ROW1_PIN, KEY_ROW2_PIN, KEY_ROW3_PIN, KEY_ROW4_PIN,
-    };
-    static GPIO_TypeDef *const s_row_port[KEYPAD_ROWS] = {
-        GPIOC, GPIOC, GPIOC, GPIOB,
-    };
-    static const uint16_t s_col_pin[KEYPAD_COLS] = {
         GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3,
-        GPIO_PIN_4, GPIO_PIN_5, GPIO_PIN_6, GPIO_PIN_7,
     };
-    uint8_t col;
+    /* Schematic breakout runs R1->PB11 ... R8->PB4, so logical column c
+     * (R1=col0 ... R8=col7) maps to pins in reverse: col0=PB11 ...
+     * col7=PB4. keypad.c's (row,col)->code table is written in logical
+     * (R-row, R-column) coordinates and stays untouched. */
+    static const uint16_t s_col_pin[KEYPAD_COLS] = {
+        GPIO_PIN_11, GPIO_PIN_10, GPIO_PIN_9, GPIO_PIN_8,
+        GPIO_PIN_7, GPIO_PIN_6, GPIO_PIN_5, GPIO_PIN_4,
+    };
+    uint8_t row;
 
-    for (col = 0u; col < KEYPAD_COLS; col++) {
-        uint8_t row;
-        /* Drive every column idle high, then pull only this column low. */
-        HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, KEY_COL_PIN_MASK, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, s_col_pin[col], GPIO_PIN_RESET);
-        for (row = 0u; row < KEYPAD_ROWS; row++) {
-            if (HAL_GPIO_ReadPin(s_row_port[row], s_row_pin[row]) ==
+    for (row = 0u; row < KEYPAD_ROWS; row++) {
+        uint8_t col;
+        /* All rows idle high, then pull only this row low. */
+        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, s_row_pin[row], GPIO_PIN_RESET);
+        /* Settle: 33k pull-up + wiring capacitance needs ~us before the
+         * column input reflects the driven row. HAL call overhead already
+         * covers most of it; a few NOPs close the gap deterministically. */
+        for (volatile uint32_t n = 0u; n < 60u; n++) {
+            __NOP();
+        }
+        for (col = 0u; col < KEYPAD_COLS; col++) {
+            if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_col_pin[col]) ==
                 GPIO_PIN_RESET) {
+                HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK,
+                                  GPIO_PIN_SET);
                 return KEYPAD_RAW(row, col);
             }
         }
     }
-    /* All columns scanned, no key pressed: restore idle-low columns. */
-    HAL_GPIO_WritePin(KEY_COL_GPIO_PORT, KEY_COL_PIN_MASK, GPIO_PIN_RESET);
+    /* No key pressed: restore idle-high rows. */
+    HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
     return 0;
 }

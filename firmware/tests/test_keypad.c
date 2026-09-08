@@ -7,7 +7,8 @@ int main(void)
     keypad_t k;
     int raw;
 
-    /* Mapping table (ODS TX table, rows PC13/PC14/PC15/PB10 x cols PB0..PB7). */
+    /* Mapping table (ODS TX table, rows PB0..PB3 x cols PB4..PB11;
+     * logical col0=R1 ... col7=R8, pin order in hal_board.c). */
     assert(keypad_code(0, 0) == 0x41);
     assert(keypad_code(0, 7) == 0x48);
     assert(keypad_code(1, 2) == 0x4B);

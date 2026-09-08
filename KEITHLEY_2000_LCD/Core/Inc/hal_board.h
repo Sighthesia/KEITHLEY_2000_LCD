@@ -18,10 +18,11 @@ void hal_uart_rx_irq(void);
 uint32_t hal_uart_rx_overflow_count(void);
 bool hal_uart_rx_recovering(void);
 
-/* Scan the 4x8 key matrix (rows PC13/PC14/PC15/PB10 x cols PB0..PB7) and
- * return the raw position code for one pressed key (KEYPAD_RAW(row,col)),
- * or 0 when no key is pressed. Drives each column low in turn and reads the
- * row inputs (pull-up). Position codes feed keypad_scan() for debounce. */
+/* Scan the 4x8 key matrix (rows PB0..PB3 x cols PB4..PB11, col0=R1=PB11 ...
+ * col7=R8=PB4) and return the raw position code for one pressed key
+ * (KEYPAD_RAW(row,col)), or 0 when no key is pressed. Drives each row low
+ * in turn and reads the column inputs (33k external pull-up). Position
+ * codes feed keypad_scan() for debounce. */
 int hal_keypad_read_code(void);
 
 /* SHT3x temperature/humidity over soft-I2C (PB15=SCL/PB14=SDA). Millidegrees C / milli-pct RH; false on NACK/CRC. */
