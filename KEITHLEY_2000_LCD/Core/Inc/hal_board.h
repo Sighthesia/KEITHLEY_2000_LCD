@@ -3,6 +3,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* Host-UART text silence: the panel shares one TX line with the host, and
+ * the host speaks strict binary (frames in, key codes out). ANY text line
+ * (boot banner, STATUS/PASS/FAIL, STALL) is protocol garbage that can wedge
+ * the host handshake (silent host = no beep, no frames). 0 = text dropped,
+ * key bytes (hal_uart_send) unaffected. Bench diagnosis sets 1. */
+#define K2000_UART_LOG 0U
+
 /* Keep the verified RGB timing orientation.  The panel's MADCTL command is
  * not used here because this RGB path did not accept the swapped 960x320
  * timing; coordinate rotation must be solved in the LT7680 framebuffer path. */

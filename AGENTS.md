@@ -24,7 +24,8 @@
 
 - 工程：`KEITHLEY_2000_LCD/`（STM32CubeMX + CMake/Ninja，`firmware/` 为离线骨架，两者 lt7680 驱动保持同步）。目标 MCU `STM32F103C8T6`，链接脚本见 `KEITHLEY_2000_LCD/STM32F103C8TX_FLASH.ld`。
 - 构建：`cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`（生成的 `.elf` 在 `KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD.elf`，**用这个路径烧录**）。
-- ⚠️ 仓库里有**两套 build 树**：工程内 `KEITHLEY_2000_LCD/build/`（权威，构建/烧录都用它）与顶层 `build/`（历史残留，ELF 布局是 `build/Release/KEITHLEY_2000_LCD/KEITHLEY_2000_LCD.elf`，**不要烧这个**，也不要执行 `cmake --build build/...`）。判断固件是否新烧：上电串口首行应为当前代码里打印的横幅。
+- ⚠️ 仓库里有**两套 build 树**：工程内 `KEITHLEY_2000_LCD/build/`（权威，构建/烧录都用它）与顶层 `build/`（历史残留，ELF 布局是 `build/Release/KEITHLEY_2000_LCD/KEITHLEY_2000_LCD.elf`，**不要烧这个**，也不要执行 `cmake --build build/...`）。
+- **主机串口静默（2026-09-08 联调教训）**：面板与主机共用一根 TX，主机只认二进制（进来显示帧、出去按键码）。`hal_board.h` 的 `K2000_UART_LOG`（0=默认，主机模式）直接丢弃一切文本行（开机横幅/`STATUS`/`PASS`/`FAIL`/STALL），按键字节走 `hal_uart_send()` 不受影响；`K2000_PERF_LOG` 同理已关。连主机前必须确认两开关为 0，否则上电百字节英文垃圾会卡死主机握手（现象：主机无蜂鸣、不发显示帧）。 bench 诊断把开关置 1；此时“上电串口首行横幅对版本”的老办法才有效。
 - 烧录（ST-Link V2 SWD，`openocd.cfg` 为 `reset_config none`，务必用 halt 先行序列，不要用 `program ... reset exit`）：
   ```
   openocd -f openocd.cfg \

@@ -437,17 +437,29 @@ void hal_uart_send(const uint8_t *data, uint16_t len)
 
 void hal_uart_send_text(const char *text)
 {
+#if K2000_UART_LOG
     while (*text != '\0') {
         uart_put_byte((uint8_t)*text++);
     }
+#else
+    /* Host build: text is protocol garbage on the shared TX line. Drop it;
+     * key bytes go through hal_uart_send() and are unaffected. */
+    (void)text;
+#endif
 }
 
 void hal_uart_send_hex8(uint8_t value)
 {
+#if K2000_UART_LOG
     static const char digits[] = "0123456789ABCDEF";
 
     uart_put_byte((uint8_t)digits[value >> 4]);
     uart_put_byte((uint8_t)digits[value & 0x0Fu]);
+#else
+    /* Same silence rule as hal_uart_send_text: hex dumps only ever
+     * accompany dropped text lines. */
+    (void)value;
+#endif
 }
 
 int hal_uart_receive_byte(void)
