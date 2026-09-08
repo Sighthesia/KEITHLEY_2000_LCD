@@ -7163,18 +7163,20 @@ int main(void)
         k2000_demo_feed();
 #endif
 
-        /* Scan the key matrix, debounce, and passthrough press/release codes to
-         * the host. Local-key interpretation (DISPLAY/TREND scene switching) is
-         * deferred to the trend milestone (ADR-0002). */
+        /* Scan the key matrix and passthrough debounced press/release codes
+         * to the host (combos supported: one code per added key, 0x40 once
+         * the set empties). Local-key interpretation (DISPLAY/TREND scene
+         * switching) is deferred to the trend milestone (ADR-0002). */
 #if K2000_KEY_DEBUG
-        /* Bench matrix map-out: "KEYS rXcY ..." per change, no host bytes. */
+        /* Bench matrix map-out: "KEYS ..." per change, no host bytes. */
         hal_keypad_debug_poll();
 #else
         {
-            int code = keypad_scan(&s_keypad, hal_keypad_read_code(),
-                                   HAL_GetTick());
-            if (code != 0)
-            {
+            uint32_t key_mask = 0u;
+            int code;
+            (void)hal_keypad_read_mask(&key_mask);
+            while ((code = keypad_scan(&s_keypad, key_mask,
+                                       HAL_GetTick())) != 0) {
                 uint8_t b = (uint8_t)code;
                 hal_uart_send(&b, 1);
             }

@@ -498,8 +498,11 @@ static const uint16_t s_key_col_pin[KEYPAD_COLS] = {
     GPIO_PIN_7, GPIO_PIN_6, GPIO_PIN_5, GPIO_PIN_4,
 };
 
-int hal_keypad_read_code(void)
+/* One full matrix sweep; returns the contact set as KEYPAD_CELL bits and
+ * leaves the rows idle-low. Shared by the host path and the bench poll. */
+static uint32_t keypad_sweep_mask(void)
 {
+    uint32_t mask = 0u;
     uint8_t row;
 
     for (row = 0u; row < KEYPAD_ROWS; row++) {
@@ -516,42 +519,43 @@ int hal_keypad_read_code(void)
         for (col = 0u; col < KEYPAD_COLS; col++) {
             if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_key_col_pin[col]) ==
                 GPIO_PIN_SET) {
-                HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK,
-                                  GPIO_PIN_RESET);
-                return KEYPAD_RAW(row, col);
+                mask |= KEYPAD_CELL(row, col);
             }
         }
     }
     /* No key pressed: restore idle-low rows. */
     HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_RESET);
-    return 0;
+    return mask;
+}
+
+int hal_keypad_read_mask(uint32_t *mask)
+{
+    uint32_t m = keypad_sweep_mask();
+    uint8_t n = 0u;
+    uint8_t i;
+    if (mask == 0) {
+        return -1;
+    }
+    *mask = m;
+    for (i = 0u; i < KEYPAD_CELLS; i++) {
+        if (((m >> i) & 1u) != 0u) {
+            n++;
+        }
+    }
+    return (int)n;
 }
 
 #if K2000_KEY_DEBUG
 void hal_keypad_debug_poll(void)
 {
-    /* 32-bit contact mask, bit (r*8+c). Printed only on change so the
+    /* 32-bit contact mask, KEYPAD_CELL bits. Printed only on change so the
      * terminal stays readable while a key is held. */
     static uint32_t s_last_mask;
     static bool s_have_last;
-    uint32_t mask = 0u;
+    uint32_t mask = keypad_sweep_mask();
     uint8_t row;
     uint8_t col;
 
-    for (row = 0u; row < KEYPAD_ROWS; row++) {
-        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, s_key_row_pin[row], GPIO_PIN_SET);
-        for (volatile uint32_t n = 0u; n < 60u; n++) {
-            __NOP();
-        }
-        for (col = 0u; col < KEYPAD_COLS; col++) {
-            if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_key_col_pin[col]) ==
-                GPIO_PIN_SET) {
-                mask |= (uint32_t)(1uL << (row * KEYPAD_COLS + col));
-            }
-        }
-    }
-    HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_RESET);
     if (s_have_last && mask == s_last_mask) {
         return;
     }
@@ -567,7 +571,7 @@ void hal_keypad_debug_poll(void)
     } else {
         for (row = 0u; row < KEYPAD_ROWS; row++) {
             for (col = 0u; col < KEYPAD_COLS; col++) {
-                if ((mask & (uint32_t)(1uL << (row * KEYPAD_COLS + col))) != 0u) {
+                if ((mask & KEYPAD_CELL(row, col)) != 0u) {
                     /* Named cell prints its key name ("FREQ"); unwired
                      * cells fall back to coordinates ("r3c0"). */
                     const char *name = keypad_name(row, col);

@@ -26,11 +26,11 @@ bool hal_uart_rx_recovering(void);
 #define K2000_KEY_DEBUG 1U
 
 /* Scan the 4x8 key matrix (rows PB0..PB3 x cols PB4..PB11, col0=R9=PB11 ...
- * col7=R16=PB4) and return the raw position code for one pressed key
- * (KEYPAD_RAW(row,col)), or 0 when no key is pressed. Drives each row high
- * in turn and reads the column inputs (33k external pull-down to GND).
- * Position codes feed keypad_scan() for debounce. */
-int hal_keypad_read_code(void);
+ * col7=R16=PB4) and report the contact set as KEYPAD_CELL bits in *mask
+ * (0 = none). Drives each row high in turn and reads the column inputs
+ * (33k external pull-down to GND). Returns the active cell count, or -1
+ * when mask is null. Feeds keypad_scan() for debounce. */
+int hal_keypad_read_mask(uint32_t *mask);
 #if K2000_KEY_DEBUG
 /* Bench diagnosis: poll the whole matrix and print every contacted cell.
  * Replaces the single-byte host send while enabled (see K2000_KEY_DEBUG). */
