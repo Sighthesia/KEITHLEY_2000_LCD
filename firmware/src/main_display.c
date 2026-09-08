@@ -157,8 +157,8 @@ const char *main_display_function_text(ui_function_t function)
     case UI_FUNCTION_AC_VOLTAGE: return "AC Voltage";
     case UI_FUNCTION_DC_CURRENT: return "DC Current";
     case UI_FUNCTION_AC_CURRENT: return "AC Current";
-    case UI_FUNCTION_2W_OHM: return "2W \xCE\xA9";
-    case UI_FUNCTION_4W_OHM: return "4W \xCE\xA9";
+    case UI_FUNCTION_2W_OHM: return "2-Wire Resistance";
+    case UI_FUNCTION_4W_OHM: return "4-Wire Resistance";
     case UI_FUNCTION_FREQUENCY: return "Frequency";
     case UI_FUNCTION_PERIOD: return "Period";
     case UI_FUNCTION_TEMPERATURE: return "Temperature";
@@ -393,6 +393,10 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
         frame->status_count++;
     }
     format_active_status(frame, frame->active_status, sizeof(frame->active_status));
+    /* Brand-row extras live outside the core lamp table: 0x07 group,
+     * SHIFT = bit 0x80, REAR = bit 0x10 (ODS RX table). */
+    frame->shift_active = status_bar_active(&model->status, 0x07u, 0x80u);
+    frame->rear_active = status_bar_active(&model->status, 0x07u, 0x10u);
     format_runtime_text(frame->temperature, sizeof(frame->temperature),
                         frame->uptime, sizeof(frame->uptime), INT16_MIN,
                         INT16_MIN, 0u);

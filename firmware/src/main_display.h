@@ -65,6 +65,7 @@
 #define MAIN_DISPLAY_COLOR_MUTED 0x632Cu
 #define MAIN_DISPLAY_COLOR_GRID 0x3186u
 #define MAIN_DISPLAY_COLOR_RED 0xF800u
+#define MAIN_DISPLAY_COLOR_BLUE 0x001Fu
 #define MAIN_DISPLAY_COLOR_YELLOW 0xFFE0u
 #define MAIN_DISPLAY_COLOR_BLACK 0x0000u
 /* Header rows redesign (ADR-0004): badge + divider are green, black badge
@@ -187,6 +188,11 @@ typedef struct {
     uint8_t status_count;
     char status_text[STATUS_BAR_CORE_COUNT][MAIN_DISPLAY_STATUS_LABEL_MAX];
     bool status_active[STATUS_BAR_CORE_COUNT];
+    /* Brand-row extras (NOT in the core lamp table): 0x07 SHIFT (bit 0x80)
+     * and REAR (bit 0x10). Rendered white after the logo; an active SHIFT
+     * turns the whole brand row background blue. */
+    bool shift_active;
+    bool rear_active;
     char y_labels[MAIN_DISPLAY_Y_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
     char x_labels[MAIN_DISPLAY_X_LABEL_COUNT][MAIN_DISPLAY_AXIS_LABEL_MAX];
     bool trend_has_data;

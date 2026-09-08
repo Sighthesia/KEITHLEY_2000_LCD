@@ -15,6 +15,7 @@
 - **引脚表以 `KEITHLEY2000_2026-08-08.tel`（确定性网表）为准**：`LCM_SS`=PA4↔LT7680 SCS、`LCM_SCK`=PA5↔LT7680 SCK、`LCM_SDI`=PA7↔LT7680 SDI、`LCM_SDO`=PA6↔LT7680 SDO、`LCM_INT`=PA8↔LT7680 INT、`LCM_RES`=PA3 经 BAT54 分路到 LT7680 RST 与 LCD RES；`LCD_CS/LCD_SCLK/LCD_SDI`=PA0/PA1/PA2 只连面板（9-bit SPI）；`PA9/PA10` 为经 BSS138/电阻电平转换的 `UART_TX/RX`（TXB/RXB 5V 侧）；`FLASH_*`（U2.20-23）连 `W25Q128JV`（U5），不经 STM32；LT7680 晶振 10MHz。固件 `hal_board.c`（在 CubeMX 树 `KEITHLEY_2000_LCD/Core/Src/`，不在 `firmware/src/`）引脚定义与该网表一致。
 - 旧 `Netlist_K2000_Display Board_TFT V20.txt` 已按 TEL 修正（`docs/` 下为 2026-08-08 修正版），芯片级映射一律以 TEL 为准：LT7680 SCS=PA4（不是 PA0）、`LCM_INT`=PA8（不是 PA7）、`LCM_SDI`=PA7、PA3 经 BAT54 分路到 LT7680 RST 与 LCD RES；数据线引脚号按 QFN-68 修正。`V20` 仍可用于面板 X6 引脚号参考。
 - 键盘以原理图截图所示矩阵为准：`PB0..PB3`=`KEY_ROW1..4`（输出，空闲高、逐行拉低）、`PB4..PB11`=`KEY_COL1..8`（输入，R1..R8 33k 外部上拉，逻辑列 col0=R1=`PB11` … col7=R8=`PB4` 反序）；`PC13/PC14/PC15` 空出。旧 `PA0..PA3` 行选命名已作废，不要按它写死。
+- 状态灯：`0x06 REM` 显示为 `REMOTE`；`0x07 SHIFT/REAR` 不进灯串，显示在徽标行徽标之后（白字），SHIFT 激活时整行底色变蓝（含徽标区、无红徽）。功能名电阻档显示 `2-Wire Resistance`/`4-Wire Resistance`，读数单位统一 `Ω/kΩ/MΩ`（主机发 `OHM` 仍兼容识别）。
 - 旧版 ODS 里的 `TX` 行选记录可以作为历史参考，但和最新网表相比已经过时；实现键盘扫描时以最新网表为准，不要再按 `PA0..PA3` 写死。
 - ODS 的 `RX`/`Notes` 记录了 `TAG + value`、`0x0D` 消息起始、显示标签、光标定位 `POS`、闪烁和 VFD 指示器字段；这些可作为协议逆向线索，不能据此断言所有消息边界、未实现按键或标签含义。
 - 任何新固件先做离线构建和静态检查，再在限流电源、断开仪器高压测量路径的条件下验证；首次烧录保留原始 V15/V16 镜像和可恢复的 SWD 接线。

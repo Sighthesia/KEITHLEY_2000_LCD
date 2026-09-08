@@ -422,6 +422,11 @@ static uint8_t s_reading_only_value_index;
 static bool s_reading_only_page_status_valid[2];
 static uint8_t s_reading_only_page_status_lamps[2];
 static char s_reading_only_page_row1[2][MAIN_DISPLAY_META_MAX];
+/* Brand-row extras snapshot: white SHIFT/REAR text right after the logo
+ * (an active SHIFT also turns the whole row-1 background blue). */
+static char s_reading_only_page_extra[2][16];
+static bool s_reading_only_page_shift[2];
+static bool s_reading_only_page_rear[2];
 static bool s_reading_only_page_info_valid[2];
 /* TRIGGER dot blink (ADR-0004): per-page last painted dot (-1 = none/erased,
  * 0 = off, 1 = on), shared 250 ms phase, pending flag forcing INFO stage. */
@@ -464,6 +469,8 @@ static bool s_row_snap_active[STATUS_BAR_CORE_COUNT];
 static char s_row_snap_rate[MAIN_DISPLAY_META_MAX];
 static char s_row_snap_temperature[20];
 static char s_row_snap_uptime[12];
+static bool s_row_snap_shift;
+static bool s_row_snap_rear;
 /* Range joins the snapshot at the first axis-valid frame of the episode.
  * The axis transition mints a different range string per composition
  * ("--", AUTO-bit flips, unit change), and without this the two pages
@@ -3908,7 +3915,7 @@ static bool READING_ONLY_LEGACY trend_yield_to_regions(void)
 static void row1_status_text(char *out, uint8_t size)
 {
     static const uint8_t order[] = {0u, 1u, 2u, 3u, 4u, 5u, 9u, 10u, 11u, 12u};
-    static const char *const labels[] = {"REM", "TALK", "LSTN", "SRQ", "HOLD",
+    static const char *const labels[] = {"REMOTE", "TALK", "LSTN", "SRQ", "HOLD",
                                          "TRIG", "ERR", "BUFFER", "MATH", "CONT"};
     uint8_t i;
     bool first = true;
@@ -3973,6 +3980,56 @@ static uint16_t row1_info_x(void)
                       MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
 }
 
+/* Brand-row extras (NOT status lamps): white 0x07 SHIFT/REAR right after the
+ * logo. One string, one step (same resumable-job rule as the lamp string).
+ * An active SHIFT turns the whole row-1 background blue. */
+static uint16_t row1_bg(void)
+{
+    return s_frame.shift_active ? MAIN_DISPLAY_COLOR_BLUE
+                                : MAIN_DISPLAY_COLOR_BAR;
+}
+
+static void row1_extra_text(char *out, uint8_t size)
+{
+    size_t n;
+    if (out == 0 || size == 0u) return;
+    out[0] = '\0';
+    if (s_frame.shift_active) {
+        const char *s = "SHIFT";
+        n = 0u;
+        while (s[n] != '\0' && n + 1u < size) { out[n] = s[n]; n++; }
+        out[n] = '\0';
+    }
+    if (s_frame.rear_active) {
+        const char *s = "REAR";
+        n = strlen(out);
+        if (n > 0u && n + 1u < size) { out[n] = ' '; out[n + 1u] = '\0'; n++; }
+        {
+            uint8_t k = 0u;
+            while (s[k] != '\0' && n + 1u < size) { out[n++] = s[k++]; }
+            out[n] = '\0';
+        }
+    }
+}
+
+static uint16_t row1_extra_w(const char *extra)
+{
+    return (uint16_t)(strlen(extra != 0 ? extra : "") * FONT_TEXT_WIDTH);
+}
+
+/* Green lamp string origin: brand end + sep + white extras + gap. With no
+ * extras this is exactly the old row1_info_x() (pixel-identical). */
+static uint16_t row1_lamp_x_for(const char *brand, const char *extra)
+{
+    uint16_t x = (uint16_t)(row1_text_end_for(brand) +
+                            MAIN_DISPLAY_ROW1_SEP_GAP +
+                            MAIN_DISPLAY_ROW1_SEP_W +
+                            MAIN_DISPLAY_ROW1_INFO_GAP +
+                            row1_extra_w(extra));
+    if (extra != 0 && extra[0] != '\0') x += MAIN_DISPLAY_ROW1_INFO_GAP;
+    return x;
+}
+
 static bool trend_paint_cell_diff(const char *old_text, const char *new_text,
                                   uint16_t x, uint16_t y, uint16_t h, uint16_t color,
                                   char *saved, uint8_t saved_size,
@@ -3984,16 +4041,27 @@ static bool reading_only_render_status_bar(void)
     static uint8_t idx;
     static uint8_t uptime_diff_pos;
     bool brand_dirty, active_dirty, temp_dirty, uptime_dirty;
+    bool shift_changed;
+    char cur_extra[16];
     if (s_reading_only_stage != READING_ONLY_STATUS) idx = 0u;
-    brand_dirty = !s_reading_only_page_status_valid[s_render_page] ||
+    row1_extra_text(cur_extra, sizeof(cur_extra));
+    /* A SHIFT/REAR change repaints the brand row: extras text, lamp origin
+     * and (for SHIFT) the whole row background. */
+    shift_changed = !s_reading_only_page_status_valid[s_render_page] ||
+                    s_reading_only_page_shift[s_render_page] != s_frame.shift_active ||
+                    s_reading_only_page_rear[s_render_page] != s_frame.rear_active ||
+                    strcmp(s_reading_only_page_extra[s_render_page], cur_extra) != 0;
+    brand_dirty = shift_changed ||
                   strcmp(s_reading_only_page_brand[s_render_page], s_frame.brand) != 0;
     {
         char cur_row1[MAIN_DISPLAY_META_MAX];
         row1_status_text(cur_row1, sizeof(cur_row1));
         active_dirty = strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0;
     }
-    temp_dirty = strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
-    uptime_dirty = strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
+    temp_dirty = shift_changed ||
+                 strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0;
+    uptime_dirty = shift_changed ||
+                   strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
     // Use layout framework to compute positions and detect overlap
     {
         uint16_t bx, ax, tx, ux;
@@ -4005,25 +4073,35 @@ static bool reading_only_render_status_bar(void)
     }
     if (idx == 0u) {
         if (!s_reading_only_page_status_valid[s_render_page]) {
-            if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             idx++;
             return false;
         } else { idx++; }
     }
     if (idx == 1u) {
         /* Red KEITHLEY badge (ADR-0004): solid red rect under the head only;
-         * the "2000" tail is drawn plain two steps later. */
-        if (!brand_dirty) { idx = 5u; } else {
+         * the "2000" tail is drawn plain two steps later. With SHIFT active
+         * the whole row is blue instead (no red badge). */
+        if (!brand_dirty) { idx = 6u; } else {
             uint16_t w = row1_red_end_for(s_frame.brand);
             uint16_t fw = row1_text_end_for(s_frame.brand);
             uint16_t ofw = row1_text_end_for(s_reading_only_page_brand[s_render_page]);
             uint16_t cw = fw > ofw ? fw : ofw;
-            /* Clear covers badge + tail + separator + gap so a narrower
-             * brand cannot leave stale pixels behind. */
-            cw = (uint16_t)(cw + MAIN_DISPLAY_ROW1_SEP_GAP +
-                            MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
-            if (ui_fill_rect(0u, 0u, cw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
-            if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
+            if (s_frame.shift_active != s_reading_only_page_shift[s_render_page] ||
+                !s_reading_only_page_status_valid[s_render_page]) {
+                /* Background transition (or first paint): stale pixels can
+                 * sit anywhere on the row, so repaint the full width. */
+                if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
+            } else {
+                /* Clear covers badge + tail + separator + gap so a narrower
+                 * brand cannot leave stale pixels behind. */
+                cw = (uint16_t)(cw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                                MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+                if (ui_fill_rect(0u, 0u, cw, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
+            }
+            if (!s_frame.shift_active) {
+                if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
+            }
             idx++;
             return false;
         }
@@ -4064,17 +4142,16 @@ static bool reading_only_render_status_bar(void)
         }
     }
     if (idx == 5u) {
-        /* Left-aligned de-duplicated lamps (ADR-0004): single string keeps the
-         * resumable bitmap job safe (one job, one string per step). */
-        char cur[MAIN_DISPLAY_META_MAX];
+        /* White SHIFT/REAR right after the logo (own step: one string per
+         * resumable bitmap job, same rule as head/tail/lamps). */
+        char cur[16];
         uint16_t nx = row1_info_x();
         uint16_t nw, ow, fx, xe;
         uint16_t ox = nx;
-        row1_status_text(cur, sizeof(cur));
-        ow = (uint16_t)(strlen(s_reading_only_page_row1[s_render_page]) * FONT_TEXT_WIDTH);
-        /* Old origin moves with brand width; erase the union of both extents.
-         * 首刷边界(ADR-0004§Bug)：缓存为空时旧原点无意义（按空品牌算出 x33），
-         * 并集擦除会抹掉刚画好的品牌只剩 "KE"——此时只擦新范围。 */
+        row1_extra_text(cur, sizeof(cur));
+        ow = row1_extra_w(s_reading_only_page_extra[s_render_page]);
+        /* Old origin moves with brand width; same first-paint guard as the
+         * lamp string below (empty snapshot => old origin meaningless). */
         if (ow > 0u)
         {
             uint16_t oo = (uint16_t)(row1_text_end_for(s_reading_only_page_brand[s_render_page]) +
@@ -4082,21 +4159,58 @@ static bool reading_only_render_status_bar(void)
                                      MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
             if (oo < ox) ox = oo;
         }
-        nw = (uint16_t)(strlen(cur) * FONT_TEXT_WIDTH);
+        nw = row1_extra_w(cur);
         fx = ox < nx ? ox : nx;
         xe = ox + ow > nx + nw ? ox + ow : nx + nw;
-        if (!active_dirty && strcmp(s_reading_only_page_row1[s_render_page], cur) == 0) { idx++; } else {
+        if (!brand_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 if (xe > fx &&
                     ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H,
-                                 MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+                                 row1_bg()) != LT7680_OK) return false;
+            }
+            if (cur[0] != '\0' && !ui_draw_text(nx, 0u, cur, MAIN_DISPLAY_COLOR_WHITE)) return false;
+            idx++;
+            return false;
+        }
+    }
+    if (idx == 6u) {
+        /* Left-aligned de-duplicated lamps (ADR-0004): single string keeps the
+         * resumable bitmap job safe (one job, one string per step). Origin
+         * follows the white extras (pixel-identical to before when empty). */
+        char cur[MAIN_DISPLAY_META_MAX];
+        char extra[16];
+        uint16_t nx;
+        uint16_t nw, ow, fx, xe;
+        uint16_t ox;
+        row1_extra_text(extra, sizeof(extra));
+        nx = row1_lamp_x_for(s_frame.brand, extra);
+        ox = nx;
+        row1_status_text(cur, sizeof(cur));
+        ow = (uint16_t)(strlen(s_reading_only_page_row1[s_render_page]) * FONT_TEXT_WIDTH);
+        /* Old origin moves with brand width AND old extras width; erase the
+         * union of both extents. 首刷边界(ADR-0004§Bug)：缓存为空时旧原点无意义（按空品牌算出 x33），
+         * 并集擦除会抹掉刚画好的品牌只剩 "KE"——此时只擦新范围。 */
+        if (ow > 0u)
+        {
+            uint16_t oo = row1_lamp_x_for(s_reading_only_page_brand[s_render_page],
+                                          s_reading_only_page_extra[s_render_page]);
+            if (oo < ox) ox = oo;
+        }
+        nw = (uint16_t)(strlen(cur) * FONT_TEXT_WIDTH);
+        fx = ox < nx ? ox : nx;
+        xe = ox + ow > nx + nw ? ox + ow : nx + nw;
+        if (!active_dirty && !brand_dirty && strcmp(s_reading_only_page_row1[s_render_page], cur) == 0) { idx++; } else {
+            if (!s_bitmap_job.active) {
+                if (xe > fx &&
+                    ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H,
+                                 row1_bg()) != LT7680_OK) return false;
             }
             if (cur[0] != '\0' && !ui_draw_text(nx, 0u, cur, MAIN_DISPLAY_COLOR_GREEN)) return false;
             idx++;
             return false;
         }
     }
-    if (idx == 6u) {
+    if (idx == 7u) {
         if (!temp_dirty) { idx++; } else {
             if (!s_bitmap_job.active) {
                 uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
@@ -4104,7 +4218,7 @@ static bool reading_only_render_status_bar(void)
                 uint16_t nw = (uint16_t)(strlen(s_frame.temperature) * FONT_TEXT_WIDTH);
                 uint16_t ow = (uint16_t)(strlen(s_reading_only_page_temperature[s_render_page]) * FONT_TEXT_WIDTH);
                 uint16_t fw = nw > ow ? nw : ow;
-                if (ui_fill_rect(n_right_x, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+                if (ui_fill_rect(n_right_x, 0u, fw, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             }
             uint16_t n_right_w2 = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
             uint16_t n_right_x2 = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w2 - 12u);
@@ -4113,7 +4227,7 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 7u) {
+    if (idx == 8u) {
         /* Right-side half-height separator between temperature and uptime
          * (1x12 grid, same language as the brand separator). The column
          * tracks the right-aligned block; erase the union of the old and
@@ -4129,7 +4243,7 @@ static bool reading_only_render_status_bar(void)
             uint16_t fx = n_sx < o_sx ? n_sx : o_sx;
             uint16_t xe = (uint16_t)((n_sx > o_sx ? n_sx : o_sx) + 1u);
             if (!s_reading_only_page_status_valid[s_render_page]) { fx = n_sx; xe = (uint16_t)(n_sx + 1u); }
-            if (ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(fx, 0u, (uint16_t)(xe - fx), MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             if (ui_fill_rect(n_sx, (uint16_t)((MAIN_DISPLAY_STATUS_H - MAIN_DISPLAY_ROW1_SEP_H) / 2u),
                              MAIN_DISPLAY_ROW1_SEP_W, MAIN_DISPLAY_ROW1_SEP_H,
                              MAIN_DISPLAY_COLOR_SEP) != LT7680_OK) return false;
@@ -4137,15 +4251,17 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 8u) {
+    if (idx == 9u) {
         if (!uptime_dirty) { idx++; uptime_diff_pos = 0u; } else {
             uint16_t n_right_w = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
             uint16_t n_right_x = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w - 12u);
             uint16_t ux = (uint16_t)(n_right_x + strlen(s_frame.temperature) * FONT_TEXT_WIDTH + 24u);
             /* Steady-state uptime (fixed 8 glyphs, temp unchanged): repaint
              * only the changed digit cells instead of erase-all + full
-             * redraw (~60 fills ≈ 20 ms every second). */
-            if (!temp_dirty &&
+             * redraw (~60 fills ≈ 20 ms every second). The cell painter
+             * assumes BAR background, so the blue SHIFT row always takes
+             * the full erase + redraw path below. */
+            if (!temp_dirty && !s_frame.shift_active &&
                 strlen(s_reading_only_page_uptime[s_render_page]) == strlen(s_frame.uptime)) {
                 if (!trend_paint_cell_diff(s_reading_only_page_uptime[s_render_page],
                                            s_frame.uptime, ux, 0u,
@@ -4165,7 +4281,7 @@ static bool reading_only_render_status_bar(void)
                 uint16_t nw = (uint16_t)(strlen(s_frame.uptime) * FONT_TEXT_WIDTH);
                 uint16_t ow = (uint16_t)(strlen(s_reading_only_page_uptime[s_render_page]) * FONT_TEXT_WIDTH);
                 uint16_t fw = nw > ow ? nw : ow;
-                if (ui_fill_rect(ux, 0u, fw, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+                if (ui_fill_rect(ux, 0u, fw, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             }
             uint16_t n_right_w3 = (uint16_t)((strlen(s_frame.temperature) + 2u + strlen(s_frame.uptime)) * FONT_TEXT_WIDTH);
             uint16_t n_right_x3 = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - n_right_w3 - 12u);
@@ -4175,9 +4291,13 @@ static bool reading_only_render_status_bar(void)
             return false;
         }
     }
-    if (idx == 9u) { idx++; }
+    if (idx == 10u) { idx++; }
     idx = 0u;
     s_reading_only_page_status_valid[s_render_page] = true;
+    row1_extra_text(s_reading_only_page_extra[s_render_page],
+                    sizeof(s_reading_only_page_extra[0]));
+    s_reading_only_page_shift[s_render_page] = s_frame.shift_active;
+    s_reading_only_page_rear[s_render_page] = s_frame.rear_active;
     strncpy(s_reading_only_page_brand[s_render_page], s_frame.brand,
             sizeof(s_reading_only_page_brand[0]) - 1u);
     s_reading_only_page_brand[s_render_page][sizeof(s_reading_only_page_brand[0]) - 1u] = '\0';
@@ -5449,6 +5569,8 @@ static void reading_only_render(void)
                     uint8_t i;
                     for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
                         s_row_snap_active[i] = s_frame.status_active[i];
+                    s_row_snap_shift = s_frame.shift_active;
+                    s_row_snap_rear = s_frame.rear_active;
                     memcpy(s_row_snap_rate, s_frame.rate,
                            sizeof(s_row_snap_rate));
                     memcpy(s_row_snap_temperature, s_frame.temperature,
@@ -5469,6 +5591,8 @@ static void reading_only_render(void)
                     uint8_t i;
                     for (i = 0u; i < STATUS_BAR_CORE_COUNT; i++)
                         s_frame.status_active[i] = s_row_snap_active[i];
+                    s_frame.shift_active = s_row_snap_shift;
+                    s_frame.rear_active = s_row_snap_rear;
                     memcpy(s_frame.rate, s_row_snap_rate,
                            sizeof(s_frame.rate));
                     memcpy(s_frame.temperature, s_row_snap_temperature,
@@ -5492,6 +5616,8 @@ static void reading_only_render(void)
               status_need = !s_reading_only_page_status_valid[s_render_page] ||
                                  s_reading_only_page_status_lamps[s_render_page] != cur_status ||
                                  strcmp(s_reading_only_page_row1[s_render_page], cur_row1) != 0 ||
+                                 s_reading_only_page_shift[s_render_page] != s_frame.shift_active ||
+                                 s_reading_only_page_rear[s_render_page] != s_frame.rear_active ||
                                  strcmp(s_reading_only_page_temperature[s_render_page], s_frame.temperature) != 0 ||
                                  strcmp(s_reading_only_page_uptime[s_render_page], s_frame.uptime) != 0;
                 bool info_need = s_trig_dot_pending ||

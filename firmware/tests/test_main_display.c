@@ -94,8 +94,17 @@ int main(void)
            frame.status_active[7] && frame.status_active[8] &&
            frame.status_active[10] && frame.status_active[11] &&
            frame.status_active[12]);
-    assert(strstr(frame.active_status, "REM") != 0);
+    assert(strstr(frame.active_status, "REMOTE") != 0);
     assert(strstr(frame.active_status, "TALK") != 0);
+    /* Brand-row extras: 0x07 SHIFT (0x80) / REAR (0x10) land on frame flags,
+     * not in the core lamp table. */
+    assert(!frame.shift_active && !frame.rear_active);
+    ui_model_apply_status(&model, 0x07u, 0x90u);
+    main_display_format(&model, &frame);
+    assert(frame.shift_active && frame.rear_active);
+    ui_model_apply_status(&model, 0x07u, 0x00u);
+    main_display_format(&model, &frame);
+    assert(!frame.shift_active && !frame.rear_active);
     main_display_format_runtime(&frame, 250, 45, 62000u);
     assert(strcmp(frame.temperature, "+25.0\xC2\xB0" "C 45%RH") == 0);
     assert(strcmp(frame.uptime, "00:01:02") == 0);
@@ -129,9 +138,9 @@ int main(void)
     assert(ui_model_infer_function("Hz") == UI_FUNCTION_FREQUENCY);
     assert(ui_model_infer_function("DEGC") == UI_FUNCTION_TEMPERATURE);
     assert(strcmp(main_display_function_text(UI_FUNCTION_2W_OHM),
-                   "2W \xCE\xA9") == 0);
+                   "2-Wire Resistance") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_4W_OHM),
-                   "4W \xCE\xA9") == 0);
+                   "4-Wire Resistance") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_DC_VOLTAGE),
                    "DC Voltage") == 0);
     {

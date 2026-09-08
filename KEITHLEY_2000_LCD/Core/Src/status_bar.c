@@ -5,7 +5,7 @@ static const uint8_t s_status_tags[STATUS_BAR_NUM_TAGS] = {
 };
 
 const status_bar_indicator_t status_bar_core_table[STATUS_BAR_CORE_COUNT] = {
-    { "REM",    0x06u, 0x08u },
+    { "REMOTE", 0x06u, 0x08u },
     { "TALK",   0x06u, 0x04u },
     { "LSTN",   0x06u, 0x02u },
     { "SRQ",    0x06u, 0x01u },

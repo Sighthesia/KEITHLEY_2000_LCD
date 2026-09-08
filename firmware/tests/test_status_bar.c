@@ -6,7 +6,7 @@
 int main(void)
 {
     static const char *const labels[] = {
-        "REM", "TALK", "LSTN", "SRQ", "HOLD", "TRIG", "REL", "FILT",
+        "REMOTE", "TALK", "LSTN", "SRQ", "HOLD", "TRIG", "REL", "FILT",
         "AUTO", "ERR", "BUFFER", "MATH", "CONT"
     };
     static const uint8_t tags[] = {
