@@ -12,6 +12,23 @@ static const uint8_t s_key_map[KEYPAD_ROWS][KEYPAD_COLS] = {
     { 0x00, 0x5A, 0x5B, 0x5C, 0x5D, 0x5E, 0x5F, 0x60 },
 };
 
+/* Display names for the same cells (ODS TX "Pressed button" + schematic
+ * labels). "" marks the unwired cells, mirroring the 0x00 codes above. */
+static const char *const s_key_names[KEYPAD_ROWS][KEYPAD_COLS] = {
+    { "SHIFT", "DCV", "ACV", "DCI", "ACI", "OHM", "OHM4W", "FREQ" },
+    { "", "", "UP", "AUTO", "DOWN", "ENTER", "RIGHT", "TEMP" },
+    { "LOCAL", "EXTTRIG", "TRIG", "STORE", "RECALL", "FILTER", "REL", "LEFT" },
+    { "", "OPEN", "CLOSE", "STEP", "SCAN", "DIGITS", "RATE", "EXIT" },
+};
+
+const char *keypad_name(uint8_t row, uint8_t col)
+{
+    if (row >= KEYPAD_ROWS || col >= KEYPAD_COLS) {
+        return "";
+    }
+    return s_key_names[row][col];
+}
+
 typedef enum {
     KP_STATE_IDLE,
     KP_STATE_PRESS_WAIT,

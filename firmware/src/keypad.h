@@ -26,4 +26,7 @@ typedef struct {
 
 void keypad_init(keypad_t *k);
 int keypad_code(uint8_t row, uint8_t col);
+/* Human-readable key name for bench diagnosis ("SHIFT", "DCV", ... "EXIT").
+ * Empty string for unwired/unknown cells. Table mirrors s_key_map below. */
+const char *keypad_name(uint8_t row, uint8_t col);
 int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms);

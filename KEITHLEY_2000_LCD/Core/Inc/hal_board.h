@@ -19,9 +19,10 @@ uint32_t hal_uart_rx_overflow_count(void);
 bool hal_uart_rx_recovering(void);
 
 /* Key-matrix bench diagnosis: 1 = replace the single-byte host codes with
- * "KEYS rXcY ..." lines listing EVERY contacted cell (change-reported, so a
- * R6/R7 short shows as "KEYS r0c5 r0c6" and a dead row/column shows
- * nothing). For matrix bring-up only; normal/host builds keep 0. */
+ * "KEYS ..." lines listing EVERY contacted cell by key name ("KEYS FREQ",
+ * unwired cells as "r3c0"; "-" when idle; change-reported, so a shorted
+ * pair shows as e.g. "KEYS OHM OHM4W"). For matrix bring-up only;
+ * normal/host builds keep 0. */
 #define K2000_KEY_DEBUG 1U
 
 /* Scan the 4x8 key matrix (rows PB0..PB3 x cols PB4..PB11, col0=R9=PB11 ...

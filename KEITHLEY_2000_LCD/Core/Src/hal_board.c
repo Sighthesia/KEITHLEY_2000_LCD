@@ -568,11 +568,22 @@ void hal_keypad_debug_poll(void)
         for (row = 0u; row < KEYPAD_ROWS; row++) {
             for (col = 0u; col < KEYPAD_COLS; col++) {
                 if ((mask & (uint32_t)(1uL << (row * KEYPAD_COLS + col))) != 0u) {
+                    /* Named cell prints its key name ("FREQ"); unwired
+                     * cells fall back to coordinates ("r3c0"). */
+                    const char *name = keypad_name(row, col);
                     uart_put_byte(' ');
-                    uart_put_byte('r');
-                    uart_put_byte((uint8_t)('0' + row));
-                    uart_put_byte('c');
-                    uart_put_byte((uint8_t)('0' + col));
+                    if (name[0] != '\0') {
+                        uint8_t i = 0u;
+                        while (name[i] != '\0') {
+                            uart_put_byte((uint8_t)name[i]);
+                            i++;
+                        }
+                    } else {
+                        uart_put_byte('r');
+                        uart_put_byte((uint8_t)('0' + row));
+                        uart_put_byte('c');
+                        uart_put_byte((uint8_t)('0' + col));
+                    }
                 }
             }
         }

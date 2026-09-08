@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 
 #include "keypad.h"
 
@@ -6,6 +7,16 @@ int main(void)
 {
     keypad_t k;
     int raw;
+
+    /* Name table mirrors the code table ("" = unwired cell). */
+    assert(strcmp(keypad_name(0, 0), "SHIFT") == 0);
+    assert(strcmp(keypad_name(0, 7), "FREQ") == 0);
+    assert(strcmp(keypad_name(1, 7), "TEMP") == 0);
+    assert(strcmp(keypad_name(2, 0), "LOCAL") == 0);
+    assert(strcmp(keypad_name(3, 7), "EXIT") == 0);
+    assert(keypad_name(1, 0)[0] == '\0');
+    assert(keypad_name(3, 0)[0] == '\0');
+    assert(keypad_name(4, 0)[0] == '\0');
 
     /* Mapping table (ODS TX table, rows PB0..PB3 x cols PB4..PB11;
      * logical col0=R9 ... col7=R16, pin order in hal_board.c). */
