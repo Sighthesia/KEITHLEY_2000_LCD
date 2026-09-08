@@ -45,6 +45,7 @@ void keypad_init(keypad_t *k)
     k->candidate_raw = 0;
     k->held_raw = 0;
     k->tick = 0;
+    k->count = 0;
 }
 
 int keypad_code(uint8_t row, uint8_t col)
@@ -67,6 +68,24 @@ static int code_from_raw(int raw)
     return keypad_code(row, col);
 }
 
+/* Integrator step: same raw again bumps the streak (saturating); anything
+ * else restarts it. Returns nonzero once the streak is long AND old enough. */
+static int streak_ready(keypad_t *k, uint32_t tick_ms)
+{
+    if (k->count < 255u) {
+        k->count++;
+    }
+    return k->count >= KEYPAD_DEBOUNCE_SAMPLES &&
+           (tick_ms - k->tick) >= KEYPAD_DEBOUNCE_MS;
+}
+
+static void streak_restart(keypad_t *k, int raw_code, uint32_t tick_ms)
+{
+    k->candidate_raw = raw_code;
+    k->tick = tick_ms;
+    k->count = 1u;
+}
+
 int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
 {
     int out = 0;
@@ -79,8 +98,7 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
     switch (k->state) {
     case KP_STATE_IDLE:
         if (raw_code != 0) {
-            k->candidate_raw = raw_code;
-            k->tick = tick_ms;
+            streak_restart(k, raw_code, tick_ms);
             k->state = KP_STATE_PRESS_WAIT;
         }
         break;
@@ -89,9 +107,8 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
         if (raw_code == 0) {
             k->state = KP_STATE_IDLE;
         } else if (raw_code != k->candidate_raw) {
-            k->candidate_raw = raw_code;
-            k->tick = tick_ms;
-        } else if ((tick_ms - k->tick) >= KEYPAD_DEBOUNCE_MS) {
+            streak_restart(k, raw_code, tick_ms);
+        } else if (streak_ready(k, tick_ms)) {
             code = code_from_raw(raw_code);
             k->held_raw = raw_code;
             k->state = KP_STATE_PRESSED;
@@ -102,10 +119,10 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
     case KP_STATE_PRESSED:
         if (raw_code == 0) {
             k->tick = tick_ms;
+            k->count = 1u;
             k->state = KP_STATE_RELEASE_WAIT;
         } else if (raw_code != k->held_raw) {
-            k->candidate_raw = raw_code;
-            k->tick = tick_ms;
+            streak_restart(k, raw_code, tick_ms);
             k->state = KP_STATE_PRESS_WAIT;
         }
         break;
@@ -115,11 +132,10 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
             if (raw_code == k->held_raw) {
                 k->state = KP_STATE_PRESSED;
             } else {
-                k->candidate_raw = raw_code;
-                k->tick = tick_ms;
+                streak_restart(k, raw_code, tick_ms);
                 k->state = KP_STATE_PRESS_WAIT;
             }
-        } else if ((tick_ms - k->tick) >= KEYPAD_DEBOUNCE_MS) {
+        } else if (streak_ready(k, tick_ms)) {
             code = code_from_raw(k->held_raw);
             if (code != 0) {
                 out = KEYPAD_RELEASE_CODE;
