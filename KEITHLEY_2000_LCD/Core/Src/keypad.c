@@ -68,15 +68,16 @@ static int code_from_raw(int raw)
     return keypad_code(row, col);
 }
 
-/* Integrator step: same raw again bumps the streak (saturating); anything
- * else restarts it. Returns nonzero once the streak is long AND old enough. */
-static int streak_ready(keypad_t *k, uint32_t tick_ms)
+/* Integrator step: same raw again bumps the streak (saturating). Returns
+ * nonzero once the streak reaches <samples> scans spanning <ms>. Anything
+ * else must restart the streak via streak_restart(). */
+static int streak_ready_n(keypad_t *k, uint32_t tick_ms, uint8_t samples,
+                          uint32_t ms)
 {
     if (k->count < 255u) {
         k->count++;
     }
-    return k->count >= KEYPAD_DEBOUNCE_SAMPLES &&
-           (tick_ms - k->tick) >= KEYPAD_DEBOUNCE_MS;
+    return k->count >= samples && (tick_ms - k->tick) >= ms;
 }
 
 static void streak_restart(keypad_t *k, int raw_code, uint32_t tick_ms)
@@ -108,7 +109,8 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
             k->state = KP_STATE_IDLE;
         } else if (raw_code != k->candidate_raw) {
             streak_restart(k, raw_code, tick_ms);
-        } else if (streak_ready(k, tick_ms)) {
+        } else if (streak_ready_n(k, tick_ms, KEYPAD_PRESS_SAMPLES,
+                                  KEYPAD_PRESS_MS)) {
             code = code_from_raw(raw_code);
             k->held_raw = raw_code;
             k->state = KP_STATE_PRESSED;
@@ -135,7 +137,8 @@ int keypad_scan(keypad_t *k, int raw_code, uint32_t tick_ms)
                 streak_restart(k, raw_code, tick_ms);
                 k->state = KP_STATE_PRESS_WAIT;
             }
-        } else if (streak_ready(k, tick_ms)) {
+        } else if (streak_ready_n(k, tick_ms, KEYPAD_RELEASE_SAMPLES,
+                                  KEYPAD_RELEASE_MS)) {
             code = code_from_raw(k->held_raw);
             if (code != 0) {
                 out = KEYPAD_RELEASE_CODE;
