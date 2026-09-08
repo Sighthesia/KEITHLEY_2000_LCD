@@ -30,21 +30,18 @@ int main(void)
     assert(keypad_code(3, 0) == 0);   /* unwired cell (CAL EN unknown) */
     assert(keypad_code(1, 0) == 0);   /* blank cell */
 
-    /* Debounce + edge: 3 consecutive stable scans spanning 30 ms confirm a
+    /* Debounce + edge: 2 consecutive stable scans spanning 15 ms confirm a
      * press (once) and a release (0x40, once). */
     keypad_init(&k);
     raw = KEYPAD_RAW(0, 0);   /* SHIFT */
     assert(keypad_scan(&k, 0, 0) == 0);          /* idle */
     assert(keypad_scan(&k, raw, 100) == 0);      /* streak 1 */
-    assert(keypad_scan(&k, raw, 110) == 0);      /* streak 2 */
-    assert(keypad_scan(&k, raw, 120) == 0);      /* streak 3, only 20 ms */
-    assert(keypad_scan(&k, raw, 130) == 0x41);   /* 30 ms: confirmed press */
-    assert(keypad_scan(&k, raw, 140) == 0);      /* held, no repeat */
+    assert(keypad_scan(&k, raw, 110) == 0);      /* streak 2, only 10 ms */
+    assert(keypad_scan(&k, raw, 120) == 0x41);   /* 20 ms: confirmed press */
+    assert(keypad_scan(&k, raw, 130) == 0);      /* held, no repeat */
     assert(keypad_scan(&k, raw, 200) == 0);
     assert(keypad_scan(&k, 0, 210) == 0);        /* release streak 1 */
-    assert(keypad_scan(&k, 0, 220) == 0);        /* streak 2 */
-    assert(keypad_scan(&k, 0, 230) == 0);        /* streak 3, only 20 ms */
-    assert(keypad_scan(&k, 0, 240) == 0x40);     /* 30 ms: confirmed release */
+    assert(keypad_scan(&k, 0, 225) == 0x40);     /* 15 ms: confirmed release */
     assert(keypad_scan(&k, 0, 300) == 0);        /* idle */
 
     /* A key released before the streak completes is ignored entirely. */
@@ -54,9 +51,7 @@ int main(void)
     assert(keypad_scan(&k, 0, 15) == 0);         /* released early */
     assert(keypad_scan(&k, 0, 500) == 0);
     assert(keypad_scan(&k, raw, 600) == 0);      /* fresh press, streak 1 */
-    assert(keypad_scan(&k, raw, 610) == 0);      /* streak 2 */
-    assert(keypad_scan(&k, raw, 620) == 0);      /* streak 3, only 20 ms */
-    assert(keypad_scan(&k, raw, 630) == 0x54);   /* confirmed */
+    assert(keypad_scan(&k, raw, 615) == 0x54);   /* confirmed */
 
     /* A different key during a press restarts the streak on the new key. */
     keypad_init(&k);
@@ -64,8 +59,8 @@ int main(void)
     assert(keypad_scan(&k, raw, 0) == 0);
     raw = KEYPAD_RAW(0, 1);                       /* DCV */
     assert(keypad_scan(&k, raw, 5) == 0);
-    assert(keypad_scan(&k, raw, 25) == 0);       /* 20 ms, not yet */
-    assert(keypad_scan(&k, raw, 35) == 0x42);    /* new key confirmed */
+    assert(keypad_scan(&k, raw, 15) == 0);       /* 10 ms, not yet */
+    assert(keypad_scan(&k, raw, 20) == 0x42);    /* new key confirmed */
 
     /* Unknown cell: nothing is ever emitted, even through release. */
     keypad_init(&k);

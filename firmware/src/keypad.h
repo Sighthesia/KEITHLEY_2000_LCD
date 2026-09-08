@@ -12,9 +12,11 @@
 /* Integrator debounce for silicone carbon contacts: a press/release only
  * confirms after KEYPAD_DEBOUNCE_SAMPLES consecutive stable scans spanning
  * at least KEYPAD_DEBOUNCE_MS. Carbon chatter is intermittent, so a single
- * timer alone is not enough. */
-#define KEYPAD_DEBOUNCE_MS 30u
-#define KEYPAD_DEBOUNCE_SAMPLES 3u
+ * timer alone is not enough. Keep the window short: taps shorter than it
+ * are eaten by design, and marginal input levels (wrong pull-down) chatter
+ * longer than any window can cover -- fix levels first (33k per BOM). */
+#define KEYPAD_DEBOUNCE_MS 15u
+#define KEYPAD_DEBOUNCE_SAMPLES 2u
 #define KEYPAD_RELEASE_CODE 0x40u
 
 /* Encode a matrix position into the raw code passed to keypad_scan().
