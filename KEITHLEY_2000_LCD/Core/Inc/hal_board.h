@@ -22,7 +22,7 @@ bool hal_uart_rx_recovering(void);
  * "KEYS rXcY ..." lines listing EVERY contacted cell (change-reported, so a
  * R6/R7 short shows as "KEYS r0c5 r0c6" and a dead row/column shows
  * nothing). For matrix bring-up only; normal/host builds keep 0. */
-#define K2000_KEY_DEBUG 0U
+#define K2000_KEY_DEBUG 1U
 
 /* Scan the 4x8 key matrix (rows PB0..PB3 x cols PB4..PB11, col0=R1=PB11 ...
  * col7=R8=PB4) and return the raw position code for one pressed key
