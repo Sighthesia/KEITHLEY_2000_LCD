@@ -2,10 +2,11 @@
 
 #include <stdint.h>
 
-/* 4x8 key matrix, rows PB0..PB3 (row 0..3, outputs, idle high) x cols
- * PB4..PB11 (col 0..7 = R1..R8 = PB11..PB4 reversed, inputs, 33k pull-up).
- * Logical (row,col) codes follow the ODS TX table; the physical pin order
- * lives in hal_board.c. Pure logic only: no HAL, no GPIO. */
+/* 4x8 key matrix, rows PB0..PB3 (row 0..3, outputs, idle low) x cols
+ * PB4..PB11 (col 0..7 = R9..R16 = PB11..PB4 reversed, inputs, 33k
+ * pull-down to GND per Netlist_Schematic1_2026-09-08.tel). Logical
+ * (row,col) codes follow the ODS TX table; the physical pin order lives
+ * in hal_board.c. Pure logic only: no HAL, no GPIO. */
 #define KEYPAD_ROWS 4u
 #define KEYPAD_COLS 8u
 #define KEYPAD_DEBOUNCE_MS 20u

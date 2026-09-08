@@ -8,7 +8,7 @@ int main(void)
     int raw;
 
     /* Mapping table (ODS TX table, rows PB0..PB3 x cols PB4..PB11;
-     * logical col0=R1 ... col7=R8, pin order in hal_board.c). */
+     * logical col0=R9 ... col7=R16, pin order in hal_board.c). */
     assert(keypad_code(0, 0) == 0x41);
     assert(keypad_code(0, 7) == 0x48);
     assert(keypad_code(1, 2) == 0x4B);
