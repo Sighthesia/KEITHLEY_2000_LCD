@@ -479,29 +479,30 @@ bool hal_uart_rx_recovering(void)
     return uart_rx_queue_recovering(&s_uart_rx);
 }
 
+/* Logical row r = PB(r) (PB0->row0 ... PB3->row3, top to bottom).
+ * If rows come back vertically flipped on the real board, swap this
+ * table end-for-end (do NOT touch keypad.c or the ODS code table). */
+static const uint16_t s_key_row_pin[KEYPAD_ROWS] = {
+    GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3,
+};
+/* Schematic breakout runs R1->PB11 ... R8->PB4, so logical column c
+ * (R1=col0 ... R8=col7) maps to pins in reverse: col0=PB11 ...
+ * col7=PB4. keypad.c's (row,col)->code table is written in logical
+ * (R-row, R-column) coordinates and stays untouched. */
+static const uint16_t s_key_col_pin[KEYPAD_COLS] = {
+    GPIO_PIN_11, GPIO_PIN_10, GPIO_PIN_9, GPIO_PIN_8,
+    GPIO_PIN_7, GPIO_PIN_6, GPIO_PIN_5, GPIO_PIN_4,
+};
+
 int hal_keypad_read_code(void)
 {
-    /* Logical row r = PB(r) (PB0->row0 ... PB3->row3, top to bottom).
-     * If rows come back vertically flipped on the real board, swap this
-     * table end-for-end (do NOT touch keypad.c or the ODS code table). */
-    static const uint16_t s_row_pin[KEYPAD_ROWS] = {
-        GPIO_PIN_0, GPIO_PIN_1, GPIO_PIN_2, GPIO_PIN_3,
-    };
-    /* Schematic breakout runs R1->PB11 ... R8->PB4, so logical column c
-     * (R1=col0 ... R8=col7) maps to pins in reverse: col0=PB11 ...
-     * col7=PB4. keypad.c's (row,col)->code table is written in logical
-     * (R-row, R-column) coordinates and stays untouched. */
-    static const uint16_t s_col_pin[KEYPAD_COLS] = {
-        GPIO_PIN_11, GPIO_PIN_10, GPIO_PIN_9, GPIO_PIN_8,
-        GPIO_PIN_7, GPIO_PIN_6, GPIO_PIN_5, GPIO_PIN_4,
-    };
     uint8_t row;
 
     for (row = 0u; row < KEYPAD_ROWS; row++) {
         uint8_t col;
         /* All rows idle high, then pull only this row low. */
         HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
-        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, s_row_pin[row], GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, s_key_row_pin[row], GPIO_PIN_RESET);
         /* Settle: 33k pull-up + wiring capacitance needs ~us before the
          * column input reflects the driven row. HAL call overhead already
          * covers most of it; a few NOPs close the gap deterministically. */
@@ -509,7 +510,7 @@ int hal_keypad_read_code(void)
             __NOP();
         }
         for (col = 0u; col < KEYPAD_COLS; col++) {
-            if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_col_pin[col]) ==
+            if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_key_col_pin[col]) ==
                 GPIO_PIN_RESET) {
                 HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK,
                                   GPIO_PIN_SET);
@@ -521,3 +522,58 @@ int hal_keypad_read_code(void)
     HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
     return 0;
 }
+
+#if K2000_KEY_DEBUG
+void hal_keypad_debug_poll(void)
+{
+    /* 32-bit contact mask, bit (r*8+c). Printed only on change so the
+     * terminal stays readable while a key is held. */
+    static uint32_t s_last_mask;
+    static bool s_have_last;
+    uint32_t mask = 0u;
+    uint8_t row;
+    uint8_t col;
+
+    for (row = 0u; row < KEYPAD_ROWS; row++) {
+        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, s_key_row_pin[row], GPIO_PIN_RESET);
+        for (volatile uint32_t n = 0u; n < 60u; n++) {
+            __NOP();
+        }
+        for (col = 0u; col < KEYPAD_COLS; col++) {
+            if (HAL_GPIO_ReadPin(KEY_COL_GPIO_PORT, s_key_col_pin[col]) ==
+                GPIO_PIN_RESET) {
+                mask |= (uint32_t)(1uL << (row * KEYPAD_COLS + col));
+            }
+        }
+    }
+    HAL_GPIO_WritePin(KEY_ROW_GPIO_PORT, KEY_ROW_PIN_MASK, GPIO_PIN_SET);
+    if (s_have_last && mask == s_last_mask) {
+        return;
+    }
+    s_have_last = true;
+    s_last_mask = mask;
+    uart_put_byte('K');
+    uart_put_byte('E');
+    uart_put_byte('Y');
+    uart_put_byte('S');
+    if (mask == 0u) {
+        uart_put_byte(' ');
+        uart_put_byte('-');
+    } else {
+        for (row = 0u; row < KEYPAD_ROWS; row++) {
+            for (col = 0u; col < KEYPAD_COLS; col++) {
+                if ((mask & (uint32_t)(1uL << (row * KEYPAD_COLS + col))) != 0u) {
+                    uart_put_byte(' ');
+                    uart_put_byte('r');
+                    uart_put_byte((uint8_t)('0' + row));
+                    uart_put_byte('c');
+                    uart_put_byte((uint8_t)('0' + col));
+                }
+            }
+        }
+    }
+    uart_put_byte('\r');
+    uart_put_byte('\n');
+}
+#endif
