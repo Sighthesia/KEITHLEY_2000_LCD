@@ -25,6 +25,7 @@ check("header brand and runtime",html.includes("KEITHLEY 2000")&&html.includes("
 check("no horizontal info-bar hairlines",!html.includes("L.infoBarY,960,1")&&!html.includes("L.infoBarH-1,960"));
 check("row1 de-duplicated left lamps",html.includes('["REMOTE","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]')&&!html.includes("STATUS.forEach"));
 check("brand-row SHIFT/REAR + blue",html.includes('getElementById("shift")')&&html.includes('getElementById("rear")')&&html.includes('COLORS.blue')&&html.includes('"SHIFT"')&&html.includes('"REAR"'));
+check("blue starts after logo separator",html.includes('ctx.fillRect(blueX,0,960-blueX')&&html.includes('const blueX=brandEnd+10'));
 check("row1 brand separator",html.includes("brandEnd+10")&&html.includes("Math.floor((L.statusH-12)/2)"));
 check("row1 temp white + right separator",html.includes('text(ctx,tempTxt,rightX,0,COLORS.white)')&&html.includes('text(ctx,upTxt,rightX+(tempTxt.length+2)*TEXT_W,0,COLORS.white)')&&html.includes('rightX+tempTxt.length*TEXT_W+11,Math.floor((L.statusH-12)/2),1,12'));
 check("red KEITHLEY-only badge",html.includes("ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,redEnd")&&html.includes('text(ctx,head,12,0,COLORS.white)')&&html.includes('text(ctx,tail,x2000,0,COLORS.white)'));

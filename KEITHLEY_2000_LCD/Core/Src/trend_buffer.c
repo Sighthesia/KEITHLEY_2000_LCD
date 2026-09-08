@@ -93,6 +93,7 @@ static void normalize_display_unit(const char *unit, char *out, uint8_t size)
     else if (strcmp(tmp, "MADC") == 0) copy_unit(out, size, "mADC");
     else if (strcmp(tmp, "MAAC") == 0) copy_unit(out, size, "mAAC");
     else if (strcmp(tmp, "KOHM") == 0) copy_unit(out, size, "k\xCE\xA9");
+    else if (strcmp(tmp, "kOHM") == 0) copy_unit(out, size, "k\xCE\xA9");
     else if (strcmp(tmp, "MOHM") == 0) copy_unit(out, size, "M\xCE\xA9");
     else if (strcmp(tmp, "OHM") == 0) copy_unit(out, size, "\xCE\xA9");
     else copy_unit(out, size, unit);

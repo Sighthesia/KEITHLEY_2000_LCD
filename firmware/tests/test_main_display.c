@@ -138,9 +138,9 @@ int main(void)
     assert(ui_model_infer_function("Hz") == UI_FUNCTION_FREQUENCY);
     assert(ui_model_infer_function("DEGC") == UI_FUNCTION_TEMPERATURE);
     assert(strcmp(main_display_function_text(UI_FUNCTION_2W_OHM),
-                   "2-Wire Resistance") == 0);
+                   "2W \xCE\xA9") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_4W_OHM),
-                   "4-Wire Resistance") == 0);
+                   "4W \xCE\xA9") == 0);
     assert(strcmp(main_display_function_text(UI_FUNCTION_DC_VOLTAGE),
                    "DC Voltage") == 0);
     {
@@ -359,7 +359,8 @@ int main(void)
         v = production_snapshot(&trend, "kOHM", 40400u, &f1, &resident,
                                 &candidate);
         assert(v.axis_rebuild && !v.keep_resident);
-        assert(strcmp(resident.unit, "kOHM") == 0);
+        /* Resident axis identity uses the normalized display unit. */
+        assert(strcmp(resident.unit, "k\xCE\xA9") == 0);
         axis_before = resident;
 
         inside_text(&resident, text, sizeof(text));

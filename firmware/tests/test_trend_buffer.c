@@ -65,6 +65,17 @@ int main(void)
     assert(trend_buffer_add(&trend, 90u, "2", "mA"));
     assert(trend.has_sample);
 
+    /* Resistance units normalize to Ohm for display (both K/k spellings);
+     * the Range cell must never show ASCII OHM. */
+    assert(trend_buffer_add(&trend, 100u, "1000", "OHM"));
+    assert(strcmp(trend_buffer_display_unit(&trend), "\xCE\xA9") == 0);
+    assert(trend_buffer_add(&trend, 110u, "1", "KOHM"));
+    assert(strcmp(trend_buffer_display_unit(&trend), "k\xCE\xA9") == 0);
+    assert(trend_buffer_add(&trend, 120u, "1", "kOHM"));
+    assert(strcmp(trend_buffer_display_unit(&trend), "k\xCE\xA9") == 0);
+    assert(trend_buffer_add(&trend, 130u, "1", "MOHM"));
+    assert(strcmp(trend_buffer_display_unit(&trend), "M\xCE\xA9") == 0);
+
     /* Ring wraps and timeout clears. */
     for (i = 0u; i < TREND_BUCKET_COUNT + 10u; i++)
         assert(trend_buffer_add(&trend, (uint32_t)i * TREND_BUCKET_MS, "1", "A"));

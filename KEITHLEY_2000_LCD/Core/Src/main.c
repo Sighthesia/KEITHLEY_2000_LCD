@@ -124,7 +124,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * the only half-height text; the mV/mA base units stay at digit size.
  * Set to 1 to enable; excluded from the normal build so the Flash budget is
  * unaffected. Keep the unit table in sync with sim/index.html. */
-#define K2000_DEMO_FEED 1U
+#define K2000_DEMO_FEED 0U
 
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
@@ -1434,6 +1434,7 @@ static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
         if (lt7680_gfx_present_page(s_render_page) != LT7680_OK)
             return;
         s_perf_display_commits_window++;
+#if K2000_DEMO_FEED
         if (!initial_frame && !s_demo_commit_reported)
         {
             hal_uart_send_text("[DEMO] commit page=");
@@ -1441,6 +1442,7 @@ static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
             hal_uart_send_text("\r\n");
             s_demo_commit_reported = true;
         }
+#endif
         s_visible_page = s_render_page;
         s_ready_page_mask |= (uint8_t)(1u << s_render_page);
         /* Runtime composes on one hidden page and levels the sibling with
@@ -1689,6 +1691,7 @@ static void proto_on_event(const k2000_event_t *evt)
     {
     case K2000_EVT_FIELD:
         s_perf_fields_window++;
+#if K2000_DEMO_FEED
         if (!s_demo_event_reported)
         {
             hal_uart_send_text("[DEMO] field-len=");
@@ -1696,6 +1699,7 @@ static void proto_on_event(const k2000_event_t *evt)
             hal_uart_send_text("\r\n");
             s_demo_event_reported = true;
         }
+#endif
         if (reading_is_special(evt->field.value, evt->field.value_len,
                                &special))
         {
@@ -3982,11 +3986,19 @@ static uint16_t row1_info_x(void)
 
 /* Brand-row extras (NOT status lamps): white 0x07 SHIFT/REAR right after the
  * logo. One string, one step (same resumable-job rule as the lamp string).
- * An active SHIFT turns the whole row-1 background blue. */
+ * An active SHIFT turns the row blue AFTER the logo separator; the logo
+ * area itself keeps BAR + the red badge. */
 static uint16_t row1_bg(void)
 {
     return s_frame.shift_active ? MAIN_DISPLAY_COLOR_BLUE
                                 : MAIN_DISPLAY_COLOR_BAR;
+}
+
+/* Blue region starts at the logo separator column (the separator itself is
+ * repainted gray on top of it). */
+static uint16_t row1_blue_x(void)
+{
+    return (uint16_t)(row1_brand_end_x() + MAIN_DISPLAY_ROW1_SEP_GAP);
 }
 
 static void row1_extra_text(char *out, uint8_t size)
@@ -4073,35 +4085,47 @@ static bool reading_only_render_status_bar(void)
     }
     if (idx == 0u) {
         if (!s_reading_only_page_status_valid[s_render_page]) {
-            if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
+            /* Logo area stays BAR; blue (when SHIFT) starts at the logo
+             * separator column. */
+            uint16_t sx = row1_blue_x();
+            if (ui_fill_rect(0u, 0u, sx, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+            if (ui_fill_rect(sx, 0u, (uint16_t)(MAIN_DISPLAY_UI_WIDTH - sx), MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             idx++;
             return false;
         } else { idx++; }
     }
     if (idx == 1u) {
         /* Red KEITHLEY badge (ADR-0004): solid red rect under the head only;
-         * the "2000" tail is drawn plain two steps later. With SHIFT active
-         * the whole row is blue instead (no red badge). */
+         * the "2000" tail is drawn plain two steps later. The badge is kept
+         * in both states; SHIFT only repaints the separator-to-right region
+         * blue. */
         if (!brand_dirty) { idx = 6u; } else {
             uint16_t w = row1_red_end_for(s_frame.brand);
             uint16_t fw = row1_text_end_for(s_frame.brand);
             uint16_t ofw = row1_text_end_for(s_reading_only_page_brand[s_render_page]);
             uint16_t cw = fw > ofw ? fw : ofw;
-            if (s_frame.shift_active != s_reading_only_page_shift[s_render_page] ||
-                !s_reading_only_page_status_valid[s_render_page]) {
-                /* Background transition (or first paint): stale pixels can
-                 * sit anywhere on the row, so repaint the full width. */
-                if (ui_fill_rect(0u, 0u, MAIN_DISPLAY_UI_WIDTH, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
-            } else {
-                /* Clear covers badge + tail + separator + gap so a narrower
-                 * brand cannot leave stale pixels behind. */
-                cw = (uint16_t)(cw + MAIN_DISPLAY_ROW1_SEP_GAP +
-                                MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
-                if (ui_fill_rect(0u, 0u, cw, MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
+            /* Split repaint: logo area [0,sep) always BAR, separator to the
+             * right takes the state bg (blue while SHIFT). A background
+             * transition (or first paint) repaints to the full width;
+             * a brand-only change clears badge + tail + separator + gap so
+             * a narrower brand cannot leave stale pixels behind. */
+            {
+                bool transition = s_frame.shift_active != s_reading_only_page_shift[s_render_page] ||
+                                  !s_reading_only_page_status_valid[s_render_page];
+                uint16_t sx = row1_blue_x();
+                uint16_t xe;
+                if (!transition) {
+                    cw = (uint16_t)(cw + MAIN_DISPLAY_ROW1_SEP_GAP +
+                                    MAIN_DISPLAY_ROW1_SEP_W + MAIN_DISPLAY_ROW1_INFO_GAP);
+                    xe = cw;
+                } else {
+                    xe = MAIN_DISPLAY_UI_WIDTH;
+                }
+                if (ui_fill_rect(0u, 0u, sx < xe ? sx : xe, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BAR) != LT7680_OK) return false;
+                if (xe > sx &&
+                    ui_fill_rect(sx, 0u, (uint16_t)(xe - sx), MAIN_DISPLAY_STATUS_H, row1_bg()) != LT7680_OK) return false;
             }
-            if (!s_frame.shift_active) {
-                if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
-            }
+            if (ui_fill_rect(0u, 0u, w, MAIN_DISPLAY_STATUS_H, MAIN_DISPLAY_COLOR_BRAND_BG) != LT7680_OK) return false;
             idx++;
             return false;
         }
@@ -7081,8 +7105,10 @@ int main(void)
                              s_frame_has_trend_update = false;
                              s_renderer.phase = RENDER_PHASE_IDLE;
                              s_display_enabled = true;
+#if K2000_DEMO_FEED
                              s_demo_last_tick = HAL_GetTick();
                              s_demo_status_tick = HAL_GetTick();
+#endif
 #endif
                              hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;

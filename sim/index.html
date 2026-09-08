@@ -49,18 +49,19 @@ function demoUptime(){const s=Math.floor((Date.now()-simStartedAt)/1000);return 
 function renderFB(ctx,source){const src=source.getImageData(0,0,960,320).data,img=ctx.createImageData(320,960);for(let y=0;y<320;y++)for(let x=0;x<960;x++){const s=(y*960+x)*4,d=(x*320+y)*4;img.data[d]=src[s];img.data[d+1]=src[s+1];img.data[d+2]=src[s+2];img.data[d+3]=255}ctx.putImageData(img,0,0)}
 function render(){
   const canvas=document.getElementById("panel"),ctx=canvas.getContext("2d");ctx.fillStyle=COLORS.bg;ctx.fillRect(0,0,960,320);
-  // 第一行：品牌 Badge（SHIFT 激活时整行蓝底、无红徽；白字 SHIFT/REAR 紧跟徽标）+ 半高分隔线 + 去重左对齐状态
+  // 第一行：品牌 Badge 恒红（SHIFT 仅分隔线之后变蓝）+ 白字 SHIFT/REAR 紧跟徽标 + 半高分隔线 + 去重左对齐状态
   const shiftOn=document.getElementById("shift").checked, rearOn=document.getElementById("rear").checked;
-  const row1bg=shiftOn?COLORS.blue:COLORS.bar;
-  ctx.fillStyle=row1bg;ctx.fillRect(0,L.statusY,960,L.statusH);
   const brand="KEITHLEY 2000";
   const sp=brand.indexOf(" "), head=sp<0?brand:brand.slice(0,sp), tail=sp<0?"":brand.slice(sp+1).trimStart();
   const redEnd=12+head.length*TEXT_W+10;
-  if(!shiftOn){ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,redEnd,L.statusH);}
-  text(ctx,head,12,0,COLORS.white);
   const x2000=redEnd+6;
-  text(ctx,tail,x2000,0,COLORS.white);
   const brandEnd=x2000+tail.length*TEXT_W;
+  const blueX=brandEnd+10;
+  ctx.fillStyle=COLORS.bar;ctx.fillRect(0,L.statusY,960,L.statusH);
+  if(shiftOn){ctx.fillStyle=COLORS.blue;ctx.fillRect(blueX,0,960-blueX,L.statusH);}
+  ctx.fillStyle=COLORS.red;ctx.fillRect(0,0,redEnd,L.statusH);
+  text(ctx,head,12,0,COLORS.white);
+  text(ctx,tail,x2000,0,COLORS.white);
   ctx.fillStyle=COLORS.grid;ctx.fillRect(brandEnd+10,Math.floor((L.statusH-12)/2),1,12);
   const activeAll=demo.on?["REMOTE","TALK","LSTN","SRQ","HOLD","TRIG","ERR","BUFFER","MATH","CONT"]:[];
   const ex=(shiftOn?"SHIFT":"")+(rearOn?(shiftOn?" ":"")+"REAR":"");
@@ -190,7 +191,7 @@ const DEMO_UNIT_COUNT=DEMO_UNITS.length,DEMO_SAMPLES_PER_UNIT=40,DEMO_FEED_PERIO
 const DEMO_RATE_TEXT={0x04:"500/s",0x02:"50/s",0x01:"5/s"};
 const demo={on:false,timer:null,sample:0,rangeVal:"AUTO",rateVal:"500/s",filt:false,rel:false,math:false,trend:[]};
 function demoPad(v,d){return String(v).padStart(d,"0")}
-function demoAxisUnit(){const u=document.getElementById("unit").value;const b=u.replace(/(DC|AC)$/,"");if(b.includes("V"))return "V";if(b.includes("A"))return "A";if(b.includes("Ω"))return "Ω";if(b.endsWith("Hz"))return "Hz";if(b.includes("°"))return "°C";if(b.includes("s"))return "s";return ""}
+function demoAxisUnit(){const u=document.getElementById("unit").value;const b=u.replace(/(DC|AC)$/,"");if(b.includes("V"))return "V";if(b.includes("A"))return "A";if(b.includes("kΩ"))return "kΩ";if(b.includes("MΩ"))return "MΩ";if(b.includes("Ω"))return "Ω";if(b.endsWith("Hz"))return "Hz";if(b.includes("°"))return "°C";if(b.includes("s"))return "s";return ""}
 function demoStep(){
  const u=DEMO_UNITS[Math.floor(demo.sample/DEMO_SAMPLES_PER_UNIT)%DEMO_UNIT_COUNT];
  const ph=demo.sample%DEMO_SAMPLES_PER_UNIT,tri=(ph<DEMO_SAMPLES_PER_UNIT/2?ph:DEMO_SAMPLES_PER_UNIT-ph)*2;

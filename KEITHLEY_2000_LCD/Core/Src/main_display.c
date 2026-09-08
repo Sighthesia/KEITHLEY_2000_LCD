@@ -157,8 +157,8 @@ const char *main_display_function_text(ui_function_t function)
     case UI_FUNCTION_AC_VOLTAGE: return "AC Voltage";
     case UI_FUNCTION_DC_CURRENT: return "DC Current";
     case UI_FUNCTION_AC_CURRENT: return "AC Current";
-    case UI_FUNCTION_2W_OHM: return "2-Wire Resistance";
-    case UI_FUNCTION_4W_OHM: return "4-Wire Resistance";
+    case UI_FUNCTION_2W_OHM: return "2W \xCE\xA9";
+    case UI_FUNCTION_4W_OHM: return "4W \xCE\xA9";
     case UI_FUNCTION_FREQUENCY: return "Frequency";
     case UI_FUNCTION_PERIOD: return "Period";
     case UI_FUNCTION_TEMPERATURE: return "Temperature";
