@@ -126,6 +126,12 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * unaffected. Keep the unit table in sync with sim/index.html. */
 #define K2000_DEMO_FEED 0U
 
+/* PERF line switch: 1 = 5 s periodic "PERF fps=..." UART dump (bench
+ * diagnosis). 0 = silent (normal/host builds). The PERF text shares the
+ * panel TX line with the key codes, so leaving it on garbles host-side
+ * key capture. Counters keep running either way; only the print is cut. */
+#define K2000_PERF_LOG 0U
+
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
  * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
@@ -137,7 +143,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * cursor storms at 50 buckets/s, single buckets get min/max-stretched ten
  * times over, and slots re-render several times per frame (visible
  * flicker). 10 Hz is the validated value (AGENTS 2026-08-22). */
-#define K2000_DEMO_INPUT_HZ 500u
+#define K2000_DEMO_INPUT_HZ 10u
 #if K2000_DEMO_FEED && (K2000_DEMO_INPUT_HZ == 0u || K2000_DEMO_INPUT_HZ > 1000u)
 #error "K2000_DEMO_INPUT_HZ must be 1..1000"
 #endif
@@ -873,6 +879,10 @@ static void perf_record_frame(void)
         print_div = (uint8_t)(print_div + 1u);
         print_this = (print_div >= 5u);
         if (print_this) print_div = 0u;
+#if !K2000_PERF_LOG
+        /* Silent build: never snapshot/print, windows just reset below. */
+        print_this = false;
+#endif
         if (!print_this)
         {
             s_loop_max_gap_ms = 0u;
