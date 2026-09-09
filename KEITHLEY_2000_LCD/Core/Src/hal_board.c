@@ -206,6 +206,11 @@ static void init_gpio(void)
     __HAL_RCC_GPIOB_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
 
+    /* Park the UART TX data latch high BEFORE the pin switches to AF: PA9
+     * floats through the clock-init window and the BSS138 stage can emit a
+     * break (0x00) on the 5V side, which the host would read as garbage. */
+    HAL_GPIO_WritePin(UART_TX_GPIO_PORT, UART_TX_PIN, GPIO_PIN_SET);
+
     /* Latest schematic: PA0..PA2 configure the ER-PCBA5981. LT7680 uses
      * PA3=RST, PA4=SCS, PA5=SCK, PA6=SDO, PA7=SDI, and PA8=INT. */
     gpio.Mode = GPIO_MODE_OUTPUT_PP;
