@@ -467,6 +467,15 @@ static uint8_t s_reading_only_page_info_lamps[2];
 static bool s_reading_only_page_trend_bg_valid[2];
 static char s_reading_only_page_trend_unit[2][TREND_UNIT_ID_MAX];
 static bool s_trend_rebuild_transaction;
+/* Commit-deadline for the transaction: auto-range hunting flips the unit
+ * identity faster than a full background drain finishes, and each flip
+ * re-arms the hold -- PRESENT bounced back to TREND forever and the panel
+ * never flipped (live black-screen with the host connected). The deadline
+ * caps one hold; coalesced rebuilds re-arm the flag but each hold is
+ * individually bounded, so a commit always lands within ~1 s. */
+#define K2000_TREND_TRANSACTION_MAX_HOLD_MS 700u
+static uint32_t s_trend_transaction_start_tick;
+static bool s_trend_rebuild_pending;
 /* The new reading is painted before the new trend background. Once the
  * background is ready, only the deferred rows need painting; replaying
  * CLEAR/VALUE/UNIT/SUFFIX doubled the gear-change work. */
@@ -537,7 +546,20 @@ static void reading_only_invalidate_trend_pages(void)
      * freezes STATUS/INFO out of the virgin pipeline, leaving the first
      * committed page without its top two rows. */
     if (s_display_enabled)
-        s_trend_rebuild_transaction = true;
+    {
+        if (!s_trend_rebuild_transaction)
+        {
+            s_trend_rebuild_transaction = true;
+            s_trend_transaction_start_tick = HAL_GetTick();
+        }
+        else
+        {
+            /* Unit flipped mid-drain: queue one follow-up rebuild instead
+             * of restarting the wipe (a restarted drain under 1 Hz churn
+             * never finishes and the transaction never clears). */
+            s_trend_rebuild_pending = true;
+        }
+    }
     s_row_snap_taken = false;
     s_row_snap_range_taken = false;
     /* NOTE: the cached unit is deliberately KEPT (rotation path): a stale
@@ -6108,6 +6130,20 @@ static void reading_only_render(void)
              * per-pass budget. */
             s_reading_only_page_trend_curve_valid[s_render_page] = true;
             s_trend_rebuild_transaction = false;
+            /* A unit flip queued during this drain gets its own fresh
+             * rebuild now (new hold window), instead of having restarted
+             * the drain in place and starving every commit. */
+            if (s_trend_rebuild_pending)
+            {
+                s_trend_rebuild_pending = false;
+                s_trend_rebuild_transaction = true;
+                s_trend_transaction_start_tick = HAL_GetTick();
+                s_trend_scroll_ms = 0u;
+                s_reading_only_trend_column = 0u;
+                s_trend_stat_snap_valid = false;
+                s_row_snap_taken = false;
+                s_row_snap_range_taken = false;
+            }
             /* The row was deliberately deferred while this transaction was
              * rebuilding. Repaint it before the first commit of the new
              * unit, so the visible page never contains mixed generations.
@@ -6250,8 +6286,20 @@ static void reading_only_render(void)
              * visible page until the hidden page contains the complete
              * trend chrome, axis and plot. Presenting each scheduler slice
              * exposes the left-to-right/top-to-bottom rebuild. */
-            s_reading_only_stage = READING_ONLY_TREND;
-            return;
+            if (HAL_GetTick() - s_trend_transaction_start_tick >=
+                K2000_TREND_TRANSACTION_MAX_HOLD_MS)
+            {
+                /* Deadline: under continuous unit churn the rebuild keeps
+                 * re-arming and the hold would starve commits forever.
+                 * Commit anyway -- a mid-rebuild trend beats a black
+                 * panel. The pending flag (if set) re-arms a fresh hold. */
+                s_trend_rebuild_transaction = false;
+            }
+            else
+            {
+                s_reading_only_stage = READING_ONLY_TREND;
+                return;
+            }
         }
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
         if (st == LT7680_OK)
