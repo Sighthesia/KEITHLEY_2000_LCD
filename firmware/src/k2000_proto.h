@@ -5,6 +5,13 @@
 
 #define K2000_PROTO_MAX_FIELD 32u
 
+/* VFD canvas: the host writes a persistent character line with an implied
+ * cursor (text advances it, 0x04+ASCII-digits repositions, 0x02 clears).
+ * The display reads the canvas back instead of chasing individual field
+ * fragments -- partial writes merge on the canvas and never overwrite the
+ * whole screen. */
+#define K2000_VFD_COLS 48u
+
 /* Status TAGs encode indicator bitmaps (one byte, bit7 = first indicator of
  * the group). 0x06=REM/TALK/LSTN/SRQ, 0x07=SHIFT/TIMER/MATH/REAR/...,
  * 0x08=HOLD/TRIG/FAST/MED/SLOW, 0x09=REL/FILT/AUTO/ERR/...,
@@ -68,3 +75,8 @@ static inline bool k2000_is_status_tag(uint8_t tag)
 void k2000_proto_init(const k2000_proto_cb_t *cb);
 void k2000_proto_reset(void);
 void k2000_proto_feed(uint8_t byte);
+
+/* Copy the current VFD line up to the segment gap (two consecutive
+ * spaces) or the end of written content, NUL-terminated. Returns the
+ * length. */
+uint8_t k2000_vfd_line(char *out, uint8_t size);

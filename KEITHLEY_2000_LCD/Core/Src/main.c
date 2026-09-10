@@ -1716,15 +1716,71 @@ static bool host_field_is_reading(const char *num, uint8_t num_len,
     }
 }
 
-static void proto_on_event(const k2000_event_t *evt)
+/* VFD-canvas reading: pull the merged host line (everything up to the
+ * two-space segment gap), parse it right-to-left, and apply it only if it
+ * is a numeric reading. Because the canvas persists, partial host updates
+ * (main digits, then units, then labels) merge instead of overwriting the
+ * whole reading -- this is what the real tube displays and why it never
+ * flickers. */
+static void host_apply_canvas_reading(void)
 {
+#if K2000_READING_ONLY_BASELINE
+    static char previous_trend_unit[TREND_UNIT_ID_MAX];
+#endif
+    char line[48];
     char num[UI_MODEL_MAX_FIELD];
     char unit[UI_MODEL_MAX_UNIT];
     uint8_t num_len;
     uint8_t unit_len;
+    uint8_t line_len;
     uint8_t special;
+
+    line_len = k2000_vfd_line(line, (uint8_t)sizeof(line));
+    if (line_len == 0u) {
+        return;
+    }
+    if (reading_is_special(line, line_len, &special)) {
+        num_len = line_len;
+        if (num_len >= sizeof(num)) {
+            num_len = (uint8_t)(sizeof(num) - 1u);
+        }
+        memcpy(num, line, num_len);
+        num[num_len] = '\0';
+        unit_len = 0u;
+        unit[0] = '\0';
+    } else {
+        reading_split(line, line_len, num, &num_len, unit, &unit_len);
+        special = 0u;
+    }
+    if (!host_field_is_reading(num, num_len, unit, unit_len)) {
+        return;
+    }
+    ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
 #if K2000_READING_ONLY_BASELINE
-    char previous_trend_unit[TREND_UNIT_ID_MAX];
+    s_reading_only_generation++;
+    s_reading_only_dirty = true;
+    if (special == 0u)
+    {
+        strncpy(previous_trend_unit, trend_buffer_display_unit(&s_trend),
+                sizeof(previous_trend_unit) - 1u);
+        previous_trend_unit[sizeof(previous_trend_unit) - 1u] = '\0';
+        (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
+        if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
+        {
+            s_trend_axis_valid = false;
+            reading_only_invalidate_trend_pages();
+            if (s_trend_pip_ready)
+                trend_pip_reset();
+        }
+    }
+#endif
+    s_ui_dirty_regions |= RENDER_DIRTY_READING;
+}
+
+static void proto_on_event(const k2000_event_t *evt)
+{
+#if K2000_READING_ONLY_BASELINE
+    (void)evt;
 #endif
 
     if (evt == 0)
@@ -1744,61 +1800,12 @@ static void proto_on_event(const k2000_event_t *evt)
             s_demo_event_reported = true;
         }
 #endif
-        /* Status-only host frames close the open field with zero payload
-         * bytes. Applying them would blank the reading (no_data flap ->
-         * visible 10 Hz flicker); a real K2000 keeps the last reading on
-         * screen until the next one arrives, so empty fields are dropped. */
-        if (evt->field.value_len == 0u)
-        {
-            break;
-        }
-        if (reading_is_special(evt->field.value, evt->field.value_len,
-                               &special))
-        {
-            num_len = evt->field.value_len;
-            if (num_len >= sizeof(num))
-                num_len = (uint8_t)(sizeof(num) - 1u);
-            memcpy(num, evt->field.value, num_len);
-            num[num_len] = '\0';
-            unit_len = 0u;
-            unit[0] = '\0';
-        }
-        else
-        {
-            reading_split(evt->field.value, evt->field.value_len, num, &num_len,
-                          unit, &unit_len);
-            special = 0u;
-        }
-        /* Label fields ("2W Ohm", "AUTO", "REMOTE", ...) must not enter
-         * the reading model (see host_field_is_reading). The model keeps
-         * the last valid reading until the next one arrives. */
-        if (!host_field_is_reading(num, num_len, unit, unit_len))
-        {
-            break;
-        }
-        ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
-#if K2000_READING_ONLY_BASELINE
-        s_reading_only_generation++;
-        s_reading_only_dirty = true;
-#endif
-        if (special == 0u)
-        {
-#if K2000_READING_ONLY_BASELINE
-            strncpy(previous_trend_unit, trend_buffer_display_unit(&s_trend),
-                    sizeof(previous_trend_unit) - 1u);
-            previous_trend_unit[sizeof(previous_trend_unit) - 1u] = '\0';
-#endif
-            (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
-#if K2000_READING_ONLY_BASELINE
-            if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
-            {
-                s_trend_axis_valid = false;
-                reading_only_invalidate_trend_pages();
-                if (s_trend_pip_ready)
-                    trend_pip_reset();
-            }
-#endif
-        }
+        /* VFD-canvas reading: the host writes positional segments over
+         * successive frames; the merged canvas line (up to the two-space
+         * segment gap) is the current reading. Parsing individual field
+         * fragments alternated main digits with labels = the "range
+         * switching" flicker. */
+        host_apply_canvas_reading();
         s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     case K2000_EVT_STATUS:

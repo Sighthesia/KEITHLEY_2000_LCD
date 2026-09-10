@@ -22,10 +22,56 @@ static k2000_state_t s_state;
 static k2000_event_t s_evt;
 static uint8_t s_evt_tag;
 
+/* VFD canvas (see k2000_proto.h). The host maintains the cursor across
+ * writes: text advances it, 0x04+ASCII-digits repositions, 0x02 clears.
+ * Content is persistent like the real tube -- partial updates merge. */
+static char s_vfd[K2000_VFD_COLS];
+static uint8_t s_vfd_cursor;
+
+static void vfd_clear(void)
+{
+    memset(s_vfd, ' ', sizeof(s_vfd));
+    s_vfd_cursor = 0u;
+}
+
+static void vfd_put(char c)
+{
+    if (s_vfd_cursor < K2000_VFD_COLS) {
+        s_vfd[s_vfd_cursor++] = c;
+    }
+}
+
+uint8_t k2000_vfd_line(char *out, uint8_t size)
+{
+    uint8_t end = K2000_VFD_COLS;
+    uint8_t n;
+    if (out == 0 || size == 0u) {
+        return 0u;
+    }
+    /* Trim trailing spaces (the canvas is space-initialised). */
+    while (end > 0u && s_vfd[end - 1u] == ' ') {
+        end--;
+    }
+    /* Cut at the segment gap: two consecutive spaces. */
+    for (n = 0u; n + 1u < end && n + 1u < size; n++) {
+        if (s_vfd[n] == ' ' && s_vfd[n + 1u] == ' ') {
+            break;
+        }
+        out[n] = s_vfd[n];
+    }
+    if (n > size - 1u) {
+        n = (uint8_t)(size - 1u);
+    }
+    out[n] = '\0';
+    /* Trailing single space is part of the segment: keep it. */
+    return n;
+}
+
 void k2000_proto_init(const k2000_proto_cb_t *cb)
 {
     s_cb = cb;
     k2000_proto_reset();
+    vfd_clear();
 }
 
 void k2000_proto_reset(void)
@@ -103,6 +149,9 @@ static bool feed_lone_text_tag(uint8_t byte)
     }
     if (type == K2000_EVT_UNKNOWN) {
         return false;
+    }
+    if (byte == K2000_TAG_FLUSH) {
+        vfd_clear();
     }
     s_evt.type = type;
     s_evt.ctrl = byte;
@@ -188,6 +237,7 @@ void k2000_proto_feed(uint8_t byte)
             } else {
                 emit_unknown(byte);
             }
+            vfd_put((char)byte);
         }
         break;
 
@@ -218,6 +268,10 @@ void k2000_proto_feed(uint8_t byte)
             emit(&s_evt);
             memset(&s_evt, 0, sizeof(s_evt));
             s_state = K2000_STATE_IDLE;
+            /* VFD cursor reposition. */
+            s_vfd_cursor = s_evt.pos < K2000_VFD_COLS
+                               ? (uint8_t)s_evt.pos
+                               : (uint8_t)(K2000_VFD_COLS - 1u);
         }
         break;
 
