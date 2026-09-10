@@ -230,6 +230,9 @@ static keypad_t s_keypad;
 #if !K2000_KEY_DEBUG
 static uint8_t s_last_key_tx_code;
 static uint32_t s_last_key_tx_tick;
+static uint32_t s_key_mask_last;
+static uint16_t s_key_forwarded;
+static uint16_t s_key_ghost_dropped;
 #endif
 static bool s_display_ready;
 static bool s_display_enabled;
@@ -7301,13 +7304,43 @@ int main(void)
                             /* Identical press burst inside the throttle
                              * window: drop the code. Releases always pass
                              * so the host never latches a held key. */
+                            s_key_ghost_dropped++;
                             continue;
                         }
                         s_last_key_tx_code = b;
                         s_last_key_tx_tick = now;
                     }
+                    s_key_forwarded++;
                     hal_uart_send(&b, 1);
                 }
+            }
+            s_key_mask_last = key_mask;
+        }
+#endif
+
+#if !K2000_KEY_DEBUG && K2000_UART_LOG
+        /* 1 Hz ghost-key audit: raw matrix, forwarded and throttled counts.
+         * A stable nonzero mask = a real level stuck (probe that column);
+         * mask=0 with rising forwarded counts = repeated transient phantoms
+         * (electrical coupling); mask=0 and no forwards = phantom lives
+         * only in the host's latch. */
+        {
+            static uint32_t s_diag_last;
+            uint32_t now_d = HAL_GetTick();
+            if (now_d - s_diag_last >= 1000u) {
+                s_diag_last = now_d;
+                hal_uart_send_text("KEYDIAG m=");
+                hal_uart_send_hex8((uint8_t)(s_key_mask_last >> 24));
+                hal_uart_send_hex8((uint8_t)(s_key_mask_last >> 16));
+                hal_uart_send_hex8((uint8_t)(s_key_mask_last >> 8));
+                hal_uart_send_hex8((uint8_t)s_key_mask_last);
+                hal_uart_send_text(" fwd=");
+                hal_uart_send_hex8((uint8_t)s_key_forwarded);
+                hal_uart_send_hex8((uint8_t)(s_key_forwarded >> 8));
+                hal_uart_send_text(" drop=");
+                hal_uart_send_hex8((uint8_t)s_key_ghost_dropped);
+                hal_uart_send_hex8((uint8_t)(s_key_ghost_dropped >> 8));
+                hal_uart_send_text("\r\n");
             }
         }
 #endif
