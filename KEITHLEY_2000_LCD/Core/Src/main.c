@@ -124,7 +124,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * the only half-height text; the mV/mA base units stay at digit size.
  * Set to 1 to enable; excluded from the normal build so the Flash budget is
  * unaffected. Keep the unit table in sync with sim/index.html. */
-#define K2000_DEMO_FEED 0U
+#define K2000_DEMO_FEED 1U
 
 /* PERF line switch: 1 = 5 s periodic "PERF fps=..." UART dump (bench
  * diagnosis). 0 = silent (normal/host builds). The PERF text shares the
@@ -7454,6 +7454,51 @@ int main(void)
             s_loop_last_tick = now_loop;
         }
         update_blink();
+        {
+            /* Freeze self-diagnostic: a frame that makes no phase progress
+             * for 2 s gets dumped (phase/item/column/stage) over the LOG
+             * uart and force-abandoned so the next frame starts fresh.
+             * Bench builds only -- text on the shared host line is poison. */
+#if K2000_UART_LOG
+            static uint32_t s_freeze_watch_start;
+            static uint8_t s_freeze_watching;
+            if (s_frame_rendering && s_renderer.phase != RENDER_PHASE_IDLE)
+            {
+                uint32_t fnow = HAL_GetTick();
+                if (!s_freeze_watching)
+                {
+                    s_freeze_watching = 1u;
+                    s_freeze_watch_start = fnow;
+                }
+                else if (fnow - s_freeze_watch_start >= 2000u)
+                {
+                    hal_uart_send_text("[FRZ] ph=");
+                    hal_uart_send_hex8((uint8_t)s_renderer.phase);
+                    hal_uart_send_text(" item=");
+                    hal_uart_send_hex8(s_render_item);
+                    hal_uart_send_text(" col=");
+                    hal_uart_send_hex8((uint8_t)s_render_column);
+                    hal_uart_send_text(" ro=");
+                    hal_uart_send_hex8((uint8_t)s_reading_only_stage);
+                    hal_uart_send_text(" vi=");
+                    hal_uart_send_hex8((uint8_t)s_reading_only_value_index);
+                    hal_uart_send_text(" err=");
+                    hal_uart_send_hex8((uint8_t)s_reading_only_last_error);
+                    hal_uart_send_text("\r\n");
+                    s_freeze_watching = 0u;
+                    s_frame_rendering = false;
+                    s_renderer.phase = RENDER_PHASE_IDLE;
+                    s_render_item = 0u;
+                    s_render_column = 0u;
+                    s_ui_dirty_regions |= RENDER_DIRTY_READING;
+                }
+            }
+            else
+            {
+                s_freeze_watching = 0u;
+            }
+#endif
+        }
         scene_mgr_render();
         /* USER CODE END WHILE */
 

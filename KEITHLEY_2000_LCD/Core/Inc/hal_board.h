@@ -8,7 +8,7 @@
  * (boot banner, STATUS/PASS/FAIL, STALL) is protocol garbage that can wedge
  * the host handshake (silent host = no beep, no frames). 0 = text dropped,
  * key bytes (hal_uart_send) unaffected. Bench diagnosis sets 1. */
-#define K2000_UART_LOG 0U
+#define K2000_UART_LOG 1U
 
 /* 0x0F-poll identity reply (V16 ROM has it, but bus captures prove the
  * real host never polls -- V16 boots silent and the host blind-streams).
