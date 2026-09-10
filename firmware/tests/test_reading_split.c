@@ -24,8 +24,29 @@ int main(void)
     assert(nl == 3 && memcmp(num, "1.5", 3) == 0);
     assert(ul == 2 && memcmp(unit, "mV", 2) == 0 && unit[2] == '\0');
 
-    /* Length-boundary safety: long numeric prefix clipped to num, long
-     * remainder clipped to unit, both NUL-terminated. */
+    /* K2000 VFD host formats (right-to-left parse). */
+    reading_split(" 0.011014 VDC  ", 15, num, &nl, unit, &ul);
+    assert(nl == 8 && memcmp(num, "0.011014", 8) == 0);
+    assert(ul == 3 && memcmp(unit, "VDC", 3) == 0);
+
+    reading_split("-030.4414mVDC. ", 15, num, &nl, unit, &ul);
+    assert(nl == 9 && memcmp(num, "-030.4414", 9) == 0);
+    assert(ul == 4 && memcmp(unit, "mVDC", 4) == 0);
+
+    reading_split("0 0.007846 VDC", 14, num, &nl, unit, &ul);
+    assert(nl == 8 && memcmp(num, "0.007846", 8) == 0);
+    assert(ul == 3 && memcmp(unit, "VDC", 3) == 0);
+
+    /* Placeholders and labels: no digit in the numeric token -> empty num. */
+    reading_split(" --.----- AAC", 13, num, &nl, unit, &ul);
+    assert(nl == 0);
+    reading_split("REV:A17   V16   ---.----mVDC", 28, num, &nl, unit, &ul);
+    assert(nl == 0);
+    reading_split("NEW CODE? N     --.----- ADC", 28, num, &nl, unit, &ul);
+    assert(nl == 0);
+
+    /* Length-boundary safety: a long numeric token clips to num, both
+     * outputs stay NUL-terminated. */
     {
         char longstr[64];
         char longnum[32], longunit[16];
@@ -33,8 +54,15 @@ int main(void)
         memset(longstr, '1', 50);
         reading_split(longstr, 50, longnum, &ln, longunit, &lu);
         assert(ln == READING_SPLIT_MAX_NUM);
-        assert(lu == READING_SPLIT_MAX_UNIT);
+        assert(lu == 0);
         assert(longnum[READING_SPLIT_MAX_NUM] == '\0');
+        assert(longunit[0] == '\0');
+
+        /* Long trailing unit clip. */
+        memset(longstr, 'V', 50);
+        reading_split(longstr, 50, longnum, &ln, longunit, &lu);
+        assert(ln == 0); /* no digits -> dropped */
+        assert(lu == READING_SPLIT_MAX_UNIT);
         assert(longunit[READING_SPLIT_MAX_UNIT] == '\0');
     }
 
