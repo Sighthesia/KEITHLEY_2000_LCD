@@ -386,6 +386,10 @@ static uint8_t s_loop_stall_printed;
 static uint32_t s_perf_fields_window;
 static uint32_t s_perf_reading_frames_window;
 static uint32_t s_perf_display_commits_window;
+/* Monotonic successful-commit counter (SWD display-health loop: never
+ * reset, unlike the window counters). 0 after boot+settle = the panel can
+ * only be black. */
+static uint32_t s_present_count_total;
 static uint32_t s_perf_axis_rebuilds_window;
 static uint32_t s_perf_trend_columns_window;
 /* Low-cost diagnosis counters. They are printed with the existing PERF
@@ -1488,6 +1492,7 @@ static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
         if (lt7680_gfx_present_page(s_render_page) != LT7680_OK)
             return;
         s_perf_display_commits_window++;
+        s_present_count_total++;
 #if K2000_DEMO_FEED
         if (!initial_frame && !s_demo_commit_reported)
         {
@@ -6317,6 +6322,7 @@ static void reading_only_render(void)
         s_frame_rendering = false;
         s_renderer.phase = RENDER_PHASE_IDLE;
         s_perf_display_commits_window++;
+        s_present_count_total++;
         perf_record_frame();
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
