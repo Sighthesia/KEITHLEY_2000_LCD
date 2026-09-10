@@ -1682,6 +1682,30 @@ static bool READING_ONLY_LEGACY begin_hidden_frame(void)
     return true;
 }
 
+/* The K2000 streams multiple display fields (reading, function label,
+ * right-column info, lamps). Only numeric readings may enter the reading
+ * model: a label like "2W Ohm" would overwrite the value, mangle the unit
+ * inference and trip the digit-charset path. Valid readings have digits;
+ * a unit must start with a unit letter (V/A/Ohm/Hz/s/C/dB + prefixes). */
+static bool host_field_is_reading(const char *num, uint8_t num_len,
+                                  const char *unit, uint8_t unit_len)
+{
+    if (num == 0 || num_len == 0u) {
+        return false;
+    }
+    if (unit == 0 || unit_len == 0u) {
+        return true;
+    }
+    switch (unit[0]) {
+    case 'V': case 'A': case 'H': case 's': case 'S': case 'C':
+    case 'm': case 'k': case 'M': case 'd': case 'u':
+        return true;
+    default:
+        /* UTF-8 leads: Ohm (CE A9), micro/degree (C2 B5/B0). */
+        return (uint8_t)unit[0] == 0xC2u || (uint8_t)unit[0] == 0xCEu;
+    }
+}
+
 static void proto_on_event(const k2000_event_t *evt)
 {
     char num[UI_MODEL_MAX_FIELD];
@@ -1734,6 +1758,13 @@ static void proto_on_event(const k2000_event_t *evt)
             reading_split(evt->field.value, evt->field.value_len, num, &num_len,
                           unit, &unit_len);
             special = 0u;
+        }
+        /* Label fields ("2W Ohm", "AUTO", "REMOTE", ...) must not enter
+         * the reading model (see host_field_is_reading). The model keeps
+         * the last valid reading until the next one arrives. */
+        if (!host_field_is_reading(num, num_len, unit, unit_len))
+        {
+            break;
         }
         ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
 #if K2000_READING_ONLY_BASELINE
@@ -2021,6 +2052,35 @@ static bool rif_text_code(const char *text, uint32_t *kind, uint16_t *code,
     return font_digit_rif_code(*text, kind, code);
 }
 
+/* Advance past the current glyph and resolve the next one. Characters
+ * outside the digit charset (host label text, special-reading letters)
+ * are SKIPPED so one odd glyph cannot tear down the whole RIF renderer
+ * (a fallback flip-flop mid-stream reads as display flicker). Returns
+ * true when the job finished. */
+static bool rif_draw_job_next_glyph(void)
+{
+    for (;;)
+    {
+        s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
+                                       FONT_DIGIT_WIDTH);
+        s_rif_draw_job.text += s_rif_draw_job.advance;
+        if (*s_rif_draw_job.text == '\0')
+        {
+            s_rif_draw_job.active = false;
+            return true;
+        }
+        if (rif_text_code(s_rif_draw_job.text,
+                          &s_rif_draw_job.kind,
+                          &s_rif_draw_job.code,
+                          &s_rif_draw_job.advance))
+        {
+            s_rif_draw_job.resolving = true;
+            s_rif_draw_job.directory_index = 0u;
+            return false;
+        }
+    }
+}
+
 static void rif_draw_fail(lt7680_status_t st)
 {
     s_rif_draw_job.active = false;
@@ -2114,8 +2174,8 @@ static bool rif_find_next_tile(void)
 
     if (s_rif_draw_job.directory_index >= s_rif_image.directory_count)
     {
-        rif_draw_fail(LT7680_ERR_PARAM);
-        return false;
+        /* Glyph absent from the image: skip it, keep the renderer alive. */
+        return rif_draw_job_next_glyph();
     }
     st = lt7680_flash_read(s_rif_image.flash_base + s_rif_image.directory_offset +
                                (uint32_t)s_rif_draw_job.directory_index * RIF_READER_ENTRY_SIZE,
@@ -2160,8 +2220,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
         if (!rif_text_code(text, &s_rif_draw_job.kind, &s_rif_draw_job.code,
                            &s_rif_draw_job.advance))
         {
-            rif_draw_fail(LT7680_ERR_PARAM);
-            return false;
+            return rif_draw_job_next_glyph();
         }
     }
     if (s_rif_draw_job.resolving)
@@ -2213,8 +2272,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                    &s_rif_draw_job.code,
                                    &s_rif_draw_job.advance))
                 {
-                    rif_draw_fail(LT7680_ERR_PARAM);
-                    return false;
+                    return rif_draw_job_next_glyph();
                 }
                 s_rif_draw_job.resolving = true;
                 s_rif_draw_job.directory_index = 0u;
@@ -2299,8 +2357,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                            &s_rif_draw_job.code,
                                            &s_rif_draw_job.advance))
                         {
-                            rif_draw_fail(LT7680_ERR_PARAM);
-                            return false;
+                            return rif_draw_job_next_glyph();
                         }
                         s_rif_draw_job.resolving = true;
                         s_rif_draw_job.directory_index = 0u;
@@ -2324,8 +2381,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                        &s_rif_draw_job.code,
                                        &s_rif_draw_job.advance))
                     {
-                        rif_draw_fail(LT7680_ERR_PARAM);
-                        return false;
+                        return rif_draw_job_next_glyph();
                     }
                     s_rif_draw_job.resolving = true;
                     s_rif_draw_job.directory_index = 0u;
@@ -2353,8 +2409,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
                                &s_rif_draw_job.code,
                                &s_rif_draw_job.advance))
             {
-                rif_draw_fail(LT7680_ERR_PARAM);
-                return false;
+                return rif_draw_job_next_glyph();
             }
             s_rif_draw_job.resolving = true;
             s_rif_draw_job.directory_index = 0u;
@@ -2452,8 +2507,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
     if (!rif_text_code(s_rif_draw_job.text, &s_rif_draw_job.kind,
                        &s_rif_draw_job.code, &s_rif_draw_job.advance))
     {
-        rif_draw_fail(LT7680_ERR_PARAM);
-        return false;
+        return rif_draw_job_next_glyph();
     }
     s_rif_draw_job.resolving = true;
     s_rif_draw_job.directory_index = 0u;
@@ -6626,8 +6680,25 @@ static void reading_scene_render(void)
         {
             if (s_render_item == 1u)
             {
-                DRAW_ITEM(ui_draw_digits(s_frame.start_x, s_frame.reading_y,
-                                         s_frame.value, s_frame.value_color));
+                /* Overflow/open-lead text ("OVR.FLW", "OPEN", ...) has no
+                 * digit glyphs: draw it with the text font so the RIF
+                 * charset path is never fed letters (that tore the whole
+                 * RIF renderer down = visible flicker). */
+                if (s_frame.special != 0u)
+                {
+                    DRAW_ITEM(ui_draw_text(
+                        s_frame.start_x,
+                        (uint16_t)(s_frame.reading_y +
+                                   (FONT_DIGIT_HEIGHT - FONT_TEXT_HEIGHT) / 2u),
+                        s_frame.value, s_frame.value_color));
+                }
+                else
+                {
+                    DRAW_ITEM(ui_draw_digits(s_frame.start_x,
+                                             s_frame.reading_y,
+                                             s_frame.value,
+                                             s_frame.value_color));
+                }
                 return;
             }
             if (s_render_item == 2u)

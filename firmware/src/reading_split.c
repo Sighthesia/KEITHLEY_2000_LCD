@@ -53,6 +53,29 @@ bool reading_is_special(const char *num, uint8_t len, uint8_t *special)
     if (num == 0) {
         return false;
     }
+    /* K2000 VFD spellings (V16 ROM): overflow variants and open-lead. The
+     * display may append the function after a gap ("OV.RFLW  DCV"), so the
+     * overflow check is a prefix match. */
+    if (len >= 6u && memcmp(num, "OVRFLW", 6u) == 0) {
+        if (special != 0) {
+            *special = 1u;
+        }
+        return true;
+    }
+    if (len >= 6u && (memcmp(num, "OVR.FL", 6u) == 0 ||
+                      memcmp(num, "OV.RFL", 6u) == 0)) {
+        if (special != 0) {
+            *special = 1u;
+        }
+        return true;
+    }
+    if (len >= 2u && (memcmp(num, "OP", 2u) == 0 ||
+                      memcmp(num, "op", 2u) == 0)) {
+        if (special != 0) {
+            *special = 2u;
+        }
+        return true;
+    }
     if (len == 8u && memcmp(num, "OVERFLOW", 8u) == 0) {
         if (special != 0) {
             *special = 1u;

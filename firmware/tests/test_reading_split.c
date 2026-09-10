@@ -44,6 +44,11 @@ int main(void)
 
     uint8_t sp;
     assert(reading_is_special("OVERFLOW", 8, &sp) && sp == 1);
+    assert(reading_is_special("OVRFLW", 6, &sp) && sp == 1);
+    assert(reading_is_special("OVR.FLW", 7, &sp) && sp == 1);
+    assert(reading_is_special("OV.RFLW  DCV", 12, &sp) && sp == 1);
+    assert(reading_is_special("OPEN", 4, &sp) && sp == 2);
+    assert(reading_is_special("open", 4, &sp) && sp == 2);
     assert(reading_is_special("----", 4, &sp) && sp == 2);
     assert(!reading_is_special("1.23", 4, &sp) && sp == 0);
 
