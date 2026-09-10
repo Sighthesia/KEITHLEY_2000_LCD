@@ -565,20 +565,21 @@ void hal_uart_rx_irq(void)
         /* Reading DR after SR clears RXNE and all receive error conditions. */
         uint8_t byte = (uint8_t)(USART1->DR & 0xFFu);
 #if K2000_IDENTITY_REPLY
-        /* V16 ROM contains a 0x0F -> 12-byte identity reply path, but bus
-         * captures show the real host NEVER polls it: V16 boots silent
-         * (only 3 NUL glitch bytes) and the host blind-streams frames.
-         * Answering the poll injected 24 bytes into the host parser and
-         * derailed it into the cal-code ("NEW CODE?") state. Default OFF,
-         * V16-boot-faithful. */
+        /* V16-faithful: reply to the FIRST 0x0F poll only (its IRQ latches
+         * a done-flag). The host polls twice at boot; a second reply lands
+         * mid-stream and derails its parser (cal-prompt state). */
         if (byte == 0x0Fu) {
+            static bool s_identity_sent;
             static const uint8_t identity[12] = {
                 '2', '0', '0', '0', ' ', 'V', '1', '6',
                 ' ', ' ', 0x80u, 0x00u
             };
-            uint8_t i;
-            for (i = 0u; i < sizeof(identity); i++) {
-                uart_put_byte(identity[i]);
+            if (!s_identity_sent) {
+                uint8_t i;
+                s_identity_sent = true;
+                for (i = 0u; i < sizeof(identity); i++) {
+                    uart_put_byte(identity[i]);
+                }
             }
         }
 #endif
