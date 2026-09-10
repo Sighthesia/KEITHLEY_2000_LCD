@@ -564,11 +564,13 @@ void hal_uart_rx_irq(void)
     if ((sr & (USART_SR_RXNE | USART_SR_ORE | USART_SR_NE | USART_SR_FE)) != 0u) {
         /* Reading DR after SR clears RXNE and all receive error conditions. */
         uint8_t byte = (uint8_t)(USART1->DR & 0xFFu);
-        /* V16-faithful handshake: the host polls 0x0F and expects the
-         * 12-byte identity string back. V16 answers from the IRQ itself,
-         * so the reply works even while display bring-up is still running
-         * (the host's query timeout is shorter than our boot). Bounded
-         * TXE waits; ~12.5ms at 9600, same as upstream. */
+#if K2000_IDENTITY_REPLY
+        /* V16 ROM contains a 0x0F -> 12-byte identity reply path, but bus
+         * captures show the real host NEVER polls it: V16 boots silent
+         * (only 3 NUL glitch bytes) and the host blind-streams frames.
+         * Answering the poll injected 24 bytes into the host parser and
+         * derailed it into the cal-code ("NEW CODE?") state. Default OFF,
+         * V16-boot-faithful. */
         if (byte == 0x0Fu) {
             static const uint8_t identity[12] = {
                 '2', '0', '0', '0', ' ', 'V', '1', '6',
@@ -579,6 +581,7 @@ void hal_uart_rx_irq(void)
                 uart_put_byte(identity[i]);
             }
         }
+#endif
         uart_rx_queue_push_isr(&s_uart_rx, byte);
     }
 }

@@ -10,6 +10,11 @@
  * key bytes (hal_uart_send) unaffected. Bench diagnosis sets 1. */
 #define K2000_UART_LOG 0U
 
+/* 0x0F-poll identity reply (V16 ROM has it, but bus captures prove the
+ * real host never polls -- V16 boots silent and the host blind-streams).
+ * Replying derailed the host into the cal-prompt state. Keep 0. */
+#define K2000_IDENTITY_REPLY 0U
+
 /* Keep the verified RGB timing orientation.  The panel's MADCTL command is
  * not used here because this RGB path did not accept the swapped 960x320
  * timing; coordinate rotation must be solved in the LT7680 framebuffer path. */
