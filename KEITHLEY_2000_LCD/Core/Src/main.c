@@ -224,8 +224,12 @@ static void refresh_runtime_snapshot(void);
 /* USER CODE BEGIN 0 */
 static ui_model_t s_ui;
 static keypad_t s_keypad;
-/* Ghost-press fences (see the keypad block in the main loop). */
+/* Ghost-press fences: keys stay suppressed until the display pipeline is
+ * up AND settled. The render burst (GE/BTE/SDRAM) couples into the 33k
+ * pull-down columns exactly when host frames start arriving -- a boot-time
+ * quiet period alone expires BEFORE that moment (boot = 5.3 s). */
 #define K2000_KEY_BOOT_QUIET_MS 2000u
+#define K2000_KEY_SETTLE_AFTER_DISPLAY_MS 1500u
 #define K2000_KEY_REPEAT_MS 300u
 #if !K2000_KEY_DEBUG
 static uint8_t s_last_key_tx_code;
@@ -233,6 +237,7 @@ static uint32_t s_last_key_tx_tick;
 static uint32_t s_key_mask_last;
 static uint16_t s_key_forwarded;
 static uint16_t s_key_ghost_dropped;
+static uint32_t s_display_on_tick;
 #endif
 static bool s_display_ready;
 static bool s_display_enabled;
@@ -7223,6 +7228,9 @@ int main(void)
                              s_frame_has_trend_update = false;
                              s_renderer.phase = RENDER_PHASE_IDLE;
                              s_display_enabled = true;
+#if !K2000_KEY_DEBUG
+                             s_display_on_tick = HAL_GetTick();
+#endif
 #if K2000_DEMO_FEED
                              s_demo_last_tick = HAL_GetTick();
                              s_demo_status_tick = HAL_GetTick();
@@ -7299,7 +7307,9 @@ int main(void)
              * the host latches that as a held key + auto-repeat. Two fences:
              * a boot quiet period (the power-on relay storm) and a repeat
              * throttle on identical press bursts. */
-            if (HAL_GetTick() >= K2000_KEY_BOOT_QUIET_MS)
+            if (s_display_enabled &&
+                HAL_GetTick() - s_display_on_tick >=
+                    K2000_KEY_SETTLE_AFTER_DISPLAY_MS)
             {
                 while ((code = keypad_scan(&s_keypad, key_mask,
                                            HAL_GetTick())) != 0) {
