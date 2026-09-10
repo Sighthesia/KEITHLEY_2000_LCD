@@ -224,6 +224,13 @@ static void refresh_runtime_snapshot(void);
 /* USER CODE BEGIN 0 */
 static ui_model_t s_ui;
 static keypad_t s_keypad;
+/* Ghost-press fences (see the keypad block in the main loop). */
+#define K2000_KEY_BOOT_QUIET_MS 2000u
+#define K2000_KEY_REPEAT_MS 300u
+#if !K2000_KEY_DEBUG
+static uint8_t s_last_key_tx_code;
+static uint32_t s_last_key_tx_tick;
+#endif
 static bool s_display_ready;
 static bool s_display_enabled;
 static bool s_initial_page_pending;
@@ -7276,10 +7283,31 @@ int main(void)
             uint32_t key_mask = 0u;
             int code;
             (void)hal_keypad_read_mask(&key_mask);
-            while ((code = keypad_scan(&s_keypad, key_mask,
-                                       HAL_GetTick())) != 0) {
-                uint8_t b = (uint8_t)code;
-                hal_uart_send(&b, 1);
+            /* Ghost-press mitigation (bench findings): the instrument's own
+             * relay/supply transients couple into the 33k pull-down columns
+             * and can hold a cell "pressed" past the debounce window, and
+             * the host latches that as a held key + auto-repeat. Two fences:
+             * a boot quiet period (the power-on relay storm) and a repeat
+             * throttle on identical press bursts. */
+            if (HAL_GetTick() >= K2000_KEY_BOOT_QUIET_MS)
+            {
+                while ((code = keypad_scan(&s_keypad, key_mask,
+                                           HAL_GetTick())) != 0) {
+                    uint8_t b = (uint8_t)code;
+                    uint32_t now = HAL_GetTick();
+                    if (code != (int)KEYPAD_RELEASE_CODE) {
+                        if (now - s_last_key_tx_tick < K2000_KEY_REPEAT_MS &&
+                            b == s_last_key_tx_code) {
+                            /* Identical press burst inside the throttle
+                             * window: drop the code. Releases always pass
+                             * so the host never latches a held key. */
+                            continue;
+                        }
+                        s_last_key_tx_code = b;
+                        s_last_key_tx_tick = now;
+                    }
+                    hal_uart_send(&b, 1);
+                }
             }
         }
 #endif
