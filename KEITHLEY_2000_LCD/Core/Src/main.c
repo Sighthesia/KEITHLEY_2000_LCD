@@ -124,7 +124,7 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * the only half-height text; the mV/mA base units stay at digit size.
  * Set to 1 to enable; excluded from the normal build so the Flash budget is
  * unaffected. Keep the unit table in sync with sim/index.html. */
-#define K2000_DEMO_FEED 1U
+#define K2000_DEMO_FEED 0U
 
 /* PERF line switch: 1 = 5 s periodic "PERF fps=..." UART dump (bench
  * diagnosis). 0 = silent (normal/host builds). The PERF text shares the
