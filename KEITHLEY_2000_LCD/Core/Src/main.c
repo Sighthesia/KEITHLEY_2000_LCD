@@ -1710,6 +1710,14 @@ static void proto_on_event(const k2000_event_t *evt)
             s_demo_event_reported = true;
         }
 #endif
+        /* Status-only host frames close the open field with zero payload
+         * bytes. Applying them would blank the reading (no_data flap ->
+         * visible 10 Hz flicker); a real K2000 keeps the last reading on
+         * screen until the next one arrives, so empty fields are dropped. */
+        if (evt->field.value_len == 0u)
+        {
+            break;
+        }
         if (reading_is_special(evt->field.value, evt->field.value_len,
                                &special))
         {
