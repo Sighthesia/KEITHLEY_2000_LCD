@@ -174,6 +174,9 @@ void k2000_proto_feed(uint8_t byte)
         s_state = K2000_STATE_IDLE;
         memset(&s_evt, 0, sizeof(s_evt));
         s_evt_tag = 0;
+        /* 0x0D is a carriage return: each host frame rewrites the line
+         * from column 0 (bus captures: no POS tags in reading frames). */
+        s_vfd_cursor = 0u;
         return;
     }
 
