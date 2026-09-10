@@ -17,6 +17,15 @@
 
 void hal_board_init(void);
 void hal_panel_init(void);
+/* Boot cosmetics: park the shared LT7680/panel reset line LOW before any
+ * slow boot work runs, so the LT7680 cannot stream its default colour-bar
+ * test pattern (or stale warm-reboot SDRAM pixels) to the backlit panel. */
+void hal_display_early_reset_hold(void);
+/* Pulsed reset + earliest-accepted display blank (REG[12h]=0x08 verified
+ * by readback). Replaces lt7680_reset() + late blank in the normal boot;
+ * false when the blank never confirmed (boot still proceeds via
+ * lt7680_wait_ready and re-asserts the blank afterwards). */
+bool hal_display_boot_blank(void);
 void hal_uart_send(const uint8_t *data, uint16_t len);
 void hal_uart_send_text(const char *text);
 void hal_uart_send_hex8(uint8_t value);

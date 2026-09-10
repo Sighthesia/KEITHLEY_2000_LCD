@@ -272,10 +272,15 @@ static void init_gpio(void)
     HAL_GPIO_WritePin(SHT3X_GPIO_PORT, SHT3X_SCL_PIN | SHT3X_SDA_PIN,
                       GPIO_PIN_SET);
 
-    /* Defaults: both chip selects idle high, LT7680 reset released. */
+    /* Defaults: chip selects idle high. LCM_RES parks LOW: the shared
+     * LT7680/panel reset stays asserted from GPIO init until the boot
+     * sequence releases it with the display blank already applied (see
+     * hal_display_boot_blank). Releasing it here instead would let the
+     * LT7680 stream its default colour-bar pattern for the whole slow
+     * boot banner (visible bars/stale-pixel debris on the backlit panel). */
     HAL_GPIO_WritePin(LCD_CS_GPIO_PORT, LCD_CS_PIN, GPIO_PIN_SET);
     HAL_GPIO_WritePin(LT7680_CS_GPIO_PORT, LT7680_CS_PIN, GPIO_PIN_SET);
-    HAL_GPIO_WritePin(LCM_RES_GPIO_PORT, LCM_RES_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(LCM_RES_GPIO_PORT, LCM_RES_PIN, GPIO_PIN_RESET);
 
     /* USART1 TX on PA9 (AF push-pull), RX on PA10 (input). */
     gpio.Mode = GPIO_MODE_AF_PP;
@@ -341,6 +346,76 @@ void hal_board_init(void)
 #endif
     lt7680_bus_init(&s_lt7680_io);
     sht3x_init(&s_sht3x_io, SHT3X_ADDR_DEFAULT);
+}
+
+void hal_display_early_reset_hold(void)
+{
+    /* Park the shared LT7680/panel reset line LOW before anything slow can
+     * run (HSE lock, the ~150 ms of 9600-bd boot banner prints). From
+     * power-on until this point the LT7680 has already left its own
+     * power-on reset (PA3 floats high through the board pull-up while the
+     * MCU boots) and streams its default register state: display ON with
+     * the colour-bar test pattern at default panel timing -- seen as
+     * rolling colour bars in part of the screen -- and a warm reboot
+     * first leaks stale SDRAM pixels (broken green glyph debris). On an
+     * MCU-only reset this must re-assert the hold. Runs before HAL_Init,
+     * so no SysTick/HAL_Delay is available -- and none is needed. */
+    GPIO_InitTypeDef gpio = {0};
+
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    gpio.Mode = GPIO_MODE_OUTPUT_PP;
+    gpio.Pull = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+    gpio.Pin = LCM_RES_PIN;
+    /* Write ODR first: the pin leaves reset state already driving LOW. */
+    HAL_GPIO_WritePin(LCM_RES_GPIO_PORT, LCM_RES_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_Init(LCM_RES_GPIO_PORT, &gpio);
+}
+
+bool hal_display_boot_blank(void)
+{
+    /* V16-verified reset timings: hold low >=10 ms; the LT7680 accepts SPI
+     * traffic ~50 ms after release. During that settle its default register
+     * state streams the colour-bar test pattern, so REG[12h]=0x08 must
+     * become the FIRST accepted transaction -- not the step after
+     * read_status/wait_ready. From +10 ms after release, retry the blank
+     * write with readback verification every 5 ms; a too-early write is
+     * simply ignored by the chip, and the loop gives up at 100 ms (the
+     * caller's wait_ready still gates the rest of the flow). */
+    uint32_t start;
+
+    hal_rst(false);
+    HAL_Delay(10u);
+    hal_rst(true);
+    start = HAL_GetTick();
+    HAL_Delay(10u);
+    for (;;)
+    {
+        uint8_t value = 0xFFu;
+
+        if (lt7680_write_reg(0x12u, 0x08u) == LT7680_OK &&
+            lt7680_read_reg(0x12u, &value) == LT7680_OK &&
+            value == 0x08u)
+        {
+            break;
+        }
+        if ((uint32_t)(HAL_GetTick() - start) >= 100u)
+        {
+            return false;
+        }
+        HAL_Delay(5u);
+    }
+    /* Honour the remaining settle time so downstream traffic (status read,
+     * panel init) keeps the verified post-release margin. */
+    {
+        uint32_t elapsed = (uint32_t)(HAL_GetTick() - start);
+
+        if (elapsed < 60u)
+        {
+            HAL_Delay(60u - elapsed);
+        }
+    }
+    return true;
 }
 
 bool hal_sht3x_read_milli(int32_t *temp_milli_c, int32_t *rh_milli_pct)

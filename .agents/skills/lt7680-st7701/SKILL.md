@@ -284,10 +284,25 @@ frame; profile the full interval on target before advertising 10Hz/5Hz.
 
 ### Boot sequence cosmetics
 
-Write `REG[12h]=0x08` (display off, test pattern off) immediately after
-`lt7680_reset()`+`wait_ready` and do NOT call `show_color_bars()` during a
-normal boot: the internal colour-bar test pattern flashes bars on screen
-before the demo blanks the display. With display held off the whole init,
-the panel stays black until the final `0x48` after the image is drawn.
-Reset-order: reset → blank 0x12=0x08 → panel init → gfx init → clear+draw
-(display off) → 0x48.
+Power-on has an uncontrolled window: while the MCU boots, PA3 floats high
+through the board pull-up, so the LT7680 leaves its own power-on reset and
+streams its default register state — **display ON + colour-bar test pattern
+at default panel timing** — to the already-backlit panel (rolling bars in
+part of the screen); a warm reboot first leaks stale SDRAM pixels (broken
+green glyph debris). Verified order that keeps the panel dark:
+
+1. First statement of `main()` (before `HAL_Init`): drive LCM_RES LOW
+   (`hal_display_early_reset_hold()`) so nothing slow (HSE lock, the 9600-bd
+   banner ≈150 ms of prints) runs with the chips out of reset. `init_gpio()`
+   parks LCM_RES LOW too — it must NOT release reset.
+2. `hal_display_boot_blank()`: hold low ≥10 ms, release, then make
+   `REG[12h]=0x08` the **FIRST accepted SPI transaction**: from +10 ms after
+   release retry write + readback-verify every 5 ms (upper bound 100 ms),
+   then pad to ≥60 ms post-release before further traffic.
+3. Panel init (`0x29` last) → gfx init → clear + draw with display off →
+   `0x48`. Re-asserting `REG[12h]=0x08` right before panel init is kept as
+   belt-and-braces.
+
+Do NOT restore the old order (release reset in `init_gpio`, blank only after
+`read_status`/`wait_ready`): every power-on then shows the default colour-bar
+pattern for 50-200 ms.

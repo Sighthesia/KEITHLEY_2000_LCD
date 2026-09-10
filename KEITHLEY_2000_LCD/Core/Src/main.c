@@ -7018,6 +7018,10 @@ int main(void)
 {
 
     /* USER CODE BEGIN 1 */
+    /* First statement of the boot: hold the shared LT7680/panel reset low
+     * so no default colour-bar pattern / stale SDRAM pixels can leak to
+     * the backlit panel while the clock starts and the banner prints. */
+    hal_display_early_reset_hold();
     ui_model_init(&s_ui);
     trend_buffer_init(&s_trend);
     render_scheduler_init(&s_renderer);
@@ -7081,11 +7085,16 @@ int main(void)
 #endif
         hal_uart_send_text("\r\nLT7680 SELF-TEST\r\n");
 
-        st = lt7680_reset();
-        if (st != LT7680_OK)
+        /* Pulsed reset, then blank REG[12h]=0x08 as the FIRST accepted
+         * SPI transaction (readback-verified). The old order waited out
+         * the 50 ms post-reset settle (plus the 9600-bd banner) with the
+         * LT7680 in its default state -- display ON + colour-bar test
+         * pattern -- which showed as rolling bars / stale-pixel debris
+         * on the backlit panel at every power-on. */
+        if (!hal_display_boot_blank())
         {
-            hal_uart_send_text("FAIL reset=");
-            hal_uart_send_hex8((uint8_t)st);
+            hal_uart_send_text("FAIL reset-blank=");
+            hal_uart_send_hex8((uint8_t)LT7680_ERR_TIMEOUT);
             hal_uart_send_text("\r\n");
         }
         else
@@ -7111,10 +7120,13 @@ int main(void)
                 }
                 else
                 {
-                    /* Blank the display right after reset so the LT7680's default
-                     * register state (colour-bar test pattern / display on) never
-                     * flashes during the ~200ms panel init or gfx init. 0x08 = init
-                     * display ctrl value (bit3 scan dir set, bits7/6/5/4/0-2 clear). */
+                    /* Belt-and-braces: the blank was already applied and
+                     * verified inside hal_display_boot_blank(); re-assert
+                     * it right before the panel wakes so the LT7680's
+                     * default register state (colour-bar test pattern /
+                     * display on) can never flash during panel init and
+                     * gfx init. 0x08 = init display ctrl value (bit3 scan
+                     * dir set, bits7/6/5/4/0-2 clear). */
                     (void)lt7680_write_reg(0x12u, 0x08u);
                     hal_panel_init();
                     st = lt7680_gfx_init(&panel);
