@@ -732,6 +732,7 @@ static void perf_u32(char *out, uint32_t value, uint8_t digits)
 
 static void perf_send_u32(uint32_t value)
 {
+#if K2000_UART_LOG
     char text[11];
     uint8_t first = 0u;
     uint8_t i;
@@ -743,6 +744,12 @@ static void perf_send_u32(uint32_t value)
     } while (value != 0u && first < sizeof(text));
     for (i = first; i > 0u; i--)
         hal_uart_send(&((uint8_t *)text)[i - 1u], 1u);
+#else
+    /* Host build: digit payloads bypass the send_text stub and would hit
+     * the shared line raw (observed as "[STALL] gap=3519 tick=3519" minus
+     * its dropped text = the mystery "35193519"). Silence like the rest. */
+    (void)value;
+#endif
 }
 
 static void READING_ONLY_LEGACY perf_format_display(char *out)
