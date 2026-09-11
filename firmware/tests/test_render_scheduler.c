@@ -6,6 +6,13 @@ int main(void)
 {
     render_scheduler_t scheduler;
 
+    /* A newer generation never cancels the active frame. The transaction may
+     * hold PRESENT only before the 700 ms deadline; at the boundary it must
+     * become reachable so continuous host input cannot starve commits. */
+    assert(render_scheduler_should_hold_transaction(true, 699u, 700u));
+    assert(!render_scheduler_should_hold_transaction(true, 700u, 700u));
+    assert(!render_scheduler_should_hold_transaction(false, 0u, 700u));
+
     render_scheduler_init(&scheduler);
     assert(scheduler.phase == RENDER_PHASE_INITIAL_STATUS);
     assert(!scheduler.trend_resume_at_columns);

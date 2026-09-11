@@ -1849,21 +1849,6 @@ static void host_apply_canvas_reading(void)
     s_ui_dirty_regions |= RENDER_DIRTY_READING;
 }
 
-/* A pending snapshot means the hidden page contains mixed generations.
- * Abandon it before PRESENT so the last visible page remains complete; IDLE
- * will plan the newest snapshot on the next frame. */
-static void reading_only_defer_pending_frame(void)
-{
-    s_bitmap_job.active = false;
-    s_rif_draw_job.active = false;
-    s_frame_rendering = false;
-    s_is_header_only = false;
-    s_reading_only_dirty = true;
-    s_reading_only_pending_latest = false;
-    s_renderer.phase = RENDER_PHASE_IDLE;
-    s_reading_only_stage = READING_ONLY_IDLE;
-}
-
 static void proto_on_event(const k2000_event_t *evt)
 {
 #if K2000_READING_ONLY_BASELINE
@@ -5629,11 +5614,11 @@ static void reading_only_render(void)
         s_dbg_last_stage = cur < 9u ? cur : 0u;
         s_dbg_last_render_tick = now;
     }
-    if (s_frame_rendering && s_reading_only_pending_latest)
-    {
-        reading_only_defer_pending_frame();
-        return;
-    }
+    /* `pending_latest` is a frame-boundary coalescing bit. Do not inspect it
+     * here: every stage below must reach its safe PRESENT boundary, even when
+     * the host advances generation on every visit. The production renderer has
+     * no smaller seam than this function; the scheduler seam test locks the
+     * corresponding invariant down for the host build. */
     if (s_reading_only_stage == READING_ONLY_STATUS) {
         if (!reading_only_render_status_bar()) {
             if (s_reading_only_io_error)
@@ -6076,6 +6061,7 @@ static void reading_only_render(void)
         uint32_t now = HAL_GetTick();
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
+        bool transaction_deadline_released = false;
 
         /* Commit deadline, checked at the ENTRY of TREND (the old deadline
          * lived in PRESENT, which a starved drain can never reach -- the
@@ -6085,18 +6071,19 @@ static void reading_only_render(void)
          * black panel. */
         if (s_trend_rebuild_transaction &&
             now - s_trend_transaction_start_tick >=
-                K2000_TREND_TRANSACTION_MAX_HOLD_MS)
+             K2000_TREND_TRANSACTION_MAX_HOLD_MS)
         {
             s_trend_rebuild_transaction = false;
             s_trend_rebuild_pending = false;
             s_hold_deadline_fired++;
+            transaction_deadline_released = true;
         }
 
         /* Apply the debounced unit flip: the unit has held still for the
          * settle window, so one clean rebuild now. During the hold the
          * chart stays frozen on the old unit and frames commit at full
          * speed. */
-        if (s_trend_unit_flip_pending &&
+        if (!transaction_deadline_released && s_trend_unit_flip_pending &&
             now - s_trend_unit_flip_tick >= K2000_TREND_UNIT_SETTLE_MS)
         {
             s_trend_unit_flip_pending = false;
@@ -6218,7 +6205,7 @@ static void reading_only_render(void)
             s_trend_axis_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
             /* ADR-0007: left gutter shows max/mid/min of the resident span. */
             main_display_format_linear_trend_labels(&s_frame);
-            if (axis_expanded)
+            if (axis_expanded && !transaction_deadline_released)
             {
                 /* Clean background; the sweep's own axis-move detector
                  * restarts a live-window rescan at the new scale (no
@@ -6400,28 +6387,18 @@ static void reading_only_render(void)
     }
     case READING_ONLY_PRESENT:
     {
-        if (s_trend_rebuild_transaction && !s_reading_only_pending_latest)
+        if (render_scheduler_should_hold_transaction(
+                s_trend_rebuild_transaction,
+                HAL_GetTick() - s_trend_transaction_start_tick,
+                K2000_TREND_TRANSACTION_MAX_HOLD_MS))
         {
             s_dbg_present_hold_window++;
             /* A range/unit change is a visual transaction: keep the old
              * visible page until the hidden page contains the complete
              * trend chrome, axis and plot. Presenting each scheduler slice
              * exposes the left-to-right/top-to-bottom rebuild. */
-            if (HAL_GetTick() - s_trend_transaction_start_tick >=
-                K2000_TREND_TRANSACTION_MAX_HOLD_MS)
-            {
-                /* Deadline: under continuous unit churn the rebuild keeps
-                 * re-arming and the hold would starve commits forever.
-                 * Commit anyway -- a mid-rebuild trend beats a black
-                 * panel. The pending flag (if set) re-arms a fresh hold. */
-                s_trend_rebuild_transaction = false;
-                s_hold_deadline_fired++;
-            }
-            else
-            {
-                s_reading_only_stage = READING_ONLY_TREND;
-                return;
-            }
+            s_reading_only_stage = READING_ONLY_TREND;
+            return;
         }
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
         if (st == LT7680_OK)

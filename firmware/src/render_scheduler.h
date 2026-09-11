@@ -59,5 +59,11 @@ void render_scheduler_kick(render_scheduler_t *scheduler);
  * item 0 on every preempt (livelock under sustained input); between
  * boundaries arriving snapshots wait coalesced. */
 bool render_scheduler_yield_trend(render_scheduler_t *scheduler);
+/* A newer host generation is coalesced at the frame boundary. It never
+ * cancels an active frame; only an incomplete trend transaction before its
+ * deadline may hold PRESENT. */
+bool render_scheduler_should_hold_transaction(bool transaction_active,
+                                              uint32_t elapsed_ms,
+                                              uint32_t max_hold_ms);
 void render_scheduler_complete_phase(render_scheduler_t *scheduler);
 bool render_scheduler_take_initial_complete(render_scheduler_t *scheduler);

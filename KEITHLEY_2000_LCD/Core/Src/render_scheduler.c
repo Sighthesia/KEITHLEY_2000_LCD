@@ -72,6 +72,13 @@ bool render_scheduler_yield_trend(render_scheduler_t *scheduler)
     return true;
 }
 
+bool render_scheduler_should_hold_transaction(bool transaction_active,
+                                              uint32_t elapsed_ms,
+                                              uint32_t max_hold_ms)
+{
+    return transaction_active && elapsed_ms < max_hold_ms;
+}
+
 void render_scheduler_complete_phase(render_scheduler_t *scheduler)
 {
     if (scheduler == 0) return;
