@@ -22,3 +22,5 @@ void reading_split(const char *ascii, uint8_t len, char *num, uint8_t *num_len,
  * red), "----" -> 2 (render grey), anything else -> 0. Returns true when a
  * special reading matched and stores the code in *special (when non-NULL). */
 bool reading_is_special(const char *num, uint8_t len, uint8_t *special);
+bool reading_normalize_unit(const char *unit, uint8_t len, char *out,
+                            uint8_t out_size);

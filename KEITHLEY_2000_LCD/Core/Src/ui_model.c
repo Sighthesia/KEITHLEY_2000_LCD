@@ -1,6 +1,7 @@
 #include <string.h>
 
 #include "k2000_proto.h"
+#include "reading_split.h"
 #include "ui_model.h"
 
 void ui_model_init(ui_model_t *m)
@@ -102,6 +103,8 @@ void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
         return;
     }
     m->special = special;
+    m->trigger_dot = special != 0u && num != 0 && num_len > 0u &&
+                     num[num_len - 1u] == '.';
     m->any_message = true;
     if (num != 0 && num_len > 0u) {
         n = num_len;
@@ -122,6 +125,13 @@ void ui_model_apply_reading(ui_model_t *m, const char *num, uint8_t num_len,
         m->unit[n] = '\0';
     } else {
         m->unit[0] = '\0';
+    }
+    {
+        char normalized[sizeof(m->unit)];
+        if (reading_normalize_unit(m->unit, (uint8_t)strlen(m->unit),
+                                   normalized, sizeof(normalized))) {
+            memcpy(m->unit, normalized, strlen(normalized) + 1u);
+        }
     }
     normalize_resistance_unit(m->unit, sizeof(m->unit));
     m->function_id = ui_model_infer_function(m->unit);

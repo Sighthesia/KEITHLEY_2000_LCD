@@ -58,6 +58,7 @@ typedef struct {
     bool buffer_recall;
     /* 0 = normal reading, 1 = OVERFLOW (red), 2 = "----" no reading (grey). */
     uint8_t special;
+    bool trigger_dot;
     /* VFD digit-segment control tag bits (0x18 first-only, 0x1A 2nd-only,
      * 0x7F full digit). Kept raw for a faithful log; TFT rendering may ignore.
      */

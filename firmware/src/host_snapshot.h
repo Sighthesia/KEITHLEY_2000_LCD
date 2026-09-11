@@ -18,6 +18,7 @@ typedef struct {
     /* 0 = normal numeric reading, 1 = OVERFLOW, 2 = no-reading (OPEN/----).
      * Special records carry the raw line in `value` and no unit. */
     uint8_t special;
+    bool trigger_dot;
     /* Monotonic count of accepted records; 0 before the first one. */
     uint32_t generation;
     /* True once at least one record has been accepted. */

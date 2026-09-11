@@ -124,6 +124,19 @@ int main(void)
     assert(reading_is_special("open", 4, &sp) && sp == 2);
     assert(reading_is_special("----", 4, &sp) && sp == 2);
     assert(!reading_is_special("1.23", 4, &sp) && sp == 0);
+    assert(reading_is_special("OVRFLW C.", 9, &sp) && sp == 1);
+    assert(reading_is_special("OVR.FLW MOHM.", 13, &sp) && sp == 1);
+    assert(!reading_is_special("1.23VDC.", 8, &sp) && sp == 0);
+    {
+        char canonical[8];
+        assert(reading_normalize_unit("vAC", 3, canonical, sizeof(canonical)) &&
+               strcmp(canonical, "VAC") == 0);
+        assert(reading_normalize_unit("vDC", 3, canonical, sizeof(canonical)) &&
+               strcmp(canonical, "VDC") == 0);
+        assert(reading_normalize_unit("v", 1, canonical, sizeof(canonical)) &&
+               strcmp(canonical, "V") == 0);
+        assert(!reading_normalize_unit("VAC", 3, canonical, sizeof(canonical)));
+    }
 
     /* Precise recognition: prefix-only or shorter matches are rejected. */
     assert(!reading_is_special("OVERFLOWING", 11, &sp));
@@ -177,6 +190,7 @@ int main(void)
             assert(s_replay_snap.special == 0u);
             assert(strcmp(s_replay_snap.value, "0.011014") == 0);
             assert(strcmp(s_replay_snap.unit, "VDC") == 0);
+            assert(!s_replay_snap.trigger_dot);
         }
 
         /* mVDC reading with leading space and trailing cursor dot: a unit
@@ -199,11 +213,20 @@ int main(void)
             assert(s_replay_snap.unit[0] == '\0');
         }
 
-        /* NEW CODE? banner with blink markers around the 'N': labels and
-         * placeholders are dropped whole. The bare 'N' opens a field that
-         * the closing blink tag flushes as an empty FIELD event -- main.c
-         * re-reads the (unchanged) canvas, and the identical-record
-         * dedup keeps the generation still. */
+        /* Special suffix dots are trigger content; ordinary numeric dots are
+         * never promoted to trigger state. */
+        {
+            assert(host_snapshot_parse(&s_replay_snap, "OVRFLW C.", 9u));
+            assert(s_replay_snap.special == 1u && s_replay_snap.trigger_dot);
+            assert(host_snapshot_parse(&s_replay_snap, "OVR.FLW MOHM.", 13u));
+            assert(s_replay_snap.special == 1u && s_replay_snap.trigger_dot);
+            assert(host_snapshot_parse(&s_replay_snap, "1.23VDC.", 8u));
+            assert(!s_replay_snap.trigger_dot);
+        }
+        host_snapshot_init(&s_replay_snap);
+        k2000_proto_init(&s_replay_cb);
+
+        /* Labels and placeholders are dropped whole after the special replay. */
         {
             k2000_proto_feed(0x0D);
             k2000_proto_feed(0x0B);
@@ -212,9 +235,8 @@ int main(void)
             k2000_proto_feed(0x0B);
             k2000_proto_feed(0x00);
             replay_feed_text("NEW CODE? N  --.----- ADC");
-            assert(s_replay_snap.generation == 3u);
-            assert(s_replay_snap.special == 2u); /* unchanged: still OPEN */
-            assert(strcmp(s_replay_snap.value, "OPEN") == 0);
+            assert(s_replay_snap.generation == 0u);
+            assert(!s_replay_snap.valid);
         }
 
         /* Continuous burst (AUTO range hunting, ~27 records/s): every
@@ -233,7 +255,7 @@ int main(void)
                 replay_feed_text(burst[gi]);
             }
             /* Newest record is the trailing VDC frame. */
-            assert(s_replay_snap.generation == 6u);
+            assert(s_replay_snap.generation == 3u);
             assert(s_replay_snap.special == 0u);
             assert(strcmp(s_replay_snap.value, "0.011014") == 0);
             assert(strcmp(s_replay_snap.unit, "VDC") == 0);

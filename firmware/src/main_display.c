@@ -363,6 +363,7 @@ void main_display_format(const ui_model_t *model, main_display_frame_t *frame)
     }
     frame->unit[frame->unit_len] = '\0';
     frame->special = model->special;
+    frame->trigger_active = model->trig || model->trigger_dot;
     frame->no_data = !model->any_message || frame->value_len == 0u;
     frame->value_color = main_display_special_color(model->special);
     frame->reading_y = MAIN_DISPLAY_READING_VALUE_Y;

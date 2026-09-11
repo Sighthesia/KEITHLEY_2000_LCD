@@ -1826,8 +1826,13 @@ static void host_apply_canvas_reading(void)
                            (uint8_t)strlen(s_host_snapshot.value),
                            s_host_snapshot.unit,
                            (uint8_t)strlen(s_host_snapshot.unit),
-                           s_host_snapshot.special);
+                            s_host_snapshot.special);
 #if K2000_READING_ONLY_BASELINE
+    if (s_host_snapshot.trigger_dot)
+    {
+        s_trig_dot_phase = !s_trig_dot_phase;
+        s_trig_dot_pending = true;
+    }
     s_reading_only_dirty = true;
     if (s_host_snapshot.special == 0u)
     {
@@ -2117,6 +2122,7 @@ static bool ui_draw_bitmap_slice(bitmap_job_t *job, uint16_t x, uint16_t y,
 static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
                          uint16_t color)
 {
+    if (text == 0 || text[0] == '\0') return true;
     return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 0u);
 }
 
@@ -2298,6 +2304,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
     (void)color;
 #endif
 
+    if (text == 0 || text[0] == '\0') return true;
     if (!s_rif_draw_job.active)
     {
         s_rif_draw_job.text = text;
@@ -2607,6 +2614,7 @@ static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
 static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color)
 {
+    if (text == 0 || text[0] == '\0') return true;
     return s_rif_ready ? ui_draw_external_digits(x, y, text, color)
                        : ui_draw_text(x, y, text, color);
 }
@@ -3177,8 +3185,9 @@ static void rif_init(void)
 }
 
 static bool READING_ONLY_LEGACY ui_draw_half(uint16_t x, uint16_t y, const char *text,
-                         uint16_t color)
+                          uint16_t color)
 {
+    if (text == 0 || text[0] == '\0') return true;
     return ui_draw_bitmap_slice(&s_bitmap_job, x, y, text, color, 2u);
 }
 
@@ -4573,7 +4582,7 @@ static uint8_t row2_info_lamps(void)
     return (uint8_t)((s_frame.status_active[7u] ? 1u : 0u) |
                      (s_frame.status_active[6u] ? 2u : 0u) |
                      (s_frame.status_active[11u] ? 4u : 0u) |
-                     (s_frame.status_active[5u] ? 8u : 0u));
+                     (s_frame.trigger_active ? 8u : 0u));
 }
 
 /* Row-2 fixed cells (ADR-0007): positions never move — only text changes.
@@ -4671,7 +4680,7 @@ static bool reading_only_render_info_panel(void)
         s_reading_only_page_info_lamps[s_render_page] == row2_info_lamps()) {
         /* Content identical: only the TRIGGER dot may need a repaint (blink
          * phase toggled). Single 8x8 fill, no full row redraw. */
-        bool trig = s_frame.status_active[5u];
+        bool trig = s_frame.trigger_active;
         int8_t want = !trig ? (int8_t)-1 : (s_trig_dot_phase ? (int8_t)1 : (int8_t)0);
         if (s_reading_only_page_trig_dot[s_render_page] == want) {
             s_trig_dot_pending = false;
@@ -4850,15 +4859,15 @@ static bool reading_only_render_info_panel(void)
     if (idx == 20u) {
         if (page_valid &&
             ((s_reading_only_page_info_lamps[s_render_page] & 8u) != 0u) ==
-                s_frame.status_active[5u]) { idx++; return false; }
-        bool trig = s_frame.status_active[5u];
+                 s_frame.trigger_active) { idx++; return false; }
+        bool trig = s_frame.trigger_active;
         if (!ui_draw_text(row2_trig_text_x(), row2_text_y(), "TRIGGER",
                           trig ? MAIN_DISPLAY_COLOR_GREEN :
                                  MAIN_DISPLAY_COLOR_MUTED)) return false;
         idx++; return false;
     }
     if (idx == 21u) {
-        bool trig = s_frame.status_active[5u];
+        bool trig = s_frame.trigger_active;
         bool dot_on = trig && s_trig_dot_phase;
         if (!trig)
         {
@@ -4892,7 +4901,7 @@ static bool reading_only_render_info_panel(void)
     s_reading_only_page_rate[s_render_page][sizeof(s_reading_only_page_rate[0])-1u] = '\0';
     s_reading_only_page_info_lamps[s_render_page] = row2_info_lamps();
     s_reading_only_page_trig_dot[s_render_page] =
-        s_frame.status_active[5u] ? (s_trig_dot_phase ? (int8_t)1 : (int8_t)0) : (int8_t)-1;
+        s_frame.trigger_active ? (s_trig_dot_phase ? (int8_t)1 : (int8_t)0) : (int8_t)-1;
     s_trig_dot_pending = false;
     s_reading_only_page_info_valid[s_render_page] = true;
     idx = 0u;
@@ -5949,10 +5958,17 @@ static void reading_only_render(void)
                             s_frame.value_color &&
                         s_reading_only_page_value[s_render_page][index] ==
                             glyph[0];
-            if (!same && !ui_draw_digits(
-                              (uint16_t)(s_frame.start_x +
-                                         (uint16_t)index * FONT_DIGIT_WIDTH),
-                              s_frame.reading_y, glyph, s_frame.value_color))
+            if (!same && !(s_frame.special != 0u
+                               ? ui_draw_text(
+                                     (uint16_t)(s_frame.start_x +
+                                                (uint16_t)index * FONT_TEXT_WIDTH),
+                                     (uint16_t)(s_frame.reading_y +
+                                                (FONT_DIGIT_HEIGHT - FONT_TEXT_HEIGHT) / 2u),
+                                     glyph, s_frame.value_color)
+                               : ui_draw_digits(
+                                     (uint16_t)(s_frame.start_x +
+                                                (uint16_t)index * FONT_DIGIT_WIDTH),
+                                     s_frame.reading_y, glyph, s_frame.value_color)))
             {
                 if (s_reading_only_io_error)
                     reading_only_abort_frame(s_reading_only_last_error);
@@ -5988,7 +6004,7 @@ static void reading_only_render(void)
         s_reading_only_stage = READING_ONLY_UNIT;
         return;
     case READING_ONLY_UNIT:
-        if (!s_frame.no_data &&
+        if (!s_frame.no_data && s_frame.special == 0u &&
             !ui_draw_digits(s_frame.end_x, s_frame.reading_y, s_frame.unit,
                             s_frame.value_color))
         {
@@ -6011,7 +6027,7 @@ static void reading_only_render(void)
                                      suffix_x &&
                                  s_reading_only_page_suffix_color[s_render_page] ==
                                      s_frame.value_color;
-        if (!s_frame.no_data && s_frame.unit_suffix[0] != '\0' &&
+        if (!s_frame.no_data && s_frame.special == 0u && s_frame.unit_suffix[0] != '\0' &&
             !suffix_same &&
             !ui_draw_half(suffix_x, MAIN_DISPLAY_DCAC_Y, s_frame.unit_suffix,
                           s_frame.value_color))
@@ -6649,7 +6665,7 @@ static void reading_scene_render(void)
             DRAW_ITEM(ui_draw_text(710u, 0u, "CONT", MAIN_DISPLAY_COLOR_GREEN));
             return;
         case 8u:
-            DRAW_ITEM(ui_draw_text(788u, 0u, "TRIG", s_frame.status_active[5] ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED));
+            DRAW_ITEM(ui_draw_text(788u, 0u, "TRIG", s_frame.trigger_active ? MAIN_DISPLAY_COLOR_GREEN : MAIN_DISPLAY_COLOR_MUTED));
             return;
         default:
             render_scheduler_complete_phase(&s_renderer);
@@ -7167,7 +7183,8 @@ static void update_blink(void)
     {
         s_trig_dot_tick = now;
         s_trig_dot_phase = !s_trig_dot_phase;
-        if (status_bar_active(&s_ui.status, 0x08u, 0x08u))
+        if (status_bar_active(&s_ui.status, 0x08u, 0x08u) ||
+            s_ui.trigger_dot)
         {
             s_reading_only_dirty = true;
             s_trig_dot_pending = true;

@@ -77,6 +77,7 @@ int main(void)
     assert(strcmp(frame.unit, "V") == 0);
     assert(strcmp(frame.unit_suffix, "DC") == 0);
     assert(frame.unit_len == 1u);
+    assert(frame.trigger_active); /* status TRIG is one side of the OR */
     assert(frame.reading_y == MAIN_DISPLAY_READING_VALUE_Y);
     assert(strcmp(frame.function, "DC Voltage") == 0);
     assert(strcmp(frame.function_line1, "DC") == 0);
@@ -131,6 +132,20 @@ int main(void)
     assert(ui_model_infer_function("mV") == UI_FUNCTION_DC_VOLTAGE);
 
     assert(ui_model_infer_function("VAC") == UI_FUNCTION_AC_VOLTAGE);
+    ui_model_init(&model);
+    ui_model_apply_reading(&model, "1.0", 3u, "VAC", 3u, 0u);
+    main_display_format(&model, &frame);
+    assert(strcmp(frame.unit, "V") == 0);
+    assert(strcmp(frame.unit_suffix, "AC") == 0);
+    ui_model_apply_reading(&model, "OVRFLW C.", 9u, "", 0u, 1u);
+    main_display_format(&model, &frame);
+    assert(frame.trigger_active);
+    ui_model_apply_status(&model, 0x08u, 0x00u);
+    main_display_format(&model, &frame);
+    assert(frame.trigger_active);
+    ui_model_apply_reading(&model, "OVRFLW C", 8u, "", 0u, 1u);
+    main_display_format(&model, &frame);
+    assert(!frame.trigger_active);
     assert(ui_model_infer_function("ADC") == UI_FUNCTION_DC_CURRENT);
     assert(ui_model_infer_function("AAC") == UI_FUNCTION_AC_CURRENT);
     assert(ui_model_infer_function("OHM") == UI_FUNCTION_2W_OHM);

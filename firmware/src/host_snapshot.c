@@ -65,7 +65,7 @@ static bool record_is_reading(const char *num, uint8_t num_len,
 
 static void store_record(host_snapshot_t *snap, const char *value,
                          uint8_t value_len, const char *unit,
-                         uint8_t unit_len, uint8_t special)
+                         uint8_t unit_len, uint8_t special, bool trigger_dot)
 {
     uint8_t n;
 
@@ -88,6 +88,7 @@ static void store_record(host_snapshot_t *snap, const char *value,
     snap->unit[n] = '\0';
 
     snap->special = special;
+    snap->trigger_dot = trigger_dot;
     snap->generation++;
     snap->valid = true;
 }
@@ -108,6 +109,8 @@ bool host_snapshot_parse(host_snapshot_t *snap, const char *line,
     uint8_t num_len;
     uint8_t unit_len;
     uint8_t special;
+    bool trigger_dot;
+    char normalized_unit[UI_MODEL_MAX_UNIT];
 
     if (snap == 0 || line == 0 || len == 0u) {
         return false;
@@ -117,24 +120,31 @@ bool host_snapshot_parse(host_snapshot_t *snap, const char *line,
          * without a unit: overwrite the snapshot whole. Dedup compares
          * against the stored copy bounded by len (the caller's buffer is
          * not assumed NUL-terminated). */
+        trigger_dot = len > 0u && line[len - 1u] == '.';
         if (snap->valid && snap->special == special &&
+            snap->trigger_dot == trigger_dot &&
             (uint8_t)strlen(snap->value) == len &&
             memcmp(snap->value, line, len) == 0) {
             return false;
         }
-        store_record(snap, line, len, "", 0u, special);
+        store_record(snap, line, len, "", 0u, special, trigger_dot);
         return true;
     }
     reading_split(line, len, num, &num_len, unit, &unit_len);
+    num[num_len] = '\0';
+    unit[unit_len] = '\0';
+    if (reading_normalize_unit(unit, unit_len, normalized_unit,
+                               sizeof(normalized_unit))) {
+        memcpy(unit, normalized_unit, strlen(normalized_unit) + 1u);
+        unit_len = (uint8_t)strlen(unit);
+    }
     if (!record_is_reading(num, num_len, unit, unit_len)) {
         return false;
     }
-    num[num_len] = '\0';
-    unit[unit_len] = '\0';
     if (record_matches(snap, num, unit, 0u)) {
         return false;
     }
     /* One atomic record: value and unit always come from this line. */
-    store_record(snap, num, num_len, unit, unit_len, 0u);
+    store_record(snap, num, num_len, unit, unit_len, 0u, false);
     return true;
 }

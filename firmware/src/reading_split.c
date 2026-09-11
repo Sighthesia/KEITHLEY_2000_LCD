@@ -108,46 +108,82 @@ void reading_split(const char *ascii, uint8_t len, char *num, uint8_t *num_len,
 
 bool reading_is_special(const char *num, uint8_t len, uint8_t *special)
 {
+    uint8_t start = 0u;
+    uint8_t end = len;
+    uint8_t special_len = 0u;
+    uint8_t span;
+    const char *special_text = 0;
+
     if (special != 0) {
         *special = 0;
     }
     if (num == 0) {
         return false;
     }
-    /* K2000 VFD spellings (V16 ROM): overflow variants and open-lead. The
-     * display may append the function after a gap ("OV.RFLW  DCV"), so the
-     * overflow check is a prefix match. */
-    if (len >= 6u && memcmp(num, "OVRFLW", 6u) == 0) {
+    while (start < end && num[start] == ' ') start++;
+    while (end > start && num[end - 1u] == '.') end--;
+    span = (uint8_t)(end - start);
+    if (span >= 6u && memcmp(num + start, "OVRFLW", 6u) == 0) {
+        special_text = "OVRFLW";
+        special_len = 6u;
+    } else if (span >= 7u &&
+               memcmp(num + start, "OVR.FLW", 7u) == 0) {
+        special_text = "OVR.FLW";
+        special_len = 7u;
+    } else if (span >= 7u &&
+               memcmp(num + start, "OV.RFLW", 7u) == 0) {
+        special_text = "OV.RFLW";
+        special_len = 7u;
+    }
+    if (special_text != 0 && (span == special_len ||
+                              num[start + special_len] == ' ')) {
         if (special != 0) {
             *special = 1u;
         }
         return true;
     }
-    if (len >= 6u && (memcmp(num, "OVR.FL", 6u) == 0 ||
-                      memcmp(num, "OV.RFL", 6u) == 0)) {
-        if (special != 0) {
-            *special = 1u;
-        }
+    if (span >= 2u && (memcmp(num + start, "OP", 2u) == 0 ||
+                              memcmp(num + start, "op", 2u) == 0)) {
+        if (special != 0) *special = 2u;
         return true;
     }
-    if (len >= 2u && (memcmp(num, "OP", 2u) == 0 ||
-                      memcmp(num, "op", 2u) == 0)) {
+    if (span == 4u && (memcmp(num + start, "OPEN", 4u) == 0 ||
+                              memcmp(num + start, "open", 4u) == 0)) {
         if (special != 0) {
             *special = 2u;
         }
         return true;
     }
-    if (len == 8u && memcmp(num, "OVERFLOW", 8u) == 0) {
+    if (span == 8u && memcmp(num + start, "OVERFLOW", 8u) == 0) {
         if (special != 0) {
             *special = 1u;
         }
         return true;
     }
-    if (len == 4u && memcmp(num, "----", 4u) == 0) {
+    if (span == 4u && memcmp(num + start, "----", 4u) == 0) {
         if (special != 0) {
             *special = 2u;
         }
         return true;
     }
     return false;
+}
+
+bool reading_normalize_unit(const char *unit, uint8_t len, char *out,
+                            uint8_t out_size)
+{
+    const char *canonical = 0;
+    uint8_t n;
+
+    if (out == 0 || out_size == 0u) return false;
+    out[0] = '\0';
+    if (unit == 0) return false;
+    if (len == 1u && unit[0] == 'v') canonical = "V";
+    else if (len == 3u && memcmp(unit, "vAC", 3u) == 0) canonical = "VAC";
+    else if (len == 3u && memcmp(unit, "vDC", 3u) == 0) canonical = "VDC";
+    if (canonical == 0) return false;
+    n = (uint8_t)strlen(canonical);
+    if (n >= out_size) return false;
+    memcpy(out, canonical, n + 1u);
+    return true;
 }

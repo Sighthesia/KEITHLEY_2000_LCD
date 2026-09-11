@@ -165,6 +165,7 @@ typedef struct {
     uint8_t value_len;
     uint8_t unit_len;
     uint8_t special;
+    bool trigger_active;
     bool no_data;
     uint16_t value_color;
     uint16_t start_x;
