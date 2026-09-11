@@ -390,6 +390,11 @@ static uint32_t s_perf_display_commits_window;
  * reset, unlike the window counters). 0 after boot+settle = the panel can
  * only be black. */
 static uint32_t s_present_count_total;
+/* Stage residency census + abort/hold-deadline counters (see
+ * reading_only_render): all monotonic, read over SWD. */
+static uint16_t s_stage_entries[9];
+static uint16_t s_abort_total;
+static uint16_t s_hold_deadline_fired;
 static uint32_t s_perf_axis_rebuilds_window;
 static uint32_t s_perf_trend_columns_window;
 /* Low-cost diagnosis counters. They are printed with the existing PERF
@@ -542,6 +547,17 @@ static void reading_only_invalidate_trend_pages(void)
 {
     uint8_t page;
 
+    /* Mid-drain churn (auto-range flips the unit identity ~1 Hz): never
+     * reset drain progress here. Resetting scroll/column/bg_valid on every
+     * flip starved the background rebuild forever and the transaction
+     * hold turned into a commit livelock (black panel). Queue one
+     * follow-up rebuild instead; it is armed when the current drain
+     * completes. */
+    if (s_trend_rebuild_transaction)
+    {
+        s_trend_rebuild_pending = true;
+        return;
+    }
     s_trend_scroll_ms = 0u;
     s_reading_only_trend_column = 0u;
     s_trend_stat_snap_valid = false;
@@ -551,18 +567,8 @@ static void reading_only_invalidate_trend_pages(void)
      * committed page without its top two rows. */
     if (s_display_enabled)
     {
-        if (!s_trend_rebuild_transaction)
-        {
-            s_trend_rebuild_transaction = true;
-            s_trend_transaction_start_tick = HAL_GetTick();
-        }
-        else
-        {
-            /* Unit flipped mid-drain: queue one follow-up rebuild instead
-             * of restarting the wipe (a restarted drain under 1 Hz churn
-             * never finishes and the transaction never clears). */
-            s_trend_rebuild_pending = true;
-        }
+        s_trend_rebuild_transaction = true;
+        s_trend_transaction_start_tick = HAL_GetTick();
     }
     s_row_snap_taken = false;
     s_row_snap_range_taken = false;
@@ -1221,6 +1227,7 @@ static bool s_rif_dma_probe_passed;
 static void reading_only_abort_frame(lt7680_status_t error)
 {
     s_reading_only_render_errors++;
+    s_abort_total++;
     s_reading_only_last_error = error;
     s_reading_only_dirty = true;
     s_reading_only_stage = READING_ONLY_IDLE;
@@ -5211,8 +5218,16 @@ static bool reading_only_render_trend_background(void)
         pending_unit[0] = '\0';
         last_page = s_render_page;
     }
-    if (strcmp(pending_unit, unit) != 0)
+    if (strcmp(pending_unit,
+               s_reading_only_page_trend_unit[s_render_page]) != 0)
     {
+        /* Restart the pass only when the PAGE's cached identity changed
+         * (real new pass / sibling switch). Churn of the BUFFER's display
+         * unit mid-pass must NOT reset idx: under ~1 Hz auto-range
+         * hunting the drain would restart forever, the background would
+         * never go valid, and the commit livelock (black panel) would
+         * return. Finish the pass; the queued pending rebuild re-arms for
+         * the new unit right after the commit. */
         idx = 0u;
         strncpy(pending_unit, unit, TREND_UNIT_ID_MAX - 1u);
         pending_unit[TREND_UNIT_ID_MAX - 1u] = '\0';
@@ -5541,6 +5556,11 @@ static int16_t internal_temperature_read(void)
 static void reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
+
+    /* Stage residency census (SWD diagnostics): one increment per call.
+     * A stage whose successor never receives entries is where the frame
+     * machine is stuck. */
+    s_stage_entries[s_reading_only_stage]++;
 
     if (!s_display_ready)
         return;
@@ -5992,6 +6012,21 @@ static void reading_only_render(void)
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
 
+        /* Commit deadline, checked at the ENTRY of TREND (the old deadline
+         * lived in PRESENT, which a starved drain can never reach -- the
+         * host-connected black screen). Whatever the drain is doing, once
+         * the transaction hold expires we drop it and let this slice walk
+         * its normal tail into PRESENT: a mid-rebuild trend always beats a
+         * black panel. */
+        if (s_trend_rebuild_transaction &&
+            now - s_trend_transaction_start_tick >=
+                K2000_TREND_TRANSACTION_MAX_HOLD_MS)
+        {
+            s_trend_rebuild_transaction = false;
+            s_trend_rebuild_pending = false;
+            s_hold_deadline_fired++;
+        }
+
         /* Stale-composition kill: a rotation sample that lands mid-pipeline
          * leaves s_frame on the old unit while the trend buffer already
          * carries the new one. Finishing that composition presents a mixed
@@ -6299,6 +6334,7 @@ static void reading_only_render(void)
                  * Commit anyway -- a mid-rebuild trend beats a black
                  * panel. The pending flag (if set) re-arms a fresh hold. */
                 s_trend_rebuild_transaction = false;
+                s_hold_deadline_fired++;
             }
             else
             {

@@ -34,10 +34,17 @@ A_INIT=$(sym s_initial_page_pending)
 A_DISP=$(sym s_display_due_tick)
 A_TEMP=$(sym s_temperature_tick)
 A_TICK=$(sym uwTick)
+A_ENTRIES=$(sym s_stage_entries)
+A_ABORT=$(sym s_abort_total)
+A_DEADLINE=$(sym s_hold_deadline_fired)
+A_TXN=$(sym s_trend_rebuild_transaction)
 
-echo "== reset + settle ${SETTLE}s =="
-openocd -f openocd.cfg -c "init" -c "reset" -c "sleep 200" -c "resume" \
-    -c "shutdown" >/dev/null 2>&1
+echo "== AIRCR reset + settle ${SETTLE}s =="
+# `reset`/`reset halt` are unreliable on this board (swd reset config);
+# a direct AIRCR SYSRESETREQ works and boots the freshly flashed image.
+openocd -f openocd.cfg -c "init" -c "halt" \
+    -c "mww 0xE000ED0C 0x05FA0004" -c "sleep 300" \
+    -c "resume" -c "shutdown" >/dev/null 2>&1
 sleep "$SETTLE"
 
 OUT=$(openocd -f openocd.cfg -c "init" -c "halt" \
@@ -49,18 +56,22 @@ OUT=$(openocd -f openocd.cfg -c "init" -c "halt" \
     -c "mdb $A_INIT 1" \
     -c "mdw $A_DISP 1" \
     -c "mdw $A_TEMP 1" \
-    -c "resume" -c "shutdown" 2>/dev/null)
+    -c "mdh $A_ABORT 1" \
+    -c "mdh $A_DEADLINE 1" \
+    -c "mdb $A_TXN 1" \
+    -c "mdh $A_ENTRIES 9" \
+    -c "resume" -c "shutdown" 2>&1)
 
 echo "$OUT" | grep "^0x"
 
-TICK=$(echo "$OUT" | awk -v a="$A_TICK" '$1==a {print $2}')
-PRESENT=$(echo "$OUT" | awk -v a="$A_PRESENT" '$1==a {print $2}')
-STAGE=$(echo "$OUT" | awk -v a="$A_STAGE" '$1==a {print $2}')
-DIRTY=$(echo "$OUT" | awk -v a="$A_DIRTY" '$1==a {print $2}')
-FR=$(echo "$OUT" | awk -v a="$A_FR" '$1==a {print $2}')
-INIT=$(echo "$OUT" | awk -v a="$A_INIT" '$1==a {print $2}')
-DUE=$(echo "$OUT" | awk -v a="$A_DISP" '$1==a {print $2}')
-TEMP=$(echo "$OUT" | awk -v a="$A_TEMP" '$1==a {print $2}')
+TICK=$(echo "$OUT" | awk -v a="$A_TICK" '$1 ~ a":" {print $2}')
+PRESENT=$(echo "$OUT" | awk -v a="$A_PRESENT" '$1 ~ a":" {print $2}')
+STAGE=$(echo "$OUT" | awk -v a="$A_STAGE" '$1 ~ a":" {print $2}')
+DIRTY=$(echo "$OUT" | awk -v a="$A_DIRTY" '$1 ~ a":" {print $2}')
+FR=$(echo "$OUT" | awk -v a="$A_FR" '$1 ~ a":" {print $2}')
+INIT=$(echo "$OUT" | awk -v a="$A_INIT" '$1 ~ a":" {print $2}')
+DUE=$(echo "$OUT" | awk -v a="$A_DISP" '$1 ~ a":" {print $2}')
+TEMP=$(echo "$OUT" | awk -v a="$A_TEMP" '$1 ~ a":" {print $2}')
 
 echo
 echo "tick=$TICK present_total=$PRESENT stage=$STAGE dirty=$DIRTY frame_rendering=$FR init_pending=$INIT"
@@ -72,4 +83,11 @@ if [ "${PRESENT:-0}" -gt 0 ] 2>/dev/null; then
     echo "VERDICT: GREEN ($PRESENT commits -- panel has been lit)"
 else
     echo "VERDICT: RED (zero commits -- panel can only be black)"
+fi
+
+ENTRIES=$(echo "$OUT" | awk -v a="$A_ENTRIES" '$1 ~ a":" {for (i=2; i<=NF; i++) printf "%s ", $i; print ""}')
+if [ -n "$ENTRIES" ]; then
+    echo "stage entries [IDLE STATUS INFO CLEAR VALUE UNIT SUFFIX TREND PRESENT]:"
+    echo "  $ENTRIES"
+    echo "  abort_total=$(echo "$OUT" | awk -v a="$A_ABORT" '$1 ~ a":" {print $2}')  hold_deadline_fired=$(echo "$OUT" | awk -v a="$A_DEADLINE" '$1 ~ a":" {print $2}')  txn=$(echo "$OUT" | awk -v a="$A_TXN" '$1 ~ a":" {print $2}')"
 fi
