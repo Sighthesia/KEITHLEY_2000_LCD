@@ -269,12 +269,13 @@ void k2000_proto_feed(uint8_t byte)
         if (byte >= '0' && byte <= '9') {
             s_evt.pos = (uint16_t)(s_evt.pos * 10u + (uint8_t)(byte - '0'));
         } else {
+            uint16_t pos = s_evt.pos;
             emit(&s_evt);
             memset(&s_evt, 0, sizeof(s_evt));
             s_state = K2000_STATE_IDLE;
             /* VFD cursor reposition. */
-            s_vfd_cursor = s_evt.pos < K2000_VFD_COLS
-                               ? (uint8_t)s_evt.pos
+            s_vfd_cursor = pos < K2000_VFD_COLS
+                               ? (uint8_t)pos
                                : (uint8_t)(K2000_VFD_COLS - 1u);
         }
         break;

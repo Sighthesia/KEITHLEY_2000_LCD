@@ -1876,6 +1876,7 @@ static void proto_on_event(const k2000_event_t *evt)
     case K2000_EVT_STATUS:
         ui_model_apply_status(&s_ui, evt->status_tag, evt->status_value);
         s_ui_dirty_regions |= RENDER_DIRTY_STATUS;
+        s_reading_only_dirty = true;
         break;
     case K2000_EVT_CURSOR:
         ui_model_apply_cursor(&s_ui, evt->pos);

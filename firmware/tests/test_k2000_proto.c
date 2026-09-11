@@ -110,6 +110,30 @@ int main(void)
     k2000_proto_feed('A');
     assert(s_pos_val == 3);
 
+    /* POS must update the persistent canvas cursor after the event payload is
+     * cleared: a subsequent field character belongs at the requested column. */
+    {
+        char line[24];
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        k2000_proto_feed('A');
+        k2000_proto_feed('B');
+        k2000_proto_feed('C');
+        k2000_proto_feed(0x04u);
+        k2000_proto_feed('0');
+        k2000_proto_feed('0');
+        k2000_proto_feed('3');
+        k2000_proto_feed('A'); /* terminates POS */
+        k2000_proto_feed(0x01u); /* field tag */
+        k2000_proto_feed('Z');
+        assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 4u);
+        assert(line[0] == 'A');
+        assert(line[1] == 'B');
+        assert(line[2] == 'C');
+        assert(line[3] == 'Z');
+    }
+
     /* Reading field still works: 0x0D then ASCII "1.23". */
     k2000_proto_init(&s_cb);
     k2000_proto_feed(0x0Du);
