@@ -543,6 +543,19 @@ static bool s_trend_axis_valid;
 static float s_trend_axis_min;
 static float s_trend_axis_max;
 static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
+/* Reading-unit hysteresis. Host auto-range oscillation (open leads)
+ * flips the unit at ~1 Hz forever; every flip re-plans the reading band
+ * and starves the resumable suffix draw (torn VD/VDC, widening sync
+ * rects) and the trend rebuilds (Waiting-for-data flicker). Gate at the
+ * application layer: samples whose unit has held for
+ * K2000_READING_UNIT_SETTLE_MS pass; the rest are dropped whole (value
+ * + unit stay a consistent pair). During oscillation the display locks
+ * onto whichever unit came first and keeps updating from those samples;
+ * a genuine range change (>=300 ms dwell) follows within 300 ms. */
+#define K2000_READING_UNIT_SETTLE_MS 300u
+static char s_reading_disp_unit[TREND_UNIT_ID_MAX];
+static char s_reading_cand_unit[TREND_UNIT_ID_MAX];
+static uint32_t s_reading_cand_tick;
 static bool s_reading_only_page_trend_curve_valid[2];
 #define TREND_PIP_SOURCE_ADDRESS 0x00400000u
 #define TREND_PIP_SOURCE_WIDTH 96u
@@ -1793,6 +1806,34 @@ static bool host_field_is_reading(const char *num, uint8_t num_len,
  * (main digits, then units, then labels) merge instead of overwriting the
  * whole reading -- this is what the real tube displays and why it never
  * flickers. */
+/* Reading-unit hysteresis gate (see the state block above). */
+static bool reading_unit_gate(const char *unit)
+{
+    if (s_reading_disp_unit[0] == '\0' ||
+        strcmp(unit, s_reading_disp_unit) == 0)
+    {
+        strncpy(s_reading_disp_unit, unit,
+                sizeof(s_reading_disp_unit) - 1u);
+        s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
+        s_reading_cand_unit[0] = '\0';
+        return true;
+    }
+    if (strcmp(unit, s_reading_cand_unit) != 0)
+    {
+        strncpy(s_reading_cand_unit, unit,
+                sizeof(s_reading_cand_unit) - 1u);
+        s_reading_cand_unit[sizeof(s_reading_cand_unit) - 1u] = '\0';
+        s_reading_cand_tick = HAL_GetTick();
+        return false;
+    }
+    if (HAL_GetTick() - s_reading_cand_tick < K2000_READING_UNIT_SETTLE_MS)
+        return false;
+    strncpy(s_reading_disp_unit, unit, sizeof(s_reading_disp_unit) - 1u);
+    s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
+    s_reading_cand_unit[0] = '\0';
+    return true;
+}
+
 static void host_apply_canvas_reading(void)
 {
 #if K2000_READING_ONLY_BASELINE
@@ -1825,6 +1866,15 @@ static void host_apply_canvas_reading(void)
     }
     if (!host_field_is_reading(num, num_len, unit, unit_len)) {
         return;
+    }
+    if (special == 0u) {
+        if (!reading_unit_gate(unit)) {
+            return;
+        }
+    } else {
+        /* Special states (OPEN / OVR.FLW / ...) carry no unit: always
+         * show immediately and cancel any pending unit switch. */
+        s_reading_cand_unit[0] = '\0';
     }
     ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
 #if K2000_READING_ONLY_BASELINE
