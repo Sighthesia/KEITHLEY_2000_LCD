@@ -436,9 +436,10 @@ static bool s_reading_only_dirty;
 static reading_only_stage_t s_reading_only_stage;
 /* Generation boundary of the frame being composed: captured from the
  * snapshot when the frame is planned; at PRESENT the comparison decides
- * whether newer host data arrived mid-frame (frame snapshot owns the
- * reading -- newer data always waits for the next frame). */
+ * whether newer host data arrived mid-frame. A mid-frame update is coalesced
+ * into pending_latest and never cancels the active frame. */
 static uint32_t s_reading_only_frame_generation;
+static bool s_reading_only_pending_latest;
 static uint32_t s_reading_only_render_errors;
 static lt7680_status_t s_reading_only_last_error;
 static bool s_reading_only_io_error;
@@ -1815,6 +1816,12 @@ static void host_apply_canvas_reading(void)
         return;
     }
     s_reading_gate_pass++;
+    /* The snapshot is already the newest complete value+unit pair. If a
+     * frame is in flight, remember only that a newer pair exists; restarting
+     * its glyph work for every host record defeats the 33 ms coalescing. */
+    if (s_frame_rendering &&
+        s_host_snapshot.generation != s_reading_only_frame_generation)
+        s_reading_only_pending_latest = true;
     ui_model_apply_reading(&s_ui, s_host_snapshot.value,
                            (uint8_t)strlen(s_host_snapshot.value),
                            s_host_snapshot.unit,
@@ -5624,9 +5631,14 @@ static void reading_only_render(void)
                                 !s_reading_only_page_info_valid[s_render_page] ||
                                 strcmp(s_reading_only_page_function[s_render_page], s_frame.function) != 0 ||
                                 strcmp(s_reading_only_page_impedance[s_render_page], s_frame.impedance) != 0 ||
-                                strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
-                                strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
-                                s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
+                                 strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
+                                 strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
+                                 s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
+             /* INFO is lower priority than the newest main reading. Keep
+              * the cached row intact for this commit and repaint it after a
+              * quiet boundary; page sync preserves the old row. */
+             if (s_reading_only_pending_latest)
+                 info_need = false;
             /* Rows paint inside the transaction on the hidden page and ride
              * the same atomic flip (PRESENT is already gated): freezing them
              * here only delays rows one composition behind the reading and
@@ -5637,6 +5649,10 @@ static void reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_INFO) {
+        if (s_reading_only_pending_latest) {
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
         if (!reading_only_render_info_panel()) {
             if (s_reading_only_io_error)
                 s_reading_only_stage = READING_ONLY_CLEAR;
@@ -5729,6 +5745,7 @@ static void reading_only_render(void)
         s_bitmap_job.active = false;
         s_rif_draw_job.active = false;
         s_reading_only_frame_generation = s_host_snapshot.generation;
+        s_reading_only_pending_latest = false;
         if (!header_only) {
             s_reading_only_value_index = 0u;
         } else {
@@ -6048,6 +6065,15 @@ static void reading_only_render(void)
         uint32_t now = HAL_GetTick();
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
+
+        /* Trend background/axis work is enhancement work. A newer host pair
+         * arrived while this frame was being composed, so commit the reading
+         * against the existing trend cache and retry the rebuild later. */
+        if (s_reading_only_pending_latest)
+        {
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
 
         /* Commit deadline, checked at the ENTRY of TREND (the old deadline
          * lived in PRESENT, which a starved drain can never reach -- the
@@ -6372,7 +6398,7 @@ static void reading_only_render(void)
     }
     case READING_ONLY_PRESENT:
     {
-        if (s_trend_rebuild_transaction)
+        if (s_trend_rebuild_transaction && !s_reading_only_pending_latest)
         {
             s_dbg_present_hold_window++;
             /* A range/unit change is a visual transaction: keep the old
@@ -6395,6 +6421,13 @@ static void reading_only_render(void)
                 return;
             }
         }
+        else if (s_trend_rebuild_transaction)
+        {
+            /* A newer host pair has priority over finishing background
+             * chrome. The next hidden-page pass resumes the trend rebuild;
+             * PRESENT must remain a safe boundary for the main reading. */
+            s_trend_rebuild_transaction = false;
+        }
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
         if (st == LT7680_OK)
             st = lt7680_write_reg(0x12u, 0x48u);
@@ -6406,8 +6439,9 @@ static void reading_only_render(void)
         s_display_enabled = true;
         s_visible_page = s_render_page;
         perf_note_present();
-        s_reading_only_dirty =
+        s_reading_only_dirty = s_reading_only_pending_latest ||
             s_host_snapshot.generation != s_reading_only_frame_generation;
+        s_reading_only_pending_latest = false;
         s_frame_rendering = false;
         s_renderer.phase = RENDER_PHASE_IDLE;
         s_perf_display_commits_window++;
