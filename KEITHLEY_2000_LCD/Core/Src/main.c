@@ -485,6 +485,17 @@ static bool s_trend_rebuild_transaction;
 #define K2000_TREND_TRANSACTION_MAX_HOLD_MS 700u
 static uint32_t s_trend_transaction_start_tick;
 static bool s_trend_rebuild_pending;
+/* Unit-flip debounce: host auto-range hunting flips the unit identity at
+ * ~1 Hz for about a second and then settles. A full trend rebuild takes
+ * >1 s, so honoring every flip restarts the drain forever (the commit
+ * livelock) -- and aborting via the deadline yields one half-drawn frame
+ * per hold (stale trend, torn unit text, flickering rows). Queue the
+ * flip instead and apply it only after the unit has held still for
+ * K2000_TREND_UNIT_SETTLE_MS; flips that cancel each other out (mVDC ->
+ * VDC -> mVDC) never trigger a rebuild at all. */
+#define K2000_TREND_UNIT_SETTLE_MS 300u
+static bool s_trend_unit_flip_pending;
+static uint32_t s_trend_unit_flip_tick;
 /* The new reading is painted before the new trend background. Once the
  * background is ready, only the deferred rows need painting; replaying
  * CLEAR/VALUE/UNIT/SUFFIX doubled the gear-change work. */
@@ -586,6 +597,20 @@ static void reading_only_invalidate_trend_pages(void)
                sizeof(s_drawn_trend_occupied[page]));
         s_trend_grid_dirty[page] = false;
     }
+}
+
+/* Queue a trend unit change instead of rebuilding immediately. Applied
+ * from the TREND slice once the unit has held still for
+ * K2000_TREND_UNIT_SETTLE_MS; alternating flips (auto-range hunting)
+ * keep refreshing the timer and never trigger a rebuild, so the trend
+ * stays frozen on the old unit (fully drawn, commits flowing) until the
+ * host settles. */
+static void trend_queue_unit_flip(void)
+{
+    if (!s_display_enabled)
+        return;
+    s_trend_unit_flip_pending = true;
+    s_trend_unit_flip_tick = HAL_GetTick();
 }
 
 /* Probed on-target 2026-08-30: both PIP1 and PIP2 accept the full datasheet
@@ -1813,10 +1838,10 @@ static void host_apply_canvas_reading(void)
         (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
         if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
         {
-            s_trend_axis_valid = false;
-            reading_only_invalidate_trend_pages();
-            if (s_trend_pip_ready)
-                trend_pip_reset();
+            /* Auto-range hunting flips the identity ~1 Hz: debounce the
+             * rebuild (trend_queue_unit_flip) instead of tearing the
+             * axis/background down on every flip. */
+            trend_queue_unit_flip();
         }
     }
 #endif
@@ -5237,8 +5262,12 @@ static bool reading_only_render_trend_background(void)
     (void)trend_draw_background;
     (void)trend_restore_grid;
     if (s_reading_only_page_trend_bg_valid[s_render_page] &&
-        strcmp(s_reading_only_page_trend_unit[s_render_page], unit) == 0)
+        (s_trend_unit_flip_pending ||
+         strcmp(s_reading_only_page_trend_unit[s_render_page], unit) == 0))
     {
+        /* Valid background: either the unit matches, or a debounced unit
+         * flip is pending and the chart deliberately stays frozen on the
+         * old unit until the host settles. */
         return true;
     }
     /* Empty identity right after a rotation reset: the buffer was just
@@ -6027,6 +6056,18 @@ static void reading_only_render(void)
             s_hold_deadline_fired++;
         }
 
+        /* Apply the debounced unit flip: the unit has held still for the
+         * settle window, so one clean rebuild now. During the hold the
+         * chart stays frozen on the old unit and frames commit at full
+         * speed. */
+        if (s_trend_unit_flip_pending &&
+            now - s_trend_unit_flip_tick >= K2000_TREND_UNIT_SETTLE_MS)
+        {
+            s_trend_unit_flip_pending = false;
+            s_trend_axis_valid = false;
+            reading_only_invalidate_trend_pages();
+        }
+
         /* Stale-composition kill: a rotation sample that lands mid-pipeline
          * leaves s_frame on the old unit while the trend buffer already
          * carries the new one. Finishing that composition presents a mixed
@@ -6062,8 +6103,10 @@ static void reading_only_render(void)
 
         if (s_trend_axis_valid && strcmp(s_trend_axis_unit, trend_unit) != 0)
         {
-            s_trend_axis_valid = false;
-            reading_only_invalidate_trend_pages();
+            /* Churn path: queue the rebuild through the settle debounce;
+             * the stale axis keeps matching the frozen old-unit chart
+             * until the host settles. */
+            trend_queue_unit_flip();
         }
         main_display_format_trend(&s_trend, now, s_frame.unit, &s_frame);
         /* Stat decimals follow the reading ("4.0000Ω" next to "2.3624Ω",
@@ -6147,9 +6190,11 @@ static void reading_only_render(void)
                 reading_only_invalidate_trend_pages();
             }
         }
-        background_ready = s_reading_only_page_trend_bg_valid[s_render_page] &&
-                           strcmp(s_reading_only_page_trend_unit[s_render_page],
-                                  trend_buffer_display_unit(&s_trend)) == 0;
+        background_ready =
+            s_reading_only_page_trend_bg_valid[s_render_page] &&
+            (s_trend_unit_flip_pending ||
+             strcmp(s_reading_only_page_trend_unit[s_render_page],
+                    trend_buffer_display_unit(&s_trend)) == 0);
         bool background_was_ready = background_ready;
         if (!reading_only_render_trend_background())
         {

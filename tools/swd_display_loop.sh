@@ -79,8 +79,12 @@ if [ -n "$TICK" ] && [ -n "$DUE" ]; then
     echo "display_due_age=$(( 0x$TICK - 0x$DUE ))ms  temperature_age=$(( 0x$TICK - 0x$TEMP ))ms"
 fi
 
-if [ "${PRESENT:-0}" -gt 0 ] 2>/dev/null; then
-    echo "VERDICT: GREEN ($PRESENT commits -- panel has been lit)"
+# mdw prints hex; force base-16 parse (leading letters like "bb" break
+# the decimal interpretation that test -gt would otherwise attempt).
+PRESENT_DEC=$((16#${PRESENT:-0}))
+
+if [ "$PRESENT_DEC" -gt 0 ]; then
+    echo "VERDICT: GREEN ($PRESENT_DEC commits -- panel has been lit)"
 else
     echo "VERDICT: RED (zero commits -- panel can only be black)"
 fi
