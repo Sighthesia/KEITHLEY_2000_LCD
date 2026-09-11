@@ -556,6 +556,16 @@ static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
 static char s_reading_disp_unit[TREND_UNIT_ID_MAX];
 static char s_reading_cand_unit[TREND_UNIT_ID_MAX];
 static uint32_t s_reading_cand_tick;
+/* SWD-visible gate census (monotonic): pass = samples reaching the UI,
+ * drop = samples withheld by the hysteresis window. A decaying drop rate
+ * after power-on is the host auto-range hunt transient (H1). */
+static uint32_t s_reading_gate_pass;
+static uint32_t s_reading_gate_drop;
+/* H4 census: full-band clears and no_data frames -- placeholder churn
+ * during the host's power-on ranging transient would show as spikes in
+ * both, decaying to ~0 once the host settles on numbers. */
+static uint32_t s_reading_band_fills;
+static uint32_t s_no_data_frames;
 static bool s_reading_only_page_trend_curve_valid[2];
 #define TREND_PIP_SOURCE_ADDRESS 0x00400000u
 #define TREND_PIP_SOURCE_WIDTH 96u
@@ -1816,6 +1826,7 @@ static bool reading_unit_gate(const char *unit)
                 sizeof(s_reading_disp_unit) - 1u);
         s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
         s_reading_cand_unit[0] = '\0';
+        s_reading_gate_pass++;
         return true;
     }
     if (strcmp(unit, s_reading_cand_unit) != 0)
@@ -1824,13 +1835,18 @@ static bool reading_unit_gate(const char *unit)
                 sizeof(s_reading_cand_unit) - 1u);
         s_reading_cand_unit[sizeof(s_reading_cand_unit) - 1u] = '\0';
         s_reading_cand_tick = HAL_GetTick();
+        s_reading_gate_drop++;
         return false;
     }
     if (HAL_GetTick() - s_reading_cand_tick < K2000_READING_UNIT_SETTLE_MS)
+    {
+        s_reading_gate_drop++;
         return false;
+    }
     strncpy(s_reading_disp_unit, unit, sizeof(s_reading_disp_unit) - 1u);
     s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
     s_reading_cand_unit[0] = '\0';
+    s_reading_gate_pass++;
     return true;
 }
 
@@ -5971,6 +5987,8 @@ static void reading_only_render(void)
     case READING_ONLY_VALUE:
     {
         uint8_t value_len = s_frame.no_data ? 0u : s_frame.value_len;
+        if (s_frame.no_data)
+            s_no_data_frames++;
         if (s_reading_only_value_index < value_len)
         {
             uint8_t index = s_reading_only_value_index;
@@ -5999,6 +6017,7 @@ static void reading_only_render(void)
             uint8_t i;
             for (i = value_len;
                  s_reading_only_page_value[s_render_page][i] != '\0'; i++)
+            {
                 if (ui_fill_rect(
                     (uint16_t)(s_reading_only_page_value_x[s_render_page] +
                                (uint16_t)i * FONT_DIGIT_WIDTH),
@@ -6008,6 +6027,8 @@ static void reading_only_render(void)
                     reading_only_abort_frame(s_reading_only_last_error);
                     return;
                 }
+                s_reading_band_fills++;
+            }
             s_reading_only_page_value[s_render_page][value_len] = '\0';
         }
         s_reading_only_page_value_x[s_render_page] = s_frame.start_x;
@@ -6866,6 +6887,7 @@ static void reading_scene_render(void)
                     (void)ui_fill_rect(0u, MAIN_DISPLAY_READING_Y, 960u,
                                        MAIN_DISPLAY_READING_H,
                                        MAIN_DISPLAY_COLOR_BG);
+                    s_reading_band_fills++;
                 }
             }
 #else
@@ -6879,6 +6901,7 @@ static void reading_scene_render(void)
         }
         if (s_frame.no_data)
         {
+            s_no_data_frames++;
             if (s_render_item == 1u)
             {
                 DRAW_ITEM(ui_draw_text(MAIN_DISPLAY_READING_X, 84u,
