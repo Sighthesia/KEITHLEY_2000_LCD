@@ -1,7 +1,50 @@
 #include <assert.h>
 #include <string.h>
 
+#include "host_snapshot.h"
+#include "k2000_proto.h"
 #include "reading_split.h"
+
+/* Replay plumbing mirrors main.c's host_apply_canvas_reading(): every
+ * FIELD event re-parses the merged VFD canvas line into the snapshot. */
+static host_snapshot_t s_replay_snap;
+
+static void replay_on_event(const k2000_event_t *evt)
+{
+    char line[48];
+    uint8_t line_len;
+
+    if (evt == 0 || evt->type != K2000_EVT_FIELD) {
+        return;
+    }
+    line_len = k2000_vfd_line(line, (uint8_t)sizeof(line));
+    if (line_len != 0u) {
+        (void)host_snapshot_parse(&s_replay_snap, line, line_len);
+    }
+}
+
+static const k2000_proto_cb_t s_replay_cb = {replay_on_event, 0};
+
+/* The host rewrites the whole VFD line every frame; the canvas keeps old
+ * characters positionally, so shorter frames pad with trailing spaces to
+ * fully cover the previous one (bus captures show padded, fixed-width
+ * lines). Trailing spaces never reach the parse: k2000_vfd_line trims. */
+#define REPLAY_LINE_COLS 28u
+
+static void replay_feed_text(const char *text)
+{
+    const char *p;
+    uint8_t col;
+
+    k2000_proto_feed(0x0Du);
+    for (p = text, col = 0u; *p != '\0'; p++, col++) {
+        k2000_proto_feed((uint8_t)*p);
+    }
+    for (; col < REPLAY_LINE_COLS; col++) {
+        k2000_proto_feed((uint8_t)' ');
+    }
+    k2000_proto_feed(0x0Du); /* flush the open field */
+}
 
 int main(void)
 {
@@ -88,6 +131,131 @@ int main(void)
     assert(!reading_is_special("--", 2, &sp));
     assert(!reading_is_special("---- ", 5, &sp));
     assert(!reading_is_special(0, 4, &sp) && sp == 0);
+
+    /* ---- Captured-stream replay: latest host snapshot ----
+     * Feeds bus-shaped frames (0x0D + status/text bytes) through the real
+     * parser into the snapshot, the same way main.c does: every FIELD event
+     * re-parses the merged VFD canvas line. Frame shapes follow the
+     * 2026-09-08 bus captures: slot counter as the field tag byte, leading
+     * space before a signed reading, trailing cursor dot, REV/NEW CODE
+     * banner labels, placeholder rotations during AUTO range hunting. */
+    {
+        host_snapshot_init(&s_replay_snap);
+        assert(!s_replay_snap.valid);
+        assert(s_replay_snap.generation == 0u);
+        assert(!host_snapshot_parse(0, "1.2", 3));
+        assert(!host_snapshot_parse(&s_replay_snap, 0, 3));
+        assert(!host_snapshot_parse(&s_replay_snap, "1.2", 0));
+        assert(s_replay_snap.generation == 0u);
+
+        k2000_proto_init(&s_replay_cb);
+
+        /* REV banner line: a label, never a reading (the bare-integer
+         * tail "V16" -> "16" must not become a value). */
+        {
+            static const char rev[] = "REV:A17 V16";
+            replay_feed_text(rev);
+            assert(!s_replay_snap.valid);
+            assert(s_replay_snap.generation == 0u);
+            assert(!host_snapshot_parse(&s_replay_snap, rev,
+                                        (uint8_t)strlen(rev)));
+        }
+
+        /* Placeholder rotation (open leads, AUTO hunting): no digits. */
+        {
+            replay_feed_text(" --.----- AAC");
+            assert(!s_replay_snap.valid);
+            assert(s_replay_snap.generation == 0u);
+        }
+
+        /* VDC reading: slot counter byte "0" is the field tag, the merged
+         * canvas keeps " 0.011014 VDC". */
+        {
+            replay_feed_text("0 0.011014 VDC");
+            assert(s_replay_snap.valid);
+            assert(s_replay_snap.generation == 1u);
+            assert(s_replay_snap.special == 0u);
+            assert(strcmp(s_replay_snap.value, "0.011014") == 0);
+            assert(strcmp(s_replay_snap.unit, "VDC") == 0);
+        }
+
+        /* mVDC reading with leading space and trailing cursor dot: a unit
+         * change must land IMMEDIATELY (no settle gate may drop it). */
+        {
+            replay_feed_text(" -030.4414mVDC.");
+            assert(s_replay_snap.valid);
+            assert(s_replay_snap.generation == 2u);
+            assert(strcmp(s_replay_snap.value, "-030.4414") == 0);
+            assert(strcmp(s_replay_snap.unit, "mVDC") == 0);
+        }
+
+        /* Special reading (open lead): whole record, no unit carried. */
+        {
+            replay_feed_text(" OPEN");
+            assert(s_replay_snap.valid);
+            assert(s_replay_snap.generation == 3u);
+            assert(s_replay_snap.special == 2u);
+            assert(strcmp(s_replay_snap.value, "OPEN") == 0);
+            assert(s_replay_snap.unit[0] == '\0');
+        }
+
+        /* NEW CODE? banner with blink markers around the 'N': labels and
+         * placeholders are dropped whole. The bare 'N' opens a field that
+         * the closing blink tag flushes as an empty FIELD event -- main.c
+         * re-reads the (unchanged) canvas, and the identical-record
+         * dedup keeps the generation still. */
+        {
+            k2000_proto_feed(0x0D);
+            k2000_proto_feed(0x0B);
+            k2000_proto_feed(0x01);
+            k2000_proto_feed('N');
+            k2000_proto_feed(0x0B);
+            k2000_proto_feed(0x00);
+            replay_feed_text("NEW CODE? N  --.----- ADC");
+            assert(s_replay_snap.generation == 3u);
+            assert(s_replay_snap.special == 2u); /* unchanged: still OPEN */
+            assert(strcmp(s_replay_snap.value, "OPEN") == 0);
+        }
+
+        /* Continuous burst (AUTO range hunting, ~27 records/s): every
+         * complete record overwrites the snapshot, value and unit always
+         * land as one pair from the same message, and the newest record
+         * wins without any queueing or settle delay. */
+        {
+            static const char *burst[3] = {
+                "0 0.011014 VDC",
+                " -030.4414mVDC.",
+                "0 0.011014 VDC",
+            };
+            uint8_t gi;
+
+            for (gi = 0u; gi < 3u; gi++) {
+                replay_feed_text(burst[gi]);
+            }
+            /* Newest record is the trailing VDC frame. */
+            assert(s_replay_snap.generation == 6u);
+            assert(s_replay_snap.special == 0u);
+            assert(strcmp(s_replay_snap.value, "0.011014") == 0);
+            assert(strcmp(s_replay_snap.unit, "VDC") == 0);
+
+            /* Same-message pairing invariant replayed record by record:
+             * the mVDC frame must have been applied whole (a settle gate
+             * would have dropped it inside its window). */
+            k2000_proto_init(&s_replay_cb);
+            host_snapshot_init(&s_replay_snap);
+            for (gi = 0u; gi < 3u; gi++) {
+                replay_feed_text(burst[gi]);
+                if (gi == 1u) {
+                    assert(strcmp(s_replay_snap.value, "-030.4414") == 0);
+                    assert(strcmp(s_replay_snap.unit, "mVDC") == 0);
+                } else {
+                    assert(strcmp(s_replay_snap.value, "0.011014") == 0);
+                    assert(strcmp(s_replay_snap.unit, "VDC") == 0);
+                }
+                assert(s_replay_snap.generation == (uint32_t)(gi + 1u));
+            }
+        }
+    }
 
     return 0;
 }

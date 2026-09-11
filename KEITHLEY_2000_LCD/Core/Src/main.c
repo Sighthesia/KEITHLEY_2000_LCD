@@ -28,6 +28,7 @@
 #include "font_digits.h"
 #include "font_half.h"
 #include "font_text.h"
+#include "host_snapshot.h"
 #include "keypad.h"
 #include "ui_layout.h"
 #include "k2000_proto.h"
@@ -35,7 +36,6 @@
 #include "lt7680_gfx.h"
 #include "main_display.h"
 #include "panel_transform.h"
-#include "reading_split.h"
 #include "render_scheduler.h"
 #include "rif_reader.h"
 #include "rif_tile_cache.h"
@@ -434,7 +434,10 @@ typedef enum {
 
 static bool s_reading_only_dirty;
 static reading_only_stage_t s_reading_only_stage;
-static uint32_t s_reading_only_generation;
+/* Generation boundary of the frame being composed: captured from the
+ * snapshot when the frame is planned; at PRESENT the comparison decides
+ * whether newer host data arrived mid-frame (frame snapshot owns the
+ * reading -- newer data always waits for the next frame). */
 static uint32_t s_reading_only_frame_generation;
 static uint32_t s_reading_only_render_errors;
 static lt7680_status_t s_reading_only_last_error;
@@ -543,22 +546,21 @@ static bool s_trend_axis_valid;
 static float s_trend_axis_min;
 static float s_trend_axis_max;
 static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
-/* Reading-unit hysteresis. Host auto-range oscillation (open leads)
- * flips the unit at ~1 Hz forever; every flip re-plans the reading band
- * and starves the resumable suffix draw (torn VD/VDC, widening sync
- * rects) and the trend rebuilds (Waiting-for-data flicker). Gate at the
- * application layer: samples whose unit has held for
- * K2000_READING_UNIT_SETTLE_MS pass; the rest are dropped whole (value
- * + unit stay a consistent pair). During oscillation the display locks
- * onto whichever unit came first and keeps updating from those samples;
- * a genuine range change (>=300 ms dwell) follows within 300 ms. */
-#define K2000_READING_UNIT_SETTLE_MS 300u
-static char s_reading_disp_unit[TREND_UNIT_ID_MAX];
-static char s_reading_cand_unit[TREND_UNIT_ID_MAX];
-static uint32_t s_reading_cand_tick;
-/* SWD-visible gate census (monotonic): pass = samples reaching the UI,
- * drop = samples withheld by the hysteresis window. A decaying drop rate
- * after power-on is the host auto-range hunt transient (H1). */
+/* Latest-host-snapshot state (host_snapshot.c): every complete record
+ * (value + unit parsed from the same merged canvas line) overwrites the
+ * snapshot immediately -- the unit hysteresis gate that used to withhold
+ * records whose unit differed from the displayed one is GONE. Withholding
+ * was the "extremely laggy reading" root cause (2026-09-11 census): the
+ * host's open-lead AUTO range hunt rotates units at ~27 records/s and the
+ * lock only re-armed once per rotation, starving the display to ~1 update/s.
+ * The main display is host-authoritative and follows the newest record;
+ * the trend stays a background enhancement (unit-flip debounce +
+ * transaction deadline bound its rebuild without ever blocking PRESENT). */
+static host_snapshot_t s_host_snapshot;
+/* SWD census (monotonic), repurposed from the removed gate: pass =
+ * records accepted into the snapshot, drop = lines rejected by the
+ * reading filter (labels, placeholders). A high drop rate during power-on
+ * is the host's placeholder/label rotation, not lost readings. */
 static uint32_t s_reading_gate_pass;
 static uint32_t s_reading_gate_drop;
 /* H4 census: full-band clears and no_data frames -- placeholder churn
@@ -1786,127 +1788,53 @@ static bool READING_ONLY_LEGACY begin_hidden_frame(void)
     return true;
 }
 
-/* The K2000 streams multiple display fields (reading, function label,
- * right-column info, lamps). Only numeric readings may enter the reading
- * model: a label like "2W Ohm" would overwrite the value, mangle the unit
- * inference and trip the digit-charset path. Valid readings have digits;
- * a unit must start with a unit letter (V/A/Ohm/Hz/s/C/dB + prefixes). */
-static bool host_field_is_reading(const char *num, uint8_t num_len,
-                                  const char *unit, uint8_t unit_len)
-{
-    if (num == 0 || num_len == 0u) {
-        return false;
-    }
-    if (unit == 0 || unit_len == 0u) {
-        return true;
-    }
-    switch (unit[0]) {
-    case 'V': case 'A': case 'H': case 's': case 'S': case 'C':
-    case 'm': case 'k': case 'M': case 'd': case 'u':
-        return true;
-    default:
-        /* UTF-8 leads: Ohm (CE A9), micro/degree (C2 B5/B0). */
-        return (uint8_t)unit[0] == 0xC2u || (uint8_t)unit[0] == 0xCEu;
-    }
-}
-
 /* VFD-canvas reading: pull the merged host line (everything up to the
- * two-space segment gap), parse it right-to-left, and apply it only if it
- * is a numeric reading. Because the canvas persists, partial host updates
- * (main digits, then units, then labels) merge instead of overwriting the
- * whole reading -- this is what the real tube displays and why it never
- * flickers. */
-/* Reading-unit hysteresis gate (see the state block above). */
-static bool reading_unit_gate(const char *unit)
-{
-    if (s_reading_disp_unit[0] == '\0' ||
-        strcmp(unit, s_reading_disp_unit) == 0)
-    {
-        strncpy(s_reading_disp_unit, unit,
-                sizeof(s_reading_disp_unit) - 1u);
-        s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
-        s_reading_cand_unit[0] = '\0';
-        s_reading_gate_pass++;
-        return true;
-    }
-    if (strcmp(unit, s_reading_cand_unit) != 0)
-    {
-        strncpy(s_reading_cand_unit, unit,
-                sizeof(s_reading_cand_unit) - 1u);
-        s_reading_cand_unit[sizeof(s_reading_cand_unit) - 1u] = '\0';
-        s_reading_cand_tick = HAL_GetTick();
-        s_reading_gate_drop++;
-        return false;
-    }
-    if (HAL_GetTick() - s_reading_cand_tick < K2000_READING_UNIT_SETTLE_MS)
-    {
-        s_reading_gate_drop++;
-        return false;
-    }
-    strncpy(s_reading_disp_unit, unit, sizeof(s_reading_disp_unit) - 1u);
-    s_reading_disp_unit[sizeof(s_reading_disp_unit) - 1u] = '\0';
-    s_reading_cand_unit[0] = '\0';
-    s_reading_gate_pass++;
-    return true;
-}
-
+ * two-space segment gap) and hand it to the snapshot parser. The merged
+ * line is one complete record: value and unit are parsed and stored
+ * together and never spliced across messages. Because the canvas
+ * persists, partial host updates (main digits, then units, then labels)
+ * merge instead of overwriting the whole reading -- this is what the real
+ * tube displays and why it never flickers. Non-reading lines (labels,
+ * placeholder rotations) leave the snapshot untouched; an identical
+ * record is a no-op, so VFD redraws and empty field events do not churn
+ * the generation. */
 static void host_apply_canvas_reading(void)
 {
+    char line[48];
+    uint8_t line_len;
 #if K2000_READING_ONLY_BASELINE
     static char previous_trend_unit[TREND_UNIT_ID_MAX];
 #endif
-    char line[48];
-    char num[UI_MODEL_MAX_FIELD];
-    char unit[UI_MODEL_MAX_UNIT];
-    uint8_t num_len;
-    uint8_t unit_len;
-    uint8_t line_len;
-    uint8_t special;
 
     line_len = k2000_vfd_line(line, (uint8_t)sizeof(line));
     if (line_len == 0u) {
         return;
     }
-    if (reading_is_special(line, line_len, &special)) {
-        num_len = line_len;
-        if (num_len >= sizeof(num)) {
-            num_len = (uint8_t)(sizeof(num) - 1u);
-        }
-        memcpy(num, line, num_len);
-        num[num_len] = '\0';
-        unit_len = 0u;
-        unit[0] = '\0';
-    } else {
-        reading_split(line, line_len, num, &num_len, unit, &unit_len);
-        special = 0u;
-    }
-    if (!host_field_is_reading(num, num_len, unit, unit_len)) {
+    if (!host_snapshot_parse(&s_host_snapshot, line, line_len)) {
+        s_reading_gate_drop++;
         return;
     }
-    if (special == 0u) {
-        if (!reading_unit_gate(unit)) {
-            return;
-        }
-    } else {
-        /* Special states (OPEN / OVR.FLW / ...) carry no unit: always
-         * show immediately and cancel any pending unit switch. */
-        s_reading_cand_unit[0] = '\0';
-    }
-    ui_model_apply_reading(&s_ui, num, num_len, unit, unit_len, special);
+    s_reading_gate_pass++;
+    ui_model_apply_reading(&s_ui, s_host_snapshot.value,
+                           (uint8_t)strlen(s_host_snapshot.value),
+                           s_host_snapshot.unit,
+                           (uint8_t)strlen(s_host_snapshot.unit),
+                           s_host_snapshot.special);
 #if K2000_READING_ONLY_BASELINE
-    s_reading_only_generation++;
     s_reading_only_dirty = true;
-    if (special == 0u)
+    if (s_host_snapshot.special == 0u)
     {
         strncpy(previous_trend_unit, trend_buffer_display_unit(&s_trend),
                 sizeof(previous_trend_unit) - 1u);
         previous_trend_unit[sizeof(previous_trend_unit) - 1u] = '\0';
-        (void)trend_buffer_add(&s_trend, HAL_GetTick(), num, unit);
+        (void)trend_buffer_add(&s_trend, HAL_GetTick(),
+                               s_host_snapshot.value, s_host_snapshot.unit);
         if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
         {
             /* Auto-range hunting flips the identity ~1 Hz: debounce the
              * rebuild (trend_queue_unit_flip) instead of tearing the
-             * axis/background down on every flip. */
+             * axis/background down on every flip. Only TREND work is
+             * deferred; the reading band commits regardless. */
             trend_queue_unit_flip();
         }
     }
@@ -5791,8 +5719,16 @@ static void reading_only_render(void)
                 s_frame.range[rl + 1u + i] = '\0';
             }
         }
+        /* Generation re-plan (host snapshot sync): the frame renders the
+         * snapshot as of THIS instant. Any resumable draw job still active
+         * from an abandoned frame carries fragments of an older snapshot
+         * -- cancel it so every stage plans fresh cells; newer records
+         * that arrive mid-frame are picked up by the next frame (the
+         * PRESENT dirty check), never spliced into this one. */
+        s_bitmap_job.active = false;
+        s_rif_draw_job.active = false;
+        s_reading_only_frame_generation = s_host_snapshot.generation;
         if (!header_only) {
-            s_reading_only_frame_generation = s_reading_only_generation;
             s_reading_only_value_index = 0u;
         } else {
             s_reading_only_value_index = s_frame.value_len;
@@ -6470,7 +6406,7 @@ static void reading_only_render(void)
         s_visible_page = s_render_page;
         perf_note_present();
         s_reading_only_dirty =
-            s_reading_only_generation != s_reading_only_frame_generation;
+            s_host_snapshot.generation != s_reading_only_frame_generation;
         s_frame_rendering = false;
         s_renderer.phase = RENDER_PHASE_IDLE;
         s_perf_display_commits_window++;
@@ -7260,6 +7196,7 @@ int main(void)
      * the backlit panel while the clock starts and the banner prints. */
     hal_display_early_reset_hold();
     ui_model_init(&s_ui);
+    host_snapshot_init(&s_host_snapshot);
     trend_buffer_init(&s_trend);
     render_scheduler_init(&s_renderer);
     keypad_init(&s_keypad);

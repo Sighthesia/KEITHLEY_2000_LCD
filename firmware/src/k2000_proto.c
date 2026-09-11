@@ -52,15 +52,16 @@ uint8_t k2000_vfd_line(char *out, uint8_t size)
     while (end > 0u && s_vfd[end - 1u] == ' ') {
         end--;
     }
-    /* Cut at the segment gap: two consecutive spaces. */
-    for (n = 0u; n + 1u < end && n + 1u < size; n++) {
-        if (s_vfd[n] == ' ' && s_vfd[n + 1u] == ' ') {
+    /* Copy up to the segment gap: two consecutive spaces. The gap
+     * look-ahead only runs while a following character exists, so a line
+     * ending without a gap keeps its final character (the old bound
+     * `n + 1u < end` silently dropped it, mangling trailing unit letters
+     * whenever the host did not append a cursor dot). */
+    for (n = 0u; n < end && n + 1u < size; n++) {
+        if (n + 1u < end && s_vfd[n] == ' ' && s_vfd[n + 1u] == ' ') {
             break;
         }
         out[n] = s_vfd[n];
-    }
-    if (n > size - 1u) {
-        n = (uint8_t)(size - 1u);
     }
     out[n] = '\0';
     /* Trailing single space is part of the segment: keep it. */

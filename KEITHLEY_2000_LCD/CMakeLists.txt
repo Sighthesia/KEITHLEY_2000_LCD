@@ -54,6 +54,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/font_text.c
     Core/Src/keypad.c
     Core/Src/k2000_proto.c
+    Core/Src/host_snapshot.c
     Core/Src/main_display.c
     Core/Src/panel_transform.c
     Core/Src/reading_split.c

@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # SWD census sampler: two samples 10 s apart, hex-diffed into rates.
 # Run right after a power-on to profile the boot transient:
-#   pass/drop  -- reading-unit gate (host hunt strength)
+#   pass/drop  -- host snapshot accepts/rejects. pass = records accepted
+#                into the snapshot (value+unit stored whole); drop = lines
+#                rejected by the reading filter (labels, placeholders,
+#                --.----- rotations) plus duplicate records (VFD redraws,
+#                empty-field re-reads). NOT a unit gate anymore: the old
+#                unit-settle hysteresis was removed (2026-09-11) because
+#                it starved commits during AUTO range hunting.
 #   band/nodata-- erased glyphs / no_data frames (placeholder churn)
 #   present    -- commits (0 = black panel)
 set -eu

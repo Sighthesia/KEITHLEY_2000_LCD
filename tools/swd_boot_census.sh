@@ -2,6 +2,12 @@
 # HITL boot-transient profiler: waits for a fresh power-on (present_total
 # returns to ~0), then samples three post-boot windows automatically.
 # Usage: start this FIRST, then power-cycle the panel.
+#
+# pass/drop = host snapshot accepts/rejects: pass counts records stored
+# whole into the snapshot; drop counts lines rejected by the reading
+# filter (labels, placeholders) and duplicate records. The old unit-settle
+# gate is gone (2026-09-11), so a high drop rate at boot is the host's
+# placeholder/label rotation, not withheld readings.
 set -eu
 cd "$(dirname "$0")/.."
 ELF=KEITHLEY_2000_LCD/build/Release/KEITHLEY_2000_LCD.elf

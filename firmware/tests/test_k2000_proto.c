@@ -186,5 +186,48 @@ int main(void)
     assert(s_sym_evts == 1);
     assert(s_sym_ctrl == 0x10);
 
+    /* VFD canvas readback keeps the FINAL character: a reading line whose
+     * wire form ends at the unit letter must read back whole (the old
+     * gap-look-ahead bound dropped it, showing "VD" for "VDC"). The first
+     * text byte after 0x0D is the field tag, so feed 0x01 then the line. */
+    {
+        char line[24];
+        uint8_t ll;
+        static const char full[] = "1.23VDC";
+        uint8_t i;
+
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (i = 0u; full[i] != '\0'; i++)
+            k2000_proto_feed((uint8_t)full[i]);
+        ll = k2000_vfd_line(line, (uint8_t)sizeof(line));
+        assert(ll == 7u);
+        assert(strcmp(line, "1.23VDC") == 0);
+
+        /* Trailing cursor dot (bus captures: "-030.4414mVDC.") is part of
+         * the canvas line; reading_split strips it at parse time. */
+        static const char dotted[] = "-030.4414mVDC.";
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (i = 0u; dotted[i] != '\0'; i++)
+            k2000_proto_feed((uint8_t)dotted[i]);
+        ll = k2000_vfd_line(line, (uint8_t)sizeof(line));
+        assert(ll == 14u);
+        assert(strcmp(line, "-030.4414mVDC.") == 0);
+
+        /* Segment gap: the line ends before two consecutive spaces. */
+        static const char gapped[] = "1.23VDC  TRIG A";
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (i = 0u; gapped[i] != '\0'; i++)
+            k2000_proto_feed((uint8_t)gapped[i]);
+        ll = k2000_vfd_line(line, (uint8_t)sizeof(line));
+        assert(ll == 7u);
+        assert(strcmp(line, "1.23VDC") == 0);
+    }
+
     return 0;
 }
