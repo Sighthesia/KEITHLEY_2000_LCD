@@ -110,6 +110,20 @@ int main(void)
     k2000_proto_feed('A');
     assert(s_pos_val == 3);
 
+    /* A protocol TAG terminating POS must be replayed, not swallowed. */
+    s_field_evts = 0;
+    k2000_proto_init(&s_cb);
+    k2000_proto_feed(0x0Du);
+    k2000_proto_feed(0x04u);
+    k2000_proto_feed('0');
+    k2000_proto_feed('3');
+    k2000_proto_feed(0x01u); /* POS terminator and next field TAG */
+    k2000_proto_feed('Z');
+    k2000_proto_feed(0x0Du);
+    assert(s_pos_val == 3);
+    assert(s_field_evts == 1);
+    assert(strcmp(s_field_value, "Z") == 0);
+
     /* POS must update the persistent canvas cursor after the event payload is
      * cleared: a subsequent field character belongs at the requested column. */
     {
@@ -124,7 +138,7 @@ int main(void)
         k2000_proto_feed('0');
         k2000_proto_feed('0');
         k2000_proto_feed('3');
-        k2000_proto_feed('A'); /* terminates POS */
+        k2000_proto_feed('A'); /* text terminator is intentionally consumed */
         k2000_proto_feed(0x01u); /* field tag */
         k2000_proto_feed('Z');
         assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 4u);
@@ -200,6 +214,28 @@ int main(void)
     k2000_proto_feed(0x0Du);
     k2000_proto_feed(0x02u);
     assert(s_flush_evts == 1);
+
+    /* 0x0D only returns the cursor; it cannot infer the end of a short VFD
+     * write. The protocol-defined 0x02 flush clears the old tail first. */
+    {
+        char line[24];
+        uint8_t i;
+        static const char long_value[] = "12.345VDC.";
+        static const char short_value[] = "1.2V.";
+
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (i = 0u; long_value[i] != '\0'; i++)
+            k2000_proto_feed((uint8_t)long_value[i]);
+        k2000_proto_feed(0x02u);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x01u);
+        for (i = 0u; short_value[i] != '\0'; i++)
+            k2000_proto_feed((uint8_t)short_value[i]);
+        assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 5u);
+        assert(strcmp(line, "1.2V.") == 0);
+    }
 
     /* A lone symbol at message start (no field tag yet) is its own event. */
     s_sym_evts = 0;

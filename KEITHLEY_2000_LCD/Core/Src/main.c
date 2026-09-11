@@ -1849,6 +1849,21 @@ static void host_apply_canvas_reading(void)
     s_ui_dirty_regions |= RENDER_DIRTY_READING;
 }
 
+/* A pending snapshot means the hidden page contains mixed generations.
+ * Abandon it before PRESENT so the last visible page remains complete; IDLE
+ * will plan the newest snapshot on the next frame. */
+static void reading_only_defer_pending_frame(void)
+{
+    s_bitmap_job.active = false;
+    s_rif_draw_job.active = false;
+    s_frame_rendering = false;
+    s_is_header_only = false;
+    s_reading_only_dirty = true;
+    s_reading_only_pending_latest = false;
+    s_renderer.phase = RENDER_PHASE_IDLE;
+    s_reading_only_stage = READING_ONLY_IDLE;
+}
+
 static void proto_on_event(const k2000_event_t *evt)
 {
 #if K2000_READING_ONLY_BASELINE
@@ -5614,6 +5629,11 @@ static void reading_only_render(void)
         s_dbg_last_stage = cur < 9u ? cur : 0u;
         s_dbg_last_render_tick = now;
     }
+    if (s_frame_rendering && s_reading_only_pending_latest)
+    {
+        reading_only_defer_pending_frame();
+        return;
+    }
     if (s_reading_only_stage == READING_ONLY_STATUS) {
         if (!reading_only_render_status_bar()) {
             if (s_reading_only_io_error)
@@ -5634,11 +5654,6 @@ static void reading_only_render(void)
                                  strcmp(s_reading_only_page_range[s_render_page], s_frame.range) != 0 ||
                                  strcmp(s_reading_only_page_rate[s_render_page], s_frame.rate) != 0 ||
                                  s_reading_only_page_info_lamps[s_render_page] != row2_info_lamps();
-             /* INFO is lower priority than the newest main reading. Keep
-              * the cached row intact for this commit and repaint it after a
-              * quiet boundary; page sync preserves the old row. */
-             if (s_reading_only_pending_latest)
-                 info_need = false;
             /* Rows paint inside the transaction on the hidden page and ride
              * the same atomic flip (PRESENT is already gated): freezing them
              * here only delays rows one composition behind the reading and
@@ -5649,10 +5664,6 @@ static void reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_INFO) {
-        if (s_reading_only_pending_latest) {
-            s_reading_only_stage = READING_ONLY_PRESENT;
-            return;
-        }
         if (!reading_only_render_info_panel()) {
             if (s_reading_only_io_error)
                 s_reading_only_stage = READING_ONLY_CLEAR;
@@ -6066,15 +6077,6 @@ static void reading_only_render(void)
         const char *trend_unit = trend_buffer_display_unit(&s_trend);
         bool background_ready;
 
-        /* Trend background/axis work is enhancement work. A newer host pair
-         * arrived while this frame was being composed, so commit the reading
-         * against the existing trend cache and retry the rebuild later. */
-        if (s_reading_only_pending_latest)
-        {
-            s_reading_only_stage = READING_ONLY_PRESENT;
-            return;
-        }
-
         /* Commit deadline, checked at the ENTRY of TREND (the old deadline
          * lived in PRESENT, which a starved drain can never reach -- the
          * host-connected black screen). Whatever the drain is doing, once
@@ -6420,13 +6422,6 @@ static void reading_only_render(void)
                 s_reading_only_stage = READING_ONLY_TREND;
                 return;
             }
-        }
-        else if (s_trend_rebuild_transaction)
-        {
-            /* A newer host pair has priority over finishing background
-             * chrome. The next hidden-page pass resumes the trend rebuild;
-             * PRESENT must remain a safe boundary for the main reading. */
-            s_trend_rebuild_transaction = false;
         }
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
         if (st == LT7680_OK)

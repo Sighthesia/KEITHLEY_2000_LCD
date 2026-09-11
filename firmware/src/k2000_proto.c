@@ -141,6 +141,13 @@ static k2000_evt_type_t control_tag_type(uint8_t byte)
     }
 }
 
+/* POS arguments are terminated by the next protocol byte. Text terminators
+ * are not replayed, but a TAG/control byte must remain visible to the parser. */
+static bool is_protocol_boundary(uint8_t byte)
+{
+    return byte < 0x20u || byte >= 0x80u;
+}
+
 /* IDLE-state handler for a lone text tag (no field open yet). */
 static bool feed_lone_text_tag(uint8_t byte)
 {
@@ -277,6 +284,9 @@ void k2000_proto_feed(uint8_t byte)
             s_vfd_cursor = pos < K2000_VFD_COLS
                                ? (uint8_t)pos
                                : (uint8_t)(K2000_VFD_COLS - 1u);
+            if (is_protocol_boundary(byte)) {
+                k2000_proto_feed(byte);
+            }
         }
         break;
 
