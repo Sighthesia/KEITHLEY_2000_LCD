@@ -2,11 +2,42 @@
 
 #include "trend_axis.h"
 
+static float unit_scale(const char *unit)
+{
+    if (unit == 0) return 1.0f;
+    if (unit[0] == 'm') return 1000.0f;
+    if (unit[0] == 'u' || ((uint8_t)unit[0] == 0xC2u &&
+                           (uint8_t)unit[1] == 0xB5u)) return 1000000.0f;
+    if (unit[0] == 'k') return 0.001f;
+    if (unit[0] == 'M' && unit[1] != '\0') return 0.000001f;
+    return 1.0f;
+}
+
+static void unit_family(const char *unit, char *family, uint8_t size)
+{
+    const char *base = unit;
+    uint8_t skip = 0u;
+
+    if (unit != 0 && (unit[0] == 'm' || unit[0] == 'u' ||
+                      unit[0] == 'k' || unit[0] == 'M')) skip = 1u;
+    else if (unit != 0 && (uint8_t)unit[0] == 0xC2u &&
+             (uint8_t)unit[1] == 0xB5u) skip = 2u;
+    if (unit != 0) base = unit + skip;
+    if (size == 0u) return;
+    strncpy(family, base, size - 1u);
+    family[size - 1u] = '\0';
+}
+
 static bool unit_matches(const main_display_trend_axis_t *resident,
                          const char *axis_unit)
 {
-    return resident != 0 && resident->valid &&
-           strcmp(resident->unit, axis_unit) == 0;
+    char resident_family[8];
+    char axis_family[8];
+
+    if (resident == 0 || !resident->valid || axis_unit == 0) return false;
+    unit_family(resident->unit, resident_family, sizeof(resident_family));
+    unit_family(axis_unit, axis_family, sizeof(axis_family));
+    return strcmp(resident_family, axis_family) == 0;
 }
 
 /* Scaled window data bounds still fit inside the resident axis span
@@ -16,8 +47,10 @@ static bool data_inside(const main_display_frame_t *frame,
                         const main_display_trend_axis_t *resident,
                         float scale)
 {
-    float bottom = (resident->top - 3.0f * resident->step) / scale;
-    float top = resident->top / scale;
+    float resident_scale = unit_scale(resident->unit);
+    float bottom = (resident->top - 3.0f * resident->step) / resident_scale;
+    float top = resident->top / resident_scale;
+    (void)scale;
     return frame->trend_minimum >= bottom && frame->trend_maximum <= top;
 }
 

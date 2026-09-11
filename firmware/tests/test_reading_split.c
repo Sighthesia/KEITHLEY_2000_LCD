@@ -254,6 +254,24 @@ int main(void)
                 }
                 assert(s_replay_snap.generation == (uint32_t)(gi + 1u));
             }
+
+            /* Strict units reject canvas contamination without changing the
+             * last complete value/unit pair. */
+            {
+                static const char *const invalid[] = {
+                    "1.0VVAC", "1.0VACVAC", "1.0mmVDC", "1.0XYZ"
+                };
+                uint8_t ii;
+                uint32_t generation = s_replay_snap.generation;
+
+                for (ii = 0u; ii < (uint8_t)(sizeof(invalid) / sizeof(invalid[0])); ii++) {
+                    assert(!host_snapshot_parse(&s_replay_snap, invalid[ii],
+                                                (uint8_t)strlen(invalid[ii])));
+                    assert(s_replay_snap.generation == generation);
+                    assert(strcmp(s_replay_snap.value, "0.011014") == 0);
+                    assert(strcmp(s_replay_snap.unit, "VDC") == 0);
+                }
+            }
         }
     }
 

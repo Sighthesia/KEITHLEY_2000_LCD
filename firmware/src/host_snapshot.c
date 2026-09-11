@@ -15,11 +15,31 @@ void host_snapshot_init(host_snapshot_t *snap)
  * right-column info, lamps). Only numeric readings may enter the reading
  * snapshot: a label like "2W Ohm" would overwrite the value, mangle the
  * unit inference and trip the digit-charset path. Valid readings have a
- * digit-bearing value; a unit must start with a unit letter
- * (V/A/Ohm/Hz/s/C/dB + prefixes). A unit-less record is accepted only with
+ * digit-bearing value; a unit must be one of the complete protocol spellings
+ * (V/A/Ohm/Hz/s/C/dB with supported prefixes). A unit-less record is accepted only with
  * a decimal point in the value: K2000 numeric fields always carry one,
  * while unit-less bare integers are label fragments (the "16" tail of the
  * REV banner or a lone slot counter). */
+static bool valid_unit(const char *unit)
+{
+    static const char *const units[] = {
+        "V", "VDC", "VAC", "mV", "mVDC", "mVAC", "uV", "uVDC", "uVAC",
+        "\xC2\xB5V", "\xC2\xB5VDC", "\xC2\xB5VAC",
+        "A", "ADC", "AAC", "mA", "mADC", "mAAC", "uA", "uADC", "uAAC",
+        "\xC2\xB5" "A", "\xC2\xB5" "ADC", "\xC2\xB5" "AAC",
+        "MVDC", "MVAC", "MADC", "MAAC",
+        "Hz", "kHz", "MHz", "s", "ms", "C", "DEGC", "\xC2\xB0" "C", "dB",
+        "OHM", "kOHM", "MOHM", "\xCE\xA9", "k\xCE\xA9", "M\xCE\xA9"
+    };
+    uint8_t i;
+
+    if (unit == 0 || unit[0] == '\0') return false;
+    for (i = 0u; i < (uint8_t)(sizeof(units) / sizeof(units[0])); i++) {
+        if (strcmp(unit, units[i]) == 0) return true;
+    }
+    return false;
+}
+
 static bool record_is_reading(const char *num, uint8_t num_len,
                               const char *unit, uint8_t unit_len)
 {
@@ -39,14 +59,8 @@ static bool record_is_reading(const char *num, uint8_t num_len,
         }
         return has_decimal_point;
     }
-    switch (unit[0]) {
-    case 'V': case 'A': case 'H': case 's': case 'S': case 'C':
-    case 'm': case 'k': case 'M': case 'd': case 'u':
-        return true;
-    default:
-        /* UTF-8 leads: Ohm (CE A9), micro/degree (C2 B5/B0). */
-        return (uint8_t)unit[0] == 0xC2u || (uint8_t)unit[0] == 0xCEu;
-    }
+    (void)unit_len;
+    return valid_unit(unit);
 }
 
 static void store_record(host_snapshot_t *snap, const char *value,

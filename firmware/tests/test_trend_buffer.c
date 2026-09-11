@@ -28,6 +28,33 @@ int main(void)
     assert(!trend_parse_reading_display("OVERFLOW", "V", &value, &dimension, &unit, 0, 0u));
     assert(!trend_parse_reading_display("----", "V", &value, &dimension, &unit, 0, 0u));
 
+    /* Every accepted prefix is stored in the parser's base-unit scale. */
+    trend_buffer_init(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1", "VDC"));
+    assert(trend_buffer_add(&trend, 1u, "1000", "mVDC"));
+    assert(trend.minimum[0] > 0.999f && trend.maximum[0] < 1.001f);
+    assert(strcmp(trend_buffer_display_unit(&trend), "mVDC") == 0);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1", "VAC"));
+    assert(trend_buffer_add(&trend, 1u, "1000", "mVAC"));
+    assert(trend.minimum[0] > 0.999f && trend.maximum[0] < 1.001f);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1", "A"));
+    assert(trend_buffer_add(&trend, 1u, "1000", "mA"));
+    assert(trend.minimum[0] > 0.999f && trend.maximum[0] < 1.001f);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1", "OHM"));
+    assert(trend_buffer_add(&trend, 1u, "0.001", "kOHM"));
+    assert(trend.minimum[0] > 0.999f && trend.maximum[0] < 1.001f);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1000", "kOHM"));
+    assert(trend_buffer_add(&trend, 1u, "1", "MOHM"));
+    assert(trend.minimum[0] > 999999.0f && trend.maximum[0] < 1000001.0f);
+    trend_buffer_reset(&trend);
+    assert(trend_buffer_add(&trend, 0u, "1", "Hz"));
+    assert(trend_buffer_add(&trend, 1u, "0.001", "kHz"));
+    assert(trend.minimum[0] > 0.999f && trend.maximum[0] < 1.001f);
+
     trend_buffer_init(&trend);
     assert(trend_buffer_add(&trend, 0u, "1", "V"));
     assert(trend_buffer_add(&trend, 1u, "9", "V"));
@@ -47,7 +74,8 @@ int main(void)
     for (i = 0u; i < count; i++)
         assert(!columns[i].occupied || columns[i].maximum <= 9.0f);
 
-    /* A complete display-unit change clears history; repeated units preserve it. */
+    /* A magnitude prefix change keeps the physical family and history; a
+     * dimension change still starts a fresh trend window. */
     assert(trend_buffer_add(&trend, 40u, "3000", "mV"));
     assert(strcmp(trend_buffer_display_unit(&trend), "mV") == 0);
     assert(trend_buffer_add(&trend, 50u, "1", "mV"));
@@ -55,7 +83,7 @@ int main(void)
     assert(trend_buffer_add(&trend, 60u, "1", "V"));
     assert(strcmp(trend_buffer_display_unit(&trend), "V") == 0);
     assert(trend_buffer_range(&trend, 60u, &minimum, &maximum));
-    assert(minimum > 0.9f && maximum < 1.1f);
+    assert(minimum < 0.001f && maximum > 2.9f);
     assert(trend_buffer_add(&trend, 70u, "1", "A"));
     assert(trend.dimension == TREND_DIM_CURRENT);
     assert(trend_buffer_range(&trend, 60u, &minimum, &maximum));

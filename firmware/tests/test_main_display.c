@@ -332,6 +332,36 @@ int main(void)
         assert(f1.trend_axis_step == resident.step &&
                f1.trend_axis_top == resident.top);
 
+        /* Prefix changes stay in the same physical family. The resident axis
+         * remains usable while the reading path accepts the new scale. */
+        trend_buffer_reset(&trend);
+        trend_axis_init(&resident, &candidate);
+        assert(trend_buffer_add(&trend, 30000u, "1.0", "VDC"));
+        assert(trend_buffer_add(&trend, 30200u, "1.2", "VDC"));
+        v = production_snapshot(&trend, "VDC", 30400u, &f1, &resident,
+                                 &candidate);
+        assert(v.axis_rebuild && resident.valid);
+        assert(trend_buffer_add(&trend, 30600u, "1200", "mVDC"));
+        v = production_snapshot(&trend, "mVDC", 30600u, &f2, &resident,
+                                 &candidate);
+        assert(v.keep_resident && !v.axis_rebuild);
+        assert(strcmp(resident.unit, "VDC") == 0);
+
+        /* A physical-family change still requests a fresh axis. */
+        trend_buffer_reset(&trend);
+        trend_axis_init(&resident, &candidate);
+        assert(trend_buffer_add(&trend, 31000u, "1.0", "VDC"));
+        assert(trend_buffer_add(&trend, 31200u, "1.2", "VDC"));
+        v = production_snapshot(&trend, "VDC", 31400u, &f1, &resident,
+                                 &candidate);
+        assert(v.axis_rebuild && resident.valid);
+        trend_buffer_reset(&trend);
+        assert(trend_buffer_add(&trend, 31600u, "1.0", "AAC"));
+        assert(trend_buffer_add(&trend, 31800u, "1.2", "AAC"));
+        v = production_snapshot(&trend, "AAC", 32000u, &f2, &resident,
+                                 &candidate);
+        assert(v.axis_rebuild && !v.keep_resident);
+
         /* Scaled unit kOHM: drift stays put, a transient outlier marks a
          * candidate, and recovery back inside the span clears it again. */
         trend_buffer_reset(&trend);

@@ -99,6 +99,19 @@ static void normalize_display_unit(const char *unit, char *out, uint8_t size)
     else copy_unit(out, size, unit);
 }
 
+static void unit_family(const char *unit, char *out, uint8_t size)
+{
+    const char *base = unit;
+    uint8_t skip = 0u;
+
+    if (unit != 0 && (unit[0] == 'm' || unit[0] == 'u' ||
+                      unit[0] == 'k' || unit[0] == 'M')) skip = 1u;
+    else if (unit != 0 && (uint8_t)unit[0] == 0xC2u &&
+             (uint8_t)unit[1] == 0xB5u) skip = 2u;
+    if (unit != 0) base = unit + skip;
+    copy_unit(out, size, base);
+}
+
 bool trend_parse_reading_display(const char *text, const char *unit,
                                  float *base_value, trend_dimension_t *dimension,
                                  const char **base_unit, char *display_unit,
@@ -152,32 +165,37 @@ static void advance_to(trend_buffer_t *t, uint32_t bucket)
 bool trend_buffer_add(trend_buffer_t *trend, uint32_t now_ms, const char *text,
                       const char *unit)
 {
-    float value;
+    float base_value;
     trend_dimension_t dim;
     char display_unit[TREND_UNIT_ID_MAX];
+    char incoming_family[TREND_UNIT_ID_MAX];
+    char resident_family[TREND_UNIT_ID_MAX];
     uint32_t bucket;
     uint16_t index;
-    if (trend == 0 || !trend_parse_reading_display(text, unit, &value, &dim, 0,
+    if (trend == 0 || !trend_parse_reading_display(text, unit, &base_value, &dim, 0,
                                                     display_unit, sizeof(display_unit))) return false;
     /* A backwards local tick (including the SysTick wrap) cannot be mapped to
      * the monotonically numbered bucket ring without ambiguity. */
     if (trend->has_sample && now_ms < trend->last_sample_ms)
         trend_buffer_reset(trend);
-    if (trend->has_sample && (dim != trend->dimension ||
-                              strcmp(display_unit, trend->unit_identity) != 0))
-        trend_buffer_reset(trend);
+    if (trend->has_sample) {
+        unit_family(display_unit, incoming_family, sizeof(incoming_family));
+        unit_family(trend->unit_identity, resident_family, sizeof(resident_family));
+        if (dim != trend->dimension || strcmp(incoming_family, resident_family) != 0)
+            trend_buffer_reset(trend);
+    }
     if (trend->has_sample && (now_ms - trend->last_sample_ms) >= TREND_WINDOW_MS)
         trend_buffer_reset(trend);
     bucket = now_ms / TREND_BUCKET_MS;
     advance_to(trend, bucket);
     index = (uint16_t)(bucket % TREND_BUCKET_COUNT);
     if (!occupied_get(trend, index)) {
-        trend->minimum[index] = value;
-        trend->maximum[index] = value;
+        trend->minimum[index] = base_value;
+        trend->maximum[index] = base_value;
         occupied_set(trend, index, true);
     } else {
-        if (value < trend->minimum[index]) trend->minimum[index] = value;
-        if (value > trend->maximum[index]) trend->maximum[index] = value;
+        if (base_value < trend->minimum[index]) trend->minimum[index] = base_value;
+        if (base_value > trend->maximum[index]) trend->maximum[index] = base_value;
     }
     if (trend->first_sample_ms == 0u)
         trend->first_sample_ms = now_ms == 0u ? 1u : now_ms;
