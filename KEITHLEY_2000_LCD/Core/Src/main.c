@@ -493,7 +493,7 @@ static bool s_trend_rebuild_pending;
  * flip instead and apply it only after the unit has held still for
  * K2000_TREND_UNIT_SETTLE_MS; flips that cancel each other out (mVDC ->
  * VDC -> mVDC) never trigger a rebuild at all. */
-#define K2000_TREND_UNIT_SETTLE_MS 300u
+#define K2000_TREND_UNIT_SETTLE_MS 3000u
 static bool s_trend_unit_flip_pending;
 static uint32_t s_trend_unit_flip_tick;
 /* The new reading is painted before the new trend background. Once the
