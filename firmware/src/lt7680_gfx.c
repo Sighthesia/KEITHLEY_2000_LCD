@@ -1,6 +1,8 @@
 #include "lt7680_gfx.h"
 #include "font_text.h"
 
+#include <string.h>
+
 /* LT768x register map (datasheet V4.2). All register addresses are 8-bit. */
 #define REG_SRR      0x00u  /* Software Reset Register */
 #define REG_CCR      0x01u  /* Chip Configuration Register */
@@ -920,13 +922,13 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
     }
     cx = x;
     while (*text != '\0') {
-        const uint8_t *bitmap = font_text_bitmap(*text);
+        font_text_glyph_t glyph;
+        const uint8_t *bitmap;
         uint16_t row;
         uint16_t col;
 
-        if (bitmap == 0) {
-            bitmap = font_text_bitmap('?');
-        }
+        (void)font_text_glyph(text, (uint8_t)strlen(text), &glyph);
+        bitmap = glyph.bitmap;
         for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
             for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
                 const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
@@ -940,7 +942,7 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
             }
         }
         cx = (uint16_t)(cx + FONT_TEXT_WIDTH);
-        text++;
+        text += glyph.bytes;
     }
     return LT7680_OK;
 }

@@ -11,13 +11,19 @@ static host_snapshot_t s_replay_snap;
 
 static void replay_on_event(const k2000_event_t *evt)
 {
-    char line[48];
+    char line[K2000_VFD_LINE_MAX];
     uint8_t line_len;
 
     if (evt == 0 || evt->type != K2000_EVT_FIELD) {
         return;
     }
     line_len = k2000_vfd_line(line, (uint8_t)sizeof(line));
+    while (line_len > 0u && line[0] == ' ') {
+        memmove(line, line + 1, line_len);
+        line_len--;
+    }
+    while (line_len > 0u && line[line_len - 1u] == ' ')
+        line[--line_len] = '\0';
     if (line_len != 0u) {
         (void)host_snapshot_parse(&s_replay_snap, line, line_len);
     }
@@ -36,6 +42,7 @@ static void replay_feed_text(const char *text)
     const char *p;
     uint8_t col;
 
+    k2000_proto_feed(K2000_TAG_FLUSH);
     k2000_proto_feed(0x0Du);
     for (p = text, col = 0u; *p != '\0'; p++, col++) {
         k2000_proto_feed((uint8_t)*p);

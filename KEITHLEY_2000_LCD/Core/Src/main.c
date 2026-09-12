@@ -28,7 +28,7 @@
 #include "font_digits.h"
 #include "font_half.h"
 #include "font_text.h"
-#include "host_snapshot.h"
+#include "raw_reading_snapshot.h"
 #include "keypad.h"
 #include "ui_layout.h"
 #include "k2000_proto.h"
@@ -547,23 +547,17 @@ static bool s_trend_axis_valid;
 static float s_trend_axis_min;
 static float s_trend_axis_max;
 static char s_trend_axis_unit[TREND_UNIT_ID_MAX];
-/* Latest-host-snapshot state (host_snapshot.c): every complete record
- * (value + unit parsed from the same merged canvas line) overwrites the
- * snapshot immediately -- the unit hysteresis gate that used to withhold
- * records whose unit differed from the displayed one is GONE. Withholding
- * was the "extremely laggy reading" root cause (2026-09-11 census): the
- * host's open-lead AUTO range hunt rotates units at ~27 records/s and the
- * lock only re-armed once per rotation, starving the display to ~1 update/s.
- * The main display is host-authoritative and follows the newest record;
- * the trend stays a background enhancement (unit-flip debounce +
- * transaction deadline bound its rebuild without ever blocking PRESENT). */
-static host_snapshot_t s_host_snapshot;
+/* Phase-one raw canvas snapshot: every complete merged line overwrites the
+ * previous line. Semantic display state is intentionally not consulted. */
+static raw_reading_snapshot_t s_raw_reading_snapshot;
+    static char s_raw_frame_line[RAW_READING_SNAPSHOT_MAX];
+static uint32_t s_raw_frame_generation;
+static bool s_raw_frame_pending;
 /* SWD census (monotonic), repurposed from the removed gate: pass =
  * records accepted into the snapshot, drop = lines rejected by the
  * reading filter (labels, placeholders). A high drop rate during power-on
  * is the host's placeholder/label rotation, not lost readings. */
 static uint32_t s_reading_gate_pass;
-static uint32_t s_reading_gate_drop;
 /* H4 census: full-band clears and no_data frames -- placeholder churn
  * during the host's power-on ranging transient would show as spikes in
  * both, decaying to ~0 once the host settles on numbers. */
@@ -1801,65 +1795,22 @@ static bool READING_ONLY_LEGACY begin_hidden_frame(void)
  * the generation. */
 static void host_apply_canvas_reading(void)
 {
-    char line[48];
+    char line[K2000_VFD_LINE_MAX];
     uint8_t line_len;
-#if K2000_READING_ONLY_BASELINE
-    static char previous_trend_unit[TREND_UNIT_ID_MAX];
-#endif
 
     line_len = k2000_vfd_line(line, (uint8_t)sizeof(line));
     if (line_len == 0u) {
         return;
     }
-    if (!host_snapshot_parse(&s_host_snapshot, line, line_len)) {
-        s_reading_gate_drop++;
+    if (!raw_reading_snapshot_accept(&s_raw_reading_snapshot, line, line_len))
         return;
-    }
     s_reading_gate_pass++;
-    /* The snapshot is already the newest complete value+unit pair. If a
-     * frame is in flight, remember only that a newer pair exists; restarting
-     * its glyph work for every host record defeats the 33 ms coalescing. */
-    if (s_frame_rendering &&
-        s_host_snapshot.generation != s_reading_only_frame_generation)
-        s_reading_only_pending_latest = true;
-    ui_model_apply_reading(&s_ui, s_host_snapshot.value,
-                           (uint8_t)strlen(s_host_snapshot.value),
-                           s_host_snapshot.unit,
-                           (uint8_t)strlen(s_host_snapshot.unit),
-                            s_host_snapshot.special);
-#if K2000_READING_ONLY_BASELINE
-    if (s_host_snapshot.trigger_dot)
-    {
-        s_trig_dot_phase = !s_trig_dot_phase;
-        s_trig_dot_pending = true;
-    }
     s_reading_only_dirty = true;
-    if (s_host_snapshot.special == 0u)
-    {
-        strncpy(previous_trend_unit, trend_buffer_display_unit(&s_trend),
-                sizeof(previous_trend_unit) - 1u);
-        previous_trend_unit[sizeof(previous_trend_unit) - 1u] = '\0';
-        (void)trend_buffer_add(&s_trend, HAL_GetTick(),
-                               s_host_snapshot.value, s_host_snapshot.unit);
-        if (strcmp(previous_trend_unit, trend_buffer_display_unit(&s_trend)) != 0)
-        {
-            /* Auto-range hunting flips the identity ~1 Hz: debounce the
-             * rebuild (trend_queue_unit_flip) instead of tearing the
-             * axis/background down on every flip. Only TREND work is
-             * deferred; the reading band commits regardless. */
-            trend_queue_unit_flip();
-        }
-    }
-#endif
-    s_ui_dirty_regions |= RENDER_DIRTY_READING;
+    s_raw_frame_pending = true;
 }
 
 static void proto_on_event(const k2000_event_t *evt)
 {
-#if K2000_READING_ONLY_BASELINE
-    (void)evt;
-#endif
-
     if (evt == 0)
     {
         return;
@@ -1867,61 +1818,110 @@ static void proto_on_event(const k2000_event_t *evt)
     switch (evt->type)
     {
     case K2000_EVT_FIELD:
-        s_perf_fields_window++;
-#if K2000_DEMO_FEED
-        if (!s_demo_event_reported)
-        {
-            hal_uart_send_text("[DEMO] field-len=");
-            hal_uart_send_hex8(evt->field.value_len);
-            hal_uart_send_text("\r\n");
-            s_demo_event_reported = true;
-        }
-#endif
-        /* VFD-canvas reading: the host writes positional segments over
-         * successive frames; the merged canvas line (up to the two-space
-         * segment gap) is the current reading. Parsing individual field
-         * fragments alternated main digits with labels = the "range
-         * switching" flicker. */
         host_apply_canvas_reading();
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
+        s_perf_fields_window++;
         break;
     case K2000_EVT_STATUS:
         ui_model_apply_status(&s_ui, evt->status_tag, evt->status_value);
-        s_ui_dirty_regions |= RENDER_DIRTY_STATUS;
-        s_reading_only_dirty = true;
         break;
     case K2000_EVT_CURSOR:
         ui_model_apply_cursor(&s_ui, evt->pos);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
+        k2000_vfd_set_cursor((uint8_t)evt->pos);
         break;
     case K2000_EVT_BLINK_START:
         ui_model_apply_blink(&s_ui, true);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     case K2000_EVT_BLINK_END:
         ui_model_apply_blink(&s_ui, false);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     case K2000_EVT_SYMBOL:
         ui_model_apply_symbol(&s_ui, evt->ctrl);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     case K2000_EVT_SEGMENT:
         ui_model_apply_segment(&s_ui, evt->ctrl);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     case K2000_EVT_FLUSH:
         ui_model_apply_flush(&s_ui);
-        s_ui_dirty_regions |= RENDER_DIRTY_READING;
         break;
     default:
-        break;
+        return;
     }
+#if K2000_DEMO_FEED
+    if (!s_demo_event_reported)
+    {
+        hal_uart_send_text("[DEMO] field-len=");
+        hal_uart_send_hex8(evt->field.value_len);
+        hal_uart_send_text("\r\n");
+        s_demo_event_reported = true;
+    }
+#endif
 }
 
 static void proto_on_unknown(uint8_t byte)
 {
     (void)byte;
+}
+
+static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
+                                    uint16_t h, uint16_t color);
+static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
+                         uint16_t color);
+
+static void raw_reading_only_render(void)
+{
+    uint32_t now = HAL_GetTick();
+
+    if (!s_display_ready)
+        return;
+    if (s_reading_only_stage == READING_ONLY_IDLE) {
+        if (!s_raw_frame_pending ||
+            (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
+            return;
+        s_render_page = (uint8_t)(s_visible_page ^ 1u);
+        memcpy(s_raw_frame_line, s_raw_reading_snapshot.line,
+               sizeof(s_raw_frame_line));
+        s_raw_frame_generation = s_raw_reading_snapshot.generation;
+        s_raw_frame_pending = false;
+        s_frame_rendering = true;
+        s_bitmap_job.active = false;
+        s_display_due_tick = now;
+        s_reading_only_stage = READING_ONLY_CLEAR;
+        return;
+    }
+    if (s_reading_only_stage == READING_ONLY_CLEAR) {
+        if (lt7680_gfx_select_canvas_page(s_render_page) != LT7680_OK ||
+            ui_fill_rect(0u, MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_UI_WIDTH,
+                         MAIN_DISPLAY_READING_H - MAIN_DISPLAY_YELLOW_LINE_H,
+                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK) {
+            reading_only_abort_frame(s_reading_only_last_error);
+            return;
+        }
+        s_reading_only_stage = READING_ONLY_VALUE;
+        return;
+    }
+    if (s_reading_only_stage == READING_ONLY_VALUE) {
+        if (!ui_draw_text(MAIN_DISPLAY_READING_X,
+                          MAIN_DISPLAY_READING_VALUE_Y,
+                          s_raw_frame_line, MAIN_DISPLAY_COLOR_GREEN))
+            return;
+        s_reading_only_stage = READING_ONLY_PRESENT;
+        return;
+    }
+    if (s_reading_only_stage == READING_ONLY_PRESENT) {
+        if (lt7680_gfx_present_page(s_render_page) != LT7680_OK) {
+            reading_only_abort_frame(s_reading_only_last_error);
+            return;
+        }
+        s_visible_page = s_render_page;
+        s_reading_only_frame_generation = s_raw_frame_generation;
+        s_raw_frame_pending = s_raw_reading_snapshot.generation !=
+                              s_raw_frame_generation;
+        s_frame_rendering = false;
+        s_reading_only_stage = READING_ONLY_IDLE;
+        return;
+    }
+    s_reading_only_stage = READING_ONLY_IDLE;
 }
 
 /* Reading scene (id 0). The renderer keeps the verified panel writes behind
@@ -5593,7 +5593,7 @@ static int16_t internal_temperature_read(void)
                      ((int32_t)ts_cal2 - (int32_t)ts_cal1));
 }
 
-static void reading_only_render(void)
+static void __attribute__((unused)) reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
 
@@ -5749,7 +5749,7 @@ static void reading_only_render(void)
          * PRESENT dirty check), never spliced into this one. */
         s_bitmap_job.active = false;
         s_rif_draw_job.active = false;
-        s_reading_only_frame_generation = s_host_snapshot.generation;
+        s_reading_only_frame_generation = s_raw_frame_generation;
         s_reading_only_pending_latest = false;
         if (!header_only) {
             s_reading_only_value_index = 0u;
@@ -6428,7 +6428,7 @@ static void reading_only_render(void)
         s_visible_page = s_render_page;
         perf_note_present();
         s_reading_only_dirty = s_reading_only_pending_latest ||
-            s_host_snapshot.generation != s_reading_only_frame_generation;
+            s_raw_reading_snapshot.generation != s_reading_only_frame_generation;
         s_reading_only_pending_latest = false;
         s_frame_rendering = false;
         s_renderer.phase = RENDER_PHASE_IDLE;
@@ -6450,7 +6450,7 @@ static void reading_only_render(void)
 static void reading_scene_render(void)
 {
 #if K2000_READING_ONLY_BASELINE
-    reading_only_render();
+    raw_reading_only_render();
     return;
 #else
     uint32_t now = HAL_GetTick();
@@ -7220,7 +7220,7 @@ int main(void)
      * the backlit panel while the clock starts and the banner prints. */
     hal_display_early_reset_hold();
     ui_model_init(&s_ui);
-    host_snapshot_init(&s_host_snapshot);
+    raw_reading_snapshot_init(&s_raw_reading_snapshot);
     trend_buffer_init(&s_trend);
     render_scheduler_init(&s_renderer);
     keypad_init(&s_keypad);

@@ -11,6 +11,8 @@
  * fragments -- partial writes merge on the canvas and never overwrite the
  * whole screen. */
 #define K2000_VFD_COLS 48u
+#define K2000_VFD_CELL_MAX 4u
+#define K2000_VFD_LINE_MAX (K2000_VFD_COLS * K2000_VFD_CELL_MAX + 1u)
 
 /* Status TAGs encode indicator bitmaps (one byte, bit7 = first indicator of
  * the group). 0x06=REM/TALK/LSTN/SRQ, 0x07=SHIFT/TIMER/MATH/REAR/...,
@@ -76,7 +78,10 @@ void k2000_proto_init(const k2000_proto_cb_t *cb);
 void k2000_proto_reset(void);
 void k2000_proto_feed(uint8_t byte);
 
-/* Copy the current VFD line up to the segment gap (two consecutive
- * spaces) or the end of written content, NUL-terminated. Returns the
- * length. */
+/* Copy columns [0, highest-written-column) with unwritten cells as spaces.
+ * A complete UTF-8 token occupies one logical column. */
 uint8_t k2000_vfd_line(char *out, uint8_t size);
+
+void k2000_vfd_clear(void);
+void k2000_vfd_set_cursor(uint8_t column);
+bool k2000_vfd_write_utf8(const char *text, uint8_t length);

@@ -618,6 +618,59 @@ const uint8_t *font_text_symbol_bitmap(uint8_t sym)
     return s_symbol_bitmaps[sym];
 }
 
+bool font_text_glyph(const char *text, uint8_t length, font_text_glyph_t *glyph)
+{
+    const uint8_t *p = (const uint8_t *)text;
+    uint32_t cp;
+    uint8_t need;
+    uint8_t i;
+
+    if (p == 0 || length == 0u || glyph == 0) return false;
+    glyph->bitmap = font_text_bitmap((char)p[0]);
+    glyph->bytes = 1u;
+    if (p[0] <= 0x7Fu) {
+        if (glyph->bitmap == 0) glyph->bitmap = font_text_bitmap('?');
+        return true;
+    }
+    if (p[0] >= 0xC2u && p[0] <= 0xDFu) {
+        need = 2u;
+        cp = p[0] & 0x1Fu;
+    } else if (p[0] >= 0xE0u && p[0] <= 0xEFu) {
+        need = 3u;
+        cp = p[0] & 0x0Fu;
+    } else if (p[0] >= 0xF0u && p[0] <= 0xF4u) {
+        need = 4u;
+        cp = p[0] & 0x07u;
+    } else {
+        glyph->bitmap = font_text_bitmap('?');
+        return true;
+    }
+    if (length < need) {
+        glyph->bitmap = font_text_bitmap('?');
+        return true;
+    }
+    for (i = 1u; i < need; i++) {
+        if (p[i] < 0x80u || p[i] > 0xBFu) {
+            glyph->bitmap = font_text_bitmap('?');
+            return true;
+        }
+        cp = (cp << 6) | (uint32_t)(p[i] & 0x3Fu);
+    }
+    if ((need == 3u && cp < 0x800u) ||
+        (need == 4u && cp < 0x10000u) ||
+        (cp >= 0xD800u && cp <= 0xDFFFu) || cp > 0x10FFFFu) {
+        glyph->bitmap = font_text_bitmap('?');
+        return true;
+    }
+    glyph->bytes = need;
+    if (cp == 0xB5u) glyph->bitmap = font_text_symbol_bitmap(FONT_TEXT_SYM_MICRO);
+    else if (cp == 0xB0u) glyph->bitmap = font_text_symbol_bitmap(FONT_TEXT_SYM_DEGREE);
+    else if (cp == 0xB1u) glyph->bitmap = font_text_symbol_bitmap(FONT_TEXT_SYM_PLUS_MINUS);
+    else if (cp == 0x3A9u) glyph->bitmap = font_text_symbol_bitmap(FONT_TEXT_SYM_OHM);
+    else glyph->bitmap = font_text_bitmap('?');
+    return true;
+}
+
 uint16_t font_text_width(void)
 {
     return FONT_TEXT_WIDTH;

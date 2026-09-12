@@ -2,6 +2,7 @@
 #include "font_text.h"
 
 #include <stddef.h>
+#include <string.h>
 
 static lt7680_panel_t s_panel;
 static lt7680_flash_b7_probe_t s_flash_b7_probe = {
@@ -1555,13 +1556,13 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
     }
     cx = x;
     while (*text != '\0') {
-        const uint8_t *bitmap = font_text_bitmap(*text);
+        font_text_glyph_t glyph;
+        const uint8_t *bitmap;
         uint16_t row;
         uint16_t col;
 
-        if (bitmap == 0) {
-            return LT7680_ERR_PARAM;
-        }
+        (void)font_text_glyph(text, (uint8_t)strlen(text), &glyph);
+        bitmap = glyph.bitmap;
         for (row = 0u; row < FONT_TEXT_HEIGHT; row++) {
             for (col = 0u; col < FONT_TEXT_WIDTH; col++) {
                 const uint8_t *bits = bitmap + row * FONT_TEXT_BYTES_PER_ROW;
@@ -1575,7 +1576,7 @@ lt7680_status_t lt7680_gfx_draw_text(uint16_t x, uint16_t y, const char *text,
             }
         }
         cx = (uint16_t)(cx + FONT_TEXT_WIDTH);
-        text++;
+        text += glyph.bytes;
     }
     return LT7680_OK;
 }

@@ -14,11 +14,15 @@ static int s_sym_ctrl = 0;
 static int s_seg_evts = 0;
 static int s_seg_ctrl = 0;
 static int s_flush_evts = 0;
+static int s_unknown_evts = 0;
+static char s_event_order[8];
+static int s_event_order_len = 0;
 
 static void on_event(const k2000_event_t *evt)
 {
     switch (evt->type) {
     case K2000_EVT_STATUS:
+        s_event_order[s_event_order_len++] = 'S';
         s_status_evts++;
         s_last_status_tag = evt->status_tag;
         s_last_status_value = evt->status_value;
@@ -27,6 +31,7 @@ static void on_event(const k2000_event_t *evt)
         s_pos_val = evt->pos;
         break;
     case K2000_EVT_FIELD:
+        s_event_order[s_event_order_len++] = 'F';
         s_field_evts++;
         memcpy(s_field_value, evt->field.value, evt->field.value_len);
         s_field_value[evt->field.value_len] = '\0';
@@ -41,6 +46,9 @@ static void on_event(const k2000_event_t *evt)
         break;
     case K2000_EVT_FLUSH:
         s_flush_evts++;
+        break;
+    case K2000_EVT_UNKNOWN:
+        s_unknown_evts++;
         break;
     default:
         break;
@@ -61,6 +69,8 @@ int main(void)
     k2000_proto_feed((uint8_t)'2');
     k2000_proto_feed(0x0Du); /* next frame: flushes "12", opens new frame */
     assert(s_field_evts == 1);
+    assert(s_unknown_evts == 0);
+    assert(s_event_order_len == 1 && s_event_order[0] == 'F');
     assert(strcmp(s_field_value, "12") == 0);
     /* New frame's field starts clean: tag 0x01 then value "3". */
     k2000_proto_feed(0x01u);
@@ -72,6 +82,7 @@ int main(void)
     /* Incomplete POS argument at frame start stays discarded (corrupt
      * fragment, not an emittable field). */
     s_field_evts = 0;
+    s_event_order_len = 0;
     k2000_proto_init(&s_cb);
     k2000_proto_feed(0x0Du);
     k2000_proto_feed(0x04u); /* POS tag, no argument */
@@ -90,6 +101,7 @@ int main(void)
     /* Status TAG arriving mid-reading (0x0D value 0x06 0x05):
      * 0x06 with value 0x05 = REM + SRQ. */
     s_status_evts = 0;
+    s_event_order_len = 0;
     k2000_proto_init(&s_cb);
     k2000_proto_feed(0x0Du);
     k2000_proto_feed(0x06u);
@@ -97,6 +109,7 @@ int main(void)
     assert(s_status_evts == 1);
     assert(s_last_status_tag == 0x06);
     assert(s_last_status_value == 0x05);
+    assert(s_event_order_len == 1 && s_event_order[0] == 'S');
 
     /* POS: 0x0D 0x04 then ASCII digits "003"; a non-digit text byte
      * terminates the position and emits the CURSOR event. */
@@ -127,7 +140,7 @@ int main(void)
     /* POS must update the persistent canvas cursor after the event payload is
      * cleared: a subsequent field character belongs at the requested column. */
     {
-        char line[24];
+        char line[K2000_VFD_LINE_MAX];
         k2000_proto_init(&s_cb);
         k2000_proto_feed(0x0Du);
         k2000_proto_feed(0x01u);
@@ -215,10 +228,10 @@ int main(void)
     k2000_proto_feed(0x02u);
     assert(s_flush_evts == 1);
 
-    /* 0x0D only returns the cursor; it cannot infer the end of a short VFD
-     * write. The protocol-defined 0x02 flush clears the old tail first. */
+    /* 0x0D closes a complete FIELD but is not itself an event. The
+     * protocol-defined 0x02 flush clears the old tail first. */
     {
-        char line[24];
+        char line[K2000_VFD_LINE_MAX];
         uint8_t i;
         static const char long_value[] = "12.345VDC.";
         static const char short_value[] = "1.2V.";
@@ -277,7 +290,8 @@ int main(void)
         assert(ll == 14u);
         assert(strcmp(line, "-030.4414mVDC.") == 0);
 
-        /* Segment gap: the line ends before two consecutive spaces. */
+        /* Internal spaces are retained and the written range ends at the
+         * highest written logical column. */
         static const char gapped[] = "1.23VDC  TRIG A";
         k2000_proto_init(&s_cb);
         k2000_proto_feed(0x0Du);
@@ -285,8 +299,45 @@ int main(void)
         for (i = 0u; gapped[i] != '\0'; i++)
             k2000_proto_feed((uint8_t)gapped[i]);
         ll = k2000_vfd_line(line, (uint8_t)sizeof(line));
-        assert(ll == 7u);
-        assert(strcmp(line, "1.23VDC") == 0);
+        assert(ll == 15u);
+        assert(strcmp(line, "1.23VDC  TRIG A") == 0);
+    }
+
+    {
+        char line[K2000_VFD_LINE_MAX];
+        static const char spaces[] = "                                              ";
+        static const char utf8[] = "\xC2\xB5\xCE\xA9";
+        k2000_proto_init(&s_cb);
+        assert(k2000_vfd_write_utf8(spaces, 46u));
+        assert(k2000_vfd_write_utf8(utf8, (uint8_t)(sizeof(utf8) - 1u)));
+        /* Two UTF-8 tokens occupy columns 46 and 47, while their serialized
+         * bytes still make the exported line 50 bytes long. */
+        assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 50u);
+        assert(memcmp(line + 46, "\xC2\xB5", 2u) == 0);
+        assert(memcmp(line + 48, "\xCE\xA9", 2u) == 0);
+        assert(!k2000_vfd_write_utf8("\xC2", 1u));
+        assert(!k2000_vfd_write_utf8("\xE0\x80\x80", 3u));
+        assert(!k2000_vfd_write_utf8("\xF4\x90\x80\x80", 4u));
+
+        k2000_vfd_clear();
+        k2000_vfd_set_cursor(47u);
+        assert(k2000_vfd_write_utf8("\xE2\x98\x83" "Z", 4u));
+        /* One logical column may serialize to several UTF-8 bytes. */
+        assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 50u);
+        assert(memcmp(line + 47, "\xE2\x98\x83", 3u) == 0);
+    }
+
+    {
+        char line[K2000_VFD_LINE_MAX];
+        k2000_proto_init(&s_cb);
+        k2000_proto_feed(0x0Du);
+        k2000_proto_feed(0x04u);
+        k2000_proto_feed('0'); k2000_proto_feed('0'); k2000_proto_feed('3');
+        k2000_proto_feed('A');
+        k2000_proto_feed(0x01u);
+        k2000_proto_feed('X');
+        assert(k2000_vfd_line(line, (uint8_t)sizeof(line)) == 4u);
+        assert(memcmp(line, "   X", 4u) == 0);
     }
 
     return 0;

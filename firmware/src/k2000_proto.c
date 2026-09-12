@@ -25,47 +25,109 @@ static uint8_t s_evt_tag;
 /* VFD canvas (see k2000_proto.h). The host maintains the cursor across
  * writes: text advances it, 0x04+ASCII-digits repositions, 0x02 clears.
  * Content is persistent like the real tube -- partial updates merge. */
-static char s_vfd[K2000_VFD_COLS];
+static char s_vfd[K2000_VFD_COLS][K2000_VFD_CELL_MAX];
+static uint8_t s_vfd_len[K2000_VFD_COLS];
+static uint8_t s_vfd_end;
 static uint8_t s_vfd_cursor;
+
+static void vfd_put(char c);
 
 static void vfd_clear(void)
 {
-    memset(s_vfd, ' ', sizeof(s_vfd));
+    memset(s_vfd, 0, sizeof(s_vfd));
+    memset(s_vfd_len, 0, sizeof(s_vfd_len));
+    s_vfd_end = 0u;
     s_vfd_cursor = 0u;
+}
+
+static void vfd_put_bytes(const char *bytes, uint8_t length)
+{
+    if (s_vfd_cursor < K2000_VFD_COLS) {
+        if (length > K2000_VFD_CELL_MAX)
+            length = K2000_VFD_CELL_MAX;
+        memcpy(s_vfd[s_vfd_cursor], bytes, length);
+        s_vfd_len[s_vfd_cursor] = length;
+        s_vfd_cursor++;
+        if (s_vfd_cursor > s_vfd_end)
+            s_vfd_end = s_vfd_cursor;
+    }
 }
 
 static void vfd_put(char c)
 {
-    if (s_vfd_cursor < K2000_VFD_COLS) {
-        s_vfd[s_vfd_cursor++] = c;
-    }
+    vfd_put_bytes(&c, 1u);
 }
 
 uint8_t k2000_vfd_line(char *out, uint8_t size)
 {
-    uint8_t end = K2000_VFD_COLS;
-    uint8_t n;
+    uint8_t column;
+    uint8_t n = 0u;
     if (out == 0 || size == 0u) {
         return 0u;
     }
-    /* Trim trailing spaces (the canvas is space-initialised). */
-    while (end > 0u && s_vfd[end - 1u] == ' ') {
-        end--;
-    }
-    /* Copy up to the segment gap: two consecutive spaces. The gap
-     * look-ahead only runs while a following character exists, so a line
-     * ending without a gap keeps its final character (the old bound
-     * `n + 1u < end` silently dropped it, mangling trailing unit letters
-     * whenever the host did not append a cursor dot). */
-    for (n = 0u; n < end && n + 1u < size; n++) {
-        if (n + 1u < end && s_vfd[n] == ' ' && s_vfd[n + 1u] == ' ') {
+    for (column = 0u; column < s_vfd_end; column++) {
+        uint8_t i;
+        uint8_t cell_len = s_vfd_len[column] == 0u ? 1u : s_vfd_len[column];
+        if ((uint16_t)n + cell_len >= size)
             break;
-        }
-        out[n] = s_vfd[n];
+        if (s_vfd_len[column] == 0u)
+            out[n++] = ' ';
+        else
+            for (i = 0u; i < s_vfd_len[column]; i++)
+                out[n++] = s_vfd[column][i];
     }
     out[n] = '\0';
-    /* Trailing single space is part of the segment: keep it. */
     return n;
+}
+
+void k2000_vfd_clear(void) { vfd_clear(); }
+
+void k2000_vfd_set_cursor(uint8_t column)
+{
+    s_vfd_cursor = column < K2000_VFD_COLS ? column : K2000_VFD_COLS;
+}
+
+static uint8_t utf8_token_width(const uint8_t *text, uint8_t length)
+{
+    uint8_t b0, b1, b2, b3;
+    if (text == 0 || length == 0u) return 0u;
+    b0 = text[0];
+    if (b0 <= 0x7Fu) return 1u;
+    if (b0 >= 0xC2u && b0 <= 0xDFu)
+        return length >= 2u && text[1] >= 0x80u && text[1] <= 0xBFu ? 2u : 0u;
+    if (length < 3u) return 0u;
+    b1 = text[1]; b2 = text[2];
+    if (b0 == 0xE0u && (b1 < 0xA0u || b1 > 0xBFu)) return 0u;
+    if (b0 >= 0xE1u && b0 <= 0xECu && (b1 < 0x80u || b1 > 0xBFu)) return 0u;
+    if (b0 == 0xEDu && (b1 < 0x80u || b1 > 0x9Fu)) return 0u;
+    if (b0 >= 0xEEu && b0 <= 0xEFu && (b1 < 0x80u || b1 > 0xBFu)) return 0u;
+    if (b2 < 0x80u || b2 > 0xBFu) return 0u;
+    if (b0 >= 0xE0u && b0 <= 0xEFu) return 3u;
+    if (length < 4u) return 0u;
+    b3 = text[3];
+    if (b0 == 0xF0u && (b1 < 0x90u || b1 > 0xBFu)) return 0u;
+    if (b0 >= 0xF1u && b0 <= 0xF3u && (b1 < 0x80u || b1 > 0xBFu)) return 0u;
+    if (b0 == 0xF4u && (b1 < 0x80u || b1 > 0x8Fu)) return 0u;
+    if (b2 < 0x80u || b2 > 0xBFu || b3 < 0x80u || b3 > 0xBFu) return 0u;
+    return b0 <= 0xF4u ? 4u : 0u;
+}
+
+bool k2000_vfd_write_utf8(const char *text, uint8_t length)
+{
+    uint8_t i = 0u, width;
+    if (text == 0) return false;
+    while (i < length) {
+        width = utf8_token_width((const uint8_t *)&text[i], (uint8_t)(length - i));
+        if (width == 0u) return false;
+        i = (uint8_t)(i + width);
+    }
+    i = 0u;
+    while (i < length) {
+        width = utf8_token_width((const uint8_t *)&text[i], (uint8_t)(length - i));
+        vfd_put_bytes(&text[i], width);
+        i = (uint8_t)(i + width);
+    }
+    return true;
 }
 
 void k2000_proto_init(const k2000_proto_cb_t *cb)
@@ -116,13 +178,14 @@ static bool append_symbol(uint8_t byte)
     } else {
         return false;
     }
+    if ((uint16_t)s_evt.field.value_len + len >= sizeof(s_evt.field.value)) {
+        emit_unknown(byte);
+        return true;
+    }
     for (i = 0; i < len; i++) {
-        if (s_evt.field.value_len >= sizeof(s_evt.field.value) - 1u) {
-            emit_unknown((uint8_t)utf8[i]);
-            break;
-        }
         s_evt.field.value[s_evt.field.value_len++] = utf8[i];
     }
+    vfd_put_bytes(utf8, len);
     return true;
 }
 
@@ -182,8 +245,7 @@ void k2000_proto_feed(uint8_t byte)
         s_state = K2000_STATE_IDLE;
         memset(&s_evt, 0, sizeof(s_evt));
         s_evt_tag = 0;
-        /* 0x0D is a carriage return: each host frame rewrites the line
-         * from column 0 (bus captures: no POS tags in reading frames). */
+        /* 0x0D is a parser/cursor boundary, not an event. */
         s_vfd_cursor = 0u;
         return;
     }

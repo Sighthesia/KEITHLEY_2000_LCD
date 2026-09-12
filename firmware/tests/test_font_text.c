@@ -68,5 +68,32 @@ int main(void)
     assert(font_text_symbol_bitmap(FONT_TEXT_SYM_COUNT) == 0);
     assert(font_text_symbol_bitmap(99) == 0);
 
+    {
+        font_text_glyph_t glyph;
+        static const char three[] = "\xE2\x98\x83" "A";
+        static const char four[] = "\xF0\x9F\x98\x80" "B";
+        static const char invalid[] = "\xE2\x28\xA1" "C";
+        char boundary[49];
+        unsigned j;
+
+        assert(font_text_glyph(three, 4u, &glyph));
+        assert(glyph.bytes == 3u && glyph.bitmap == font_text_bitmap('?'));
+        assert(font_text_glyph(three + glyph.bytes, 1u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('A'));
+        assert(font_text_glyph(four, 5u, &glyph));
+        assert(glyph.bytes == 4u && glyph.bitmap == font_text_bitmap('?'));
+        assert(font_text_glyph(four + glyph.bytes, 1u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('B'));
+        assert(font_text_glyph(invalid, 4u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('?'));
+        assert(font_text_glyph(invalid + glyph.bytes, 3u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('('));
+
+        for (j = 0u; j < 48u; j++) boundary[j] = 'A';
+        boundary[48] = '\0';
+        assert(font_text_glyph(&boundary[47], 1u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('A'));
+    }
+
     return 0;
 }
