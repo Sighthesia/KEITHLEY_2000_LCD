@@ -29,6 +29,7 @@
 #include "font_half.h"
 #include "font_text.h"
 #include "raw_reading_snapshot.h"
+#include "raw_reading_progress.h"
 #include "keypad.h"
 #include "ui_layout.h"
 #include "k2000_proto.h"
@@ -553,6 +554,8 @@ static raw_reading_snapshot_t s_raw_reading_snapshot;
     static char s_raw_frame_line[RAW_READING_SNAPSHOT_MAX];
 static uint32_t s_raw_frame_generation;
 static bool s_raw_frame_pending;
+static raw_reading_progress_t s_raw_reading_progress;
+static char s_raw_reading_block[RAW_READING_SNAPSHOT_MAX];
 /* SWD census (monotonic), repurposed from the removed gate: pass =
  * records accepted into the snapshot, drop = lines rejected by the
  * reading filter (labels, placeholders). A high drop rate during power-on
@@ -1885,6 +1888,9 @@ static void raw_reading_only_render(void)
                sizeof(s_raw_frame_line));
         s_raw_frame_generation = s_raw_reading_snapshot.generation;
         s_raw_frame_pending = false;
+        raw_reading_progress_init(&s_raw_reading_progress, s_raw_frame_line,
+                                  s_raw_reading_snapshot.length,
+                                  RAW_READING_PROGRESS_BLOCK_TOKENS);
         s_frame_rendering = true;
         s_bitmap_job.active = false;
         s_display_due_tick = now;
@@ -1909,15 +1915,32 @@ static void raw_reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_VALUE) {
-        if (!ui_draw_text(MAIN_DISPLAY_READING_X,
+        uint8_t start;
+        uint8_t length;
+        if (!raw_reading_progress_current(&s_raw_reading_progress, &start,
+                                          &length)) {
+            s_reading_only_stage = READING_ONLY_PRESENT;
+            return;
+        }
+        /* The shared bitmap job may resume inside this block. Do not rewrite
+         * its source buffer until the previous block has completed. */
+        if (!s_bitmap_job.active)
+        {
+            memcpy(s_raw_reading_block, s_raw_frame_line + start, length);
+            s_raw_reading_block[length] = '\0';
+        }
+        if (!ui_draw_text((uint16_t)(MAIN_DISPLAY_READING_X +
+                                     s_raw_reading_progress.column * FONT_TEXT_WIDTH),
                           MAIN_DISPLAY_READING_VALUE_Y,
-                          s_raw_frame_line, MAIN_DISPLAY_COLOR_GREEN))
+                          s_raw_reading_block, MAIN_DISPLAY_COLOR_GREEN))
         {
             if (s_reading_only_io_error)
                 reading_only_abort_frame(s_reading_only_last_error);
             return;
         }
-        s_reading_only_stage = READING_ONLY_PRESENT;
+        raw_reading_progress_advance(&s_raw_reading_progress);
+        if (!raw_reading_progress_current(&s_raw_reading_progress, 0, 0))
+            s_reading_only_stage = READING_ONLY_PRESENT;
         return;
     }
     if (s_reading_only_stage == READING_ONLY_PRESENT) {
@@ -2042,7 +2065,10 @@ static const uint8_t *text_glyph(const char *text, uint8_t *advance)
         *advance = 2u;
     }
     else
+    {
         bitmap = font_text_bitmap(*text);
+        *advance = raw_reading_progress_token_length((const uint8_t *)text);
+    }
     return bitmap != 0 ? bitmap : font_text_bitmap('?');
 }
 

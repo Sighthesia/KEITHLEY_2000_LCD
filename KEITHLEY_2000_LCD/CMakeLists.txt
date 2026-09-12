@@ -56,6 +56,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/k2000_proto.c
     Core/Src/host_snapshot.c
     Core/Src/raw_reading_snapshot.c
+    Core/Src/raw_reading_progress.c
     Core/Src/main_display.c
     Core/Src/panel_transform.c
     Core/Src/reading_split.c
