@@ -9,6 +9,11 @@ static uint8_t hal_spi_xfer(uint8_t byte)
     return 0xFFu;
 }
 
+static bool hal_spi_failed(void)
+{
+    return false;
+}
+
 static void hal_cs(bool level)
 {
     (void)level;
@@ -28,6 +33,7 @@ static const lt7680_bus_io_t s_io = {
     .cs = hal_cs,
     .rst = hal_rst,
     .spi_xfer = hal_spi_xfer,
+    .spi_failed = hal_spi_failed,
     .delay_ms = hal_delay_ms,
 };
 

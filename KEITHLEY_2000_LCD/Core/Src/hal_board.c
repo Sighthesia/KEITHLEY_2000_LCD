@@ -120,6 +120,16 @@ static const sht3x_io_t s_sht3x_io = {
     .delay_ms = sht3x_delay_ms_wrap,
 };
 
+static volatile bool s_spi_transfer_failed;
+static uint32_t s_spi_timeout_count;
+
+static bool hal_spi_failed(void)
+{
+    bool failed = s_spi_transfer_failed;
+    s_spi_transfer_failed = false;
+    return failed;
+}
+
 static uint8_t hal_spi_xfer(uint8_t byte)
 {
 #if LT7680_SPI_HW
@@ -136,8 +146,11 @@ static uint8_t hal_spi_xfer(uint8_t byte)
         (void)purge;
     }
     while ((SPI1->SR & SPI_SR_TXE) == 0u) {
-        if (++spin > 200000u)
+        if (++spin > 200000u) {
+            s_spi_transfer_failed = true;
+            s_spi_timeout_count++;
             return 0xFFu;
+        }
     }
     SPI1->DR = byte;
     spin = 0u;
@@ -146,6 +159,8 @@ static uint8_t hal_spi_xfer(uint8_t byte)
             volatile uint32_t purge = SPI1->DR;
             purge = SPI1->SR;
             (void)purge;
+            s_spi_transfer_failed = true;
+            s_spi_timeout_count++;
             return 0xFFu;
         }
     }
@@ -193,6 +208,7 @@ static const lt7680_bus_io_t s_lt7680_io = {
     .cs = hal_cs,
     .rst = hal_rst,
     .spi_xfer = hal_spi_xfer,
+    .spi_failed = hal_spi_failed,
     .delay_ms = hal_delay_ms,
 };
 

@@ -1275,6 +1275,9 @@ static void reading_only_abort_frame(lt7680_status_t error)
     s_abort_total++;
     s_reading_only_last_error = error;
     s_reading_only_dirty = true;
+    /* The snapshot was consumed when this attempt started. Keep it queued so
+     * a bus recovery can retry the same raw frame on a later scheduler turn. */
+    s_raw_frame_pending = true;
     s_reading_only_stage = READING_ONLY_IDLE;
     s_deferred_row_pending = false;
     s_display_due_tick = HAL_GetTick();
@@ -1889,12 +1892,17 @@ static void raw_reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_CLEAR) {
-        if (lt7680_gfx_select_canvas_page(s_render_page) != LT7680_OK ||
+        lt7680_status_t st = lt7680_gfx_select_canvas_page(s_render_page);
+        if (st != LT7680_OK ||
             ui_fill_rect(0u, MAIN_DISPLAY_READING_Y + MAIN_DISPLAY_YELLOW_LINE_H,
                          MAIN_DISPLAY_UI_WIDTH,
                          MAIN_DISPLAY_READING_H - MAIN_DISPLAY_YELLOW_LINE_H,
-                         MAIN_DISPLAY_COLOR_BG) != LT7680_OK) {
-            reading_only_abort_frame(s_reading_only_last_error);
+                          MAIN_DISPLAY_COLOR_BG) != LT7680_OK) {
+            if (st == LT7680_OK)
+                st = s_reading_only_last_error;
+            if (st == LT7680_OK)
+                st = LT7680_ERR_BUS;
+            reading_only_abort_frame(st);
             return;
         }
         s_reading_only_stage = READING_ONLY_VALUE;
@@ -1904,7 +1912,11 @@ static void raw_reading_only_render(void)
         if (!ui_draw_text(MAIN_DISPLAY_READING_X,
                           MAIN_DISPLAY_READING_VALUE_Y,
                           s_raw_frame_line, MAIN_DISPLAY_COLOR_GREEN))
+        {
+            if (s_reading_only_io_error)
+                reading_only_abort_frame(s_reading_only_last_error);
             return;
+        }
         s_reading_only_stage = READING_ONLY_PRESENT;
         return;
     }

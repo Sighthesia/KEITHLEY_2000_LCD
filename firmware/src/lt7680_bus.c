@@ -7,17 +7,28 @@ void lt7680_bus_init(const lt7680_bus_io_t *io)
     s_io = io;
 }
 
-static uint8_t xfer_byte(uint8_t out)
+lt7680_status_t lt7680_delay_ms(uint32_t ms)
 {
-    return s_io->spi_xfer(out);
+    if (s_io == 0 || s_io->delay_ms == 0) {
+        return LT7680_ERR_BUS;
+    }
+    s_io->delay_ms(ms);
+    return LT7680_OK;
 }
 
-static lt7680_status_t xfer_byte_st(uint8_t out, uint8_t *in)
+static lt7680_status_t xfer_byte(uint8_t out, uint8_t *in)
 {
     if (s_io == 0 || s_io->spi_xfer == 0) {
         return LT7680_ERR_BUS;
     }
-    *in = s_io->spi_xfer(out);
+    if (in != 0) {
+        *in = s_io->spi_xfer(out);
+    } else {
+        (void)s_io->spi_xfer(out);
+    }
+    if (s_io->spi_failed != 0 && s_io->spi_failed()) {
+        return LT7680_ERR_TIMEOUT;
+    }
     return LT7680_OK;
 }
 
@@ -42,8 +53,11 @@ lt7680_status_t lt7680_wait_ready(uint32_t timeout_ms)
     }
     for (;;) {
         s_io->cs(false);
-        (void)xfer_byte_st(LT7680_SPI_CMD_READ_STATUS, &status);
-        (void)xfer_byte_st(0xFFu, &status);
+        if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
+            xfer_byte(0xFFu, &status) != LT7680_OK) {
+            s_io->cs(true);
+            return LT7680_ERR_TIMEOUT;
+        }
         s_io->cs(true);
         if ((status & LT7680_STATUS_BUSY) == 0u) {
             return LT7680_OK;
@@ -62,27 +76,30 @@ lt7680_status_t lt7680_read_status(uint8_t *status)
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    (void)xfer_byte_st(LT7680_SPI_CMD_READ_STATUS, status);
-    (void)xfer_byte_st(0xFFu, status);
+    if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
+        xfer_byte(0xFFu, status) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
+    }
     s_io->cs(true);
     return LT7680_OK;
 }
 
-/* Command write: select register address (REG[00h]..REG[FFh]). */
 static lt7680_status_t cmd_write(uint8_t reg)
 {
     if (s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_BUS;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_REG);
-    (void)xfer_byte(reg);
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
+    }
     s_io->cs(true);
     return LT7680_OK;
 }
 
-/* Select a register address without writing data.  Used to point the data
- * port at Display RAM (REG[04h] MRWDP) before a memory-write burst. */
 lt7680_status_t lt7680_select_reg(uint8_t reg)
 {
     return cmd_write(reg);
@@ -90,46 +107,11 @@ lt7680_status_t lt7680_select_reg(uint8_t reg)
 
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value)
 {
-    lt7680_status_t st;
-    st = cmd_write(reg);
+    lt7680_status_t st = cmd_write(reg);
     if (st != LT7680_OK) {
         return st;
     }
-    if (s_io == 0 || s_io->cs == 0) {
-        return LT7680_ERR_BUS;
-    }
-    s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA);
-    (void)xfer_byte(value);
-    s_io->cs(true);
-    return LT7680_OK;
-}
-
-/* Write consecutive bytes to the register/memory port (multi-byte
- * registers are written LSB first, e.g. REG[E2h] then REG[E3h]). */
-lt7680_status_t lt7680_write_reg_bytes(uint8_t reg, const uint8_t *data,
-                                       uint8_t len)
-{
-    lt7680_status_t st;
-    uint8_t i;
-
-    if (data == 0) {
-        return LT7680_ERR_PARAM;
-    }
-    st = cmd_write(reg);
-    if (st != LT7680_OK) {
-        return st;
-    }
-    if (s_io == 0 || s_io->cs == 0) {
-        return LT7680_ERR_BUS;
-    }
-    s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA);
-    for (i = 0; i < len; i++) {
-        (void)xfer_byte(data[i]);
-    }
-    s_io->cs(true);
-    return LT7680_OK;
+    return lt7680_write_data(&value, 1u);
 }
 
 lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
@@ -138,30 +120,36 @@ lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
         return LT7680_ERR_PARAM;
     }
     s_io->cs(false);
-    (void)xfer_byte(LT7680_SPI_CMD_WRITE_REG);
-    (void)xfer_byte(reg);
-    (void)xfer_byte(LT7680_SPI_CMD_READ_REG);
-    (void)xfer_byte(0xFFu);
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
+    }
     s_io->cs(true);
-    *value = 0;
+
+    s_io->cs(false);
+    if (xfer_byte(LT7680_SPI_CMD_READ_REG, 0) != LT7680_OK ||
+        xfer_byte(0xFFu, value) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
+    }
+    s_io->cs(true);
     return LT7680_OK;
 }
 
-/* Write Display RAM pixel data. Mirror Levetop SPI_DataWrite: each byte is a
- * full CS transaction (CS low -> 0x80 -> byte -> CS high).  Keeping CS low
- * across a burst makes LT7680A-R consume every byte after the first 0x80 as
- * data, so a repeated 0x80 prefix is written into the pixel stream and the
- * picture looks like aliased 8bpp (the classic MRWDP symptom). */
+/* Each display-RAM byte is a complete LT7680 transaction. */
 lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
 {
-    uint32_t i;
     if (data == 0 || s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_PARAM;
     }
-    for (i = 0; i < len; i++) {
+    for (uint32_t i = 0; i < len; i++) {
         s_io->cs(false);
-        (void)xfer_byte(LT7680_SPI_CMD_WRITE_DATA);
-        (void)xfer_byte(data[i]);
+        if (xfer_byte(LT7680_SPI_CMD_WRITE_DATA, 0) != LT7680_OK ||
+            xfer_byte(data[i], 0) != LT7680_OK) {
+            s_io->cs(true);
+            return LT7680_ERR_TIMEOUT;
+        }
         s_io->cs(true);
     }
     return LT7680_OK;

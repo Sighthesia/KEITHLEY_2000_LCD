@@ -10,6 +10,10 @@
 #define LT7680_SPI_CMD_READ_DATA 0xE0u
 
 #define LT7680_STATUS_CORE_BUSY 0x08u
+#define LT7680_STATUS_DPRAM_READY 0x04u
+#define LT7680_STATUS_MEMWR_FIFO_FULL 0x80u
+#define LT7680_STATUS_MEMRD_FIFO_FULL 0x20u
+#define LT7680_STATUS_INHIBIT 0x02u
 #define LT7680_STATUS_BUSY LT7680_STATUS_CORE_BUSY
 
 typedef enum {
@@ -25,6 +29,9 @@ typedef struct {
     void (*cs)(bool level);
     void (*rst)(bool level);
     uint8_t (*spi_xfer)(uint8_t byte);
+    /* Optional hardware seam: reports a failed transfer without changing the
+     * legacy byte-oriented SPI callback ABI. */
+    bool (*spi_failed)(void);
     void (*delay_ms)(uint32_t ms);
 } lt7680_bus_io_t;
 

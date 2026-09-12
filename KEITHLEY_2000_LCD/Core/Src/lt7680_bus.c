@@ -26,6 +26,9 @@ static lt7680_status_t xfer_byte(uint8_t out, uint8_t *in)
     } else {
         (void)s_io->spi_xfer(out);
     }
+    if (s_io->spi_failed != 0 && s_io->spi_failed()) {
+        return LT7680_ERR_TIMEOUT;
+    }
     return LT7680_OK;
 }
 
@@ -53,7 +56,7 @@ lt7680_status_t lt7680_wait_ready(uint32_t timeout_ms)
         if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
             xfer_byte(0xFFu, &status) != LT7680_OK) {
             s_io->cs(true);
-            return LT7680_ERR_BUS;
+            return LT7680_ERR_TIMEOUT;
         }
         s_io->cs(true);
         if ((status & LT7680_STATUS_BUSY) == 0u) {
@@ -76,7 +79,22 @@ lt7680_status_t lt7680_read_status(uint8_t *status)
     if (xfer_byte(LT7680_SPI_CMD_READ_STATUS, 0) != LT7680_OK ||
         xfer_byte(0xFFu, status) != LT7680_OK) {
         s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
+    }
+    s_io->cs(true);
+    return LT7680_OK;
+}
+
+static lt7680_status_t cmd_write(uint8_t reg)
+{
+    if (s_io == 0 || s_io->cs == 0) {
         return LT7680_ERR_BUS;
+    }
+    s_io->cs(false);
+    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
+        xfer_byte(reg, 0) != LT7680_OK) {
+        s_io->cs(true);
+        return LT7680_ERR_TIMEOUT;
     }
     s_io->cs(true);
     return LT7680_OK;
@@ -84,31 +102,15 @@ lt7680_status_t lt7680_read_status(uint8_t *status)
 
 lt7680_status_t lt7680_select_reg(uint8_t reg)
 {
-    if (s_io == 0 || s_io->cs == 0) {
-        return LT7680_ERR_BUS;
-    }
-    s_io->cs(false);
-    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
-        xfer_byte(reg, 0) != LT7680_OK) {
-        s_io->cs(true);
-        return LT7680_ERR_BUS;
-    }
-    s_io->cs(true);
-    return LT7680_OK;
+    return cmd_write(reg);
 }
 
 lt7680_status_t lt7680_write_reg(uint8_t reg, uint8_t value)
 {
-    if (s_io == 0 || s_io->cs == 0) {
-        return LT7680_ERR_BUS;
+    lt7680_status_t st = cmd_write(reg);
+    if (st != LT7680_OK) {
+        return st;
     }
-    s_io->cs(false);
-    if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
-        xfer_byte(reg, 0) != LT7680_OK) {
-        s_io->cs(true);
-        return LT7680_ERR_BUS;
-    }
-    s_io->cs(true);
     return lt7680_write_data(&value, 1u);
 }
 
@@ -121,7 +123,7 @@ lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
     if (xfer_byte(LT7680_SPI_CMD_WRITE_REG, 0) != LT7680_OK ||
         xfer_byte(reg, 0) != LT7680_OK) {
         s_io->cs(true);
-        return LT7680_ERR_BUS;
+        return LT7680_ERR_TIMEOUT;
     }
     s_io->cs(true);
 
@@ -129,17 +131,13 @@ lt7680_status_t lt7680_read_reg(uint8_t reg, uint8_t *value)
     if (xfer_byte(LT7680_SPI_CMD_READ_REG, 0) != LT7680_OK ||
         xfer_byte(0xFFu, value) != LT7680_OK) {
         s_io->cs(true);
-        return LT7680_ERR_BUS;
+        return LT7680_ERR_TIMEOUT;
     }
     s_io->cs(true);
     return LT7680_OK;
 }
 
-/* Write Display RAM pixel data. Mirror Levetop SPI_DataWrite: each byte is a
- * full CS transaction (CS low -> 0x80 -> byte -> CS high).  Keeping CS low
- * across a burst makes LT7680A-R consume every byte after the first 0x80 as
- * data, so a repeated 0x80 prefix is written into the pixel stream and the
- * picture looks like aliased 8bpp (the classic MRWDP symptom). */
+/* Each display-RAM byte is a complete LT7680 transaction. */
 lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
 {
     if (data == 0 || s_io == 0 || s_io->cs == 0) {
@@ -150,7 +148,7 @@ lt7680_status_t lt7680_write_data(const uint8_t *data, uint32_t len)
         if (xfer_byte(LT7680_SPI_CMD_WRITE_DATA, 0) != LT7680_OK ||
             xfer_byte(data[i], 0) != LT7680_OK) {
             s_io->cs(true);
-            return LT7680_ERR_BUS;
+            return LT7680_ERR_TIMEOUT;
         }
         s_io->cs(true);
     }
