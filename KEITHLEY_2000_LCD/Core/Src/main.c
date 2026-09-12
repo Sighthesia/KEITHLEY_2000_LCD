@@ -1944,8 +1944,9 @@ static void raw_reading_only_render(void)
         return;
     }
     if (s_reading_only_stage == READING_ONLY_PRESENT) {
-        if (lt7680_gfx_present_page(s_render_page) != LT7680_OK) {
-            reading_only_abort_frame(s_reading_only_last_error);
+        lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
+        if (st != LT7680_OK) {
+            reading_only_abort_frame(st);
             return;
         }
         s_visible_page = s_render_page;

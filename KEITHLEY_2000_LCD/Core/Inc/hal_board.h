@@ -21,6 +21,8 @@
 #define PANEL_LANDSCAPE 0u
 
 void hal_board_init(void);
+extern volatile uint32_t k2000_spi_config_restore_count;
+extern volatile uint32_t k2000_spi_failure_count;
 void hal_panel_init(void);
 /* Boot cosmetics: park the shared LT7680/panel reset line LOW before any
  * slow boot work runs, so the LT7680 cannot stream its default colour-bar

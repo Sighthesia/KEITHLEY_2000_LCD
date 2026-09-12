@@ -3,6 +3,7 @@
 #include "keypad.h"
 #include "lt7680_bus.h"
 #include "sht3x.h"
+#include "spi_config.h"
 #include "spi_timeout.h"
 #include "stm32f1xx_hal.h"
 #include "uart_rx_queue.h"
@@ -122,7 +123,12 @@ static const sht3x_io_t s_sht3x_io = {
 };
 
 static volatile bool s_spi_transfer_failed;
-static uint32_t s_spi_timeout_count;
+volatile uint32_t k2000_spi_config_restore_count;
+volatile uint32_t k2000_spi_failure_count;
+
+#if LT7680_SPI_HW
+static void init_spi1(void);
+#endif
 
 static bool hal_spi_failed(void)
 {
@@ -141,7 +147,25 @@ static uint8_t hal_spi_xfer(uint8_t byte)
      * checks recover the link. */
     volatile uint32_t polls;
 
-    if (SPI1->SR & SPI_SR_OVR) {
+    bool spi_clock_enabled =
+        (RCC->APB2ENR & RCC_APB2ENR_SPI1EN) != 0u;
+    uint32_t spi_cr1 = spi_clock_enabled ? SPI1->CR1 : 0u;
+    uint32_t spi_cr2 = spi_clock_enabled ? SPI1->CR2 : 0u;
+
+    if (k2000_spi_config_missing(spi_clock_enabled, spi_cr1, spi_cr2)) {
+        /* Recover only the SPI peripheral. The caller owns CS and continues
+         * the current LT7680 transaction after the registers are restored. */
+        if (!spi_clock_enabled)
+            __HAL_RCC_SPI1_CLK_ENABLE();
+        SPI1->CR1 &= ~SPI_CR1_SPE;
+        {
+            volatile uint32_t purge = SPI1->DR;
+            purge = SPI1->SR;
+            (void)purge;
+        }
+        init_spi1();
+        k2000_spi_config_restore_count++;
+    } else if (SPI1->SR & SPI_SR_OVR) {
         volatile uint32_t purge = SPI1->DR;
         purge = SPI1->SR;
         (void)purge;
@@ -150,7 +174,7 @@ static uint8_t hal_spi_xfer(uint8_t byte)
     while ((SPI1->SR & SPI_SR_TXE) == 0u) {
         if (k2000_spi_poll_expired(&polls)) {
             s_spi_transfer_failed = true;
-            s_spi_timeout_count++;
+            k2000_spi_failure_count++;
             return 0xFFu;
         }
     }
@@ -162,7 +186,7 @@ static uint8_t hal_spi_xfer(uint8_t byte)
             purge = SPI1->SR;
             (void)purge;
             s_spi_transfer_failed = true;
-            s_spi_timeout_count++;
+            k2000_spi_failure_count++;
             return 0xFFu;
         }
     }
@@ -334,9 +358,8 @@ static void init_spi1(void)
     /* Mode 0, master, 8-bit, MSB first, /16 prescaler. PCLK2 = 72 MHz
      * gives approximately 4.5 MHz, a conservative diagnostic rate for the
      * LT7680/ST7701 control path. USART1 remains independently at 9600 baud. */
-    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM |
-                SPI_CR1_BR_1 | SPI_CR1_BR_0;
-    SPI1->CR2 = 0;
+    SPI1->CR1 = K2000_SPI_CR1_EXPECTED & ~SPI_CR1_SPE;
+    SPI1->CR2 = K2000_SPI_CR2_EXPECTED;
     SPI1->CR1 |= SPI_CR1_SPE;
 }
 #endif

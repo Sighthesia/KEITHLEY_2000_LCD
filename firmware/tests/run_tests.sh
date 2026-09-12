@@ -10,7 +10,7 @@ SRCS="src/k2000_proto.c src/host_snapshot.c src/raw_reading_snapshot.c src/ui_mo
        src/panel_transform.c src/reading_split.c src/scene.c \
          src/status_bar.c src/trend_axis.c src/trend_buffer.c src/uart_rx_queue.c src/keypad.c \
         src/render_scheduler.c src/ui_layout.c src/sht3x.c src/spi_timeout.c \
-        src/raw_reading_progress.c"
+         src/raw_reading_progress.c src/spi_config.c"
 
 for t in tests/test_*.c; do
     name=$(basename "$t" .c)

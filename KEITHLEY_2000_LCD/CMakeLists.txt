@@ -70,6 +70,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/uart_rx_queue.c
     Core/Src/sht3x.c
     Core/Src/spi_timeout.c
+    Core/Src/spi_config.c
     Core/Src/ui_model.c
     Core/Src/ui_layout.c
 )
