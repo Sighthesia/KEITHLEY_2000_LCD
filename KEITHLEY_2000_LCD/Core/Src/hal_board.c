@@ -124,10 +124,6 @@ static const sht3x_io_t s_sht3x_io = {
 static volatile bool s_spi_transfer_failed;
 static uint32_t s_spi_timeout_count;
 
-/* A byte at ~4.5 MHz completes in under 2 us. Two milliseconds leaves ample
- * room for interrupt latency while keeping a wedged peripheral bounded. */
-#define LT7680_SPI_WAIT_TIMEOUT_MS 2u
-
 static bool hal_spi_failed(void)
 {
     bool failed = s_spi_transfer_failed;
@@ -143,27 +139,25 @@ static uint8_t hal_spi_xfer(uint8_t byte)
      * freezing the whole product mid-render. Now a wedged transfer
      * degrades to a dummy byte and the higher-level status/timeout
      * checks recover the link. */
-    uint32_t start_tick;
+    volatile uint32_t polls;
 
     if (SPI1->SR & SPI_SR_OVR) {
         volatile uint32_t purge = SPI1->DR;
         purge = SPI1->SR;
         (void)purge;
     }
-    start_tick = HAL_GetTick();
+    polls = 0u;
     while ((SPI1->SR & SPI_SR_TXE) == 0u) {
-        if (k2000_timeout_expired(start_tick, HAL_GetTick(),
-                                  LT7680_SPI_WAIT_TIMEOUT_MS)) {
+        if (k2000_spi_poll_expired(&polls)) {
             s_spi_transfer_failed = true;
             s_spi_timeout_count++;
             return 0xFFu;
         }
     }
     SPI1->DR = byte;
-    start_tick = HAL_GetTick();
+    polls = 0u;
     while ((SPI1->SR & SPI_SR_RXNE) == 0u) {
-        if (k2000_timeout_expired(start_tick, HAL_GetTick(),
-                                  LT7680_SPI_WAIT_TIMEOUT_MS)) {
+        if (k2000_spi_poll_expired(&polls)) {
             volatile uint32_t purge = SPI1->DR;
             purge = SPI1->SR;
             (void)purge;
