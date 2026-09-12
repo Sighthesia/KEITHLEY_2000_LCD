@@ -3,6 +3,7 @@
 #include "keypad.h"
 #include "lt7680_bus.h"
 #include "sht3x.h"
+#include "spi_timeout.h"
 #include "stm32f1xx_hal.h"
 #include "uart_rx_queue.h"
 
@@ -123,6 +124,10 @@ static const sht3x_io_t s_sht3x_io = {
 static volatile bool s_spi_transfer_failed;
 static uint32_t s_spi_timeout_count;
 
+/* A byte at ~4.5 MHz completes in under 2 us. Two milliseconds leaves ample
+ * room for interrupt latency while keeping a wedged peripheral bounded. */
+#define LT7680_SPI_WAIT_TIMEOUT_MS 2u
+
 static bool hal_spi_failed(void)
 {
     bool failed = s_spi_transfer_failed;
@@ -138,24 +143,27 @@ static uint8_t hal_spi_xfer(uint8_t byte)
      * freezing the whole product mid-render. Now a wedged transfer
      * degrades to a dummy byte and the higher-level status/timeout
      * checks recover the link. */
-    uint32_t spin = 0u;
+    uint32_t start_tick;
 
     if (SPI1->SR & SPI_SR_OVR) {
         volatile uint32_t purge = SPI1->DR;
         purge = SPI1->SR;
         (void)purge;
     }
+    start_tick = HAL_GetTick();
     while ((SPI1->SR & SPI_SR_TXE) == 0u) {
-        if (++spin > 200000u) {
+        if (k2000_timeout_expired(start_tick, HAL_GetTick(),
+                                  LT7680_SPI_WAIT_TIMEOUT_MS)) {
             s_spi_transfer_failed = true;
             s_spi_timeout_count++;
             return 0xFFu;
         }
     }
     SPI1->DR = byte;
-    spin = 0u;
+    start_tick = HAL_GetTick();
     while ((SPI1->SR & SPI_SR_RXNE) == 0u) {
-        if (++spin > 200000u) {
+        if (k2000_timeout_expired(start_tick, HAL_GetTick(),
+                                  LT7680_SPI_WAIT_TIMEOUT_MS)) {
             volatile uint32_t purge = SPI1->DR;
             purge = SPI1->SR;
             (void)purge;
@@ -329,10 +337,11 @@ static void init_spi1(void)
 {
     __HAL_RCC_SPI1_CLK_ENABLE();
     SPI1->CR1 = 0;
-    /* Mode 0 (CPOL=0, CPHA=0), master, 8-bit, MSB first, /4 prescaler.
-     * PCLK2 = 72 MHz -> SPI clock = 18 MHz.  Mode 0 matches the verified
-     * bit-bang signalling the LT7680 color-bars milestone used. */
-    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM | SPI_CR1_BR_1;
+    /* Mode 0, master, 8-bit, MSB first, /16 prescaler. PCLK2 = 72 MHz
+     * gives approximately 4.5 MHz, a conservative diagnostic rate for the
+     * LT7680/ST7701 control path. USART1 remains independently at 9600 baud. */
+    SPI1->CR1 = SPI_CR1_MSTR | SPI_CR1_SSI | SPI_CR1_SSM |
+                SPI_CR1_BR_1 | SPI_CR1_BR_0;
     SPI1->CR2 = 0;
     SPI1->CR1 |= SPI_CR1_SPE;
 }
