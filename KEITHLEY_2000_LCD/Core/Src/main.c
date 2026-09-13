@@ -1740,7 +1740,7 @@ static bool hidden_page_sync_regions(void)
 static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
-    return !s_raw_rendering && (!s_trend_sweep_drawing && s_frame_rendering &&
+    return s_raw_rendering || (!s_trend_sweep_drawing && s_frame_rendering &&
            !s_render_full_page &&
            frame_region_for_phase(s_renderer.phase) != 0u);
 }
@@ -1897,6 +1897,25 @@ static void raw_reading_only_render(void)
             (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
             return;
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
+        /* Raw frames bypass the normal region scheduler. Keep the hidden
+         * page's non-reading bands current with two wide BTE copies before
+         * drawing the new value only on that page. */
+        {
+            static const uint16_t ranges[][2] = {{0u, 50u}, {192u, 320u}};
+            uint8_t range;
+            for (range = 0u; range < 2u; range++) {
+                lt7680_rect_t rect;
+                uint16_t y = ranges[range][0];
+                uint16_t h = (uint16_t)(ranges[range][1] - y);
+
+                panel_transform_ui_rect_to_fb(0u, y, MAIN_DISPLAY_UI_WIDTH,
+                                              h, &rect.x, &rect.y,
+                                              &rect.w, &rect.h);
+                if (lt7680_gfx_copy_rect(s_visible_page, s_render_page,
+                                         &rect) != LT7680_OK)
+                    return;
+            }
+        }
         memcpy(s_raw_frame_line, s_raw_reading_snapshot.line,
                sizeof(s_raw_frame_line));
         s_raw_frame_generation = s_raw_reading_snapshot.generation;
@@ -3112,11 +3131,15 @@ static void rif_init(void)
     s_rif_dma_probe_passed = false;
 #if K2000_RIF_DMA_PROBE
     rif_dma_probe();
+#else
+    /* No visible probe was requested; allow the off-screen cache validation
+     * below to decide whether the normal BTE renderer may run. */
+    s_rif_dma_probe_passed = true;
 #endif
-    /* The BTE probe currently reports command completion only; until its
-     * pixels are independently accepted, do not present its diagnostic page
-     * during normal boot. */
-    if (s_rif_dma_probe_passed)
+    /* Build and validate the glyph cache off-screen. The optional visual
+     * probe above is deliberately independent: it must never be required for
+     * normal boot because it presents a cropped glyph on page 1. */
+    if (header_ready)
     {
         /* Glyphs draw straight from U5 via block DMA -- no SDRAM cache to
          * build. Just walk the directory once into the RAM lookup table so
