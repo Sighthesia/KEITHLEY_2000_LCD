@@ -74,7 +74,7 @@
  * display scan for SDRAM bandwidth and leave sparse single-pixel sparkles.
  * A 1 ms gap per glyph keeps ~10 glyphs/frame inside the 33 ms budget. */
 #ifndef RIF_BLIT_GAP_MS
-#define RIF_BLIT_GAP_MS 0U
+#define RIF_BLIT_GAP_MS 1U
 #endif
 
 /* Change-diff bookkeeping for the reading band. Each cached tile carries an
@@ -566,6 +566,9 @@ static bool s_raw_frame_pending;
 static raw_reading_progress_t s_raw_reading_progress;
 static char s_raw_reading_block[RAW_READING_SNAPSHOT_MAX];
 static bool s_raw_rendering;
+/* Raw frames bypass the normal region scheduler. Each canvas therefore
+ * receives the unchanged header/trend bands once before it is first used. */
+static bool s_raw_page_nonreading_synced[2];
 /* SWD census (monotonic), repurposed from the removed gate: pass =
  * records accepted into the snapshot, drop = lines rejected by the
  * reading filter (labels, placeholders). A high drop rate during power-on
@@ -1897,13 +1900,13 @@ static void raw_reading_only_render(void)
             (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
             return;
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
-        /* Raw frames bypass the normal region scheduler. Keep the hidden
-         * page's non-reading bands current with two wide BTE copies before
-         * drawing the new value only on that page. */
+        if (!s_raw_page_nonreading_synced[s_render_page])
         {
             static const uint16_t ranges[][2] = {{0u, 50u}, {192u, 320u}};
             uint8_t range;
-            for (range = 0u; range < 2u; range++) {
+
+            for (range = 0u; range < 2u; range++)
+            {
                 lt7680_rect_t rect;
                 uint16_t y = ranges[range][0];
                 uint16_t h = (uint16_t)(ranges[range][1] - y);
@@ -1915,6 +1918,7 @@ static void raw_reading_only_render(void)
                                          &rect) != LT7680_OK)
                     return;
             }
+            s_raw_page_nonreading_synced[s_render_page] = true;
         }
         memcpy(s_raw_frame_line, s_raw_reading_snapshot.line,
                sizeof(s_raw_frame_line));
@@ -2518,6 +2522,10 @@ static bool __attribute__((unused)) ui_draw_external_digits(
                 if (st == LT7680_OK)
                 {
                     s_rif_bte_hits++;
+                    /* Let the display fetch breathe between large tile
+                     * bursts; back-to-back BTE traffic causes glyph-edge
+                     * sparkles on this controller. */
+                    (void)lt7680_delay_ms(RIF_BLIT_GAP_MS);
                     s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
                                                    FONT_DIGIT_WIDTH);
                     s_rif_draw_job.text += s_rif_draw_job.advance;
