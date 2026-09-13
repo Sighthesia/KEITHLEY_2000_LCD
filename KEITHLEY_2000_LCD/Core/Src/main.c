@@ -137,11 +137,10 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * key capture. Counters keep running either way; only the print is cut. */
 #define K2000_PERF_LOG 0U
 
-/* The RIF DMA/BTE path is not accepted as a normal rendering path. Keep the
- * internal bitmap renderer active until the staged hardware probe is enabled
- * explicitly and passes its visual checks; otherwise every glyph can take a
- * slow direct-flash transfer and leave partial pixels during reset/retry. */
-#define K2000_DISABLE_RIF_DIGITS 1U
+/* Normal reading digits use the external RIF path so the 68x128 MCU bitmap
+ * is not linked into the 64 KiB image. The boot-only visual probe remains
+ * disabled; normal glyph rendering is still guarded by the RIF header check. */
+#define K2000_DISABLE_RIF_DIGITS 0U
 
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
