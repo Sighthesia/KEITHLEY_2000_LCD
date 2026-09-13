@@ -133,6 +133,10 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * key capture. Counters keep running either way; only the print is cut. */
 #define K2000_PERF_LOG 0U
 
+/* Isolate the verified internal bitmap path while the LT7680 flash-DMA glyph
+ * path is being diagnosed. External glyph failures otherwise skip digits. */
+#define K2000_DISABLE_RIF_DIGITS 1U
+
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
  * default 10 Hz reproduces a normal K2000 sample flow. Raising it (only
@@ -1945,10 +1949,13 @@ static void raw_reading_only_render(void)
     }
     if (s_reading_only_stage == READING_ONLY_PRESENT) {
         lt7680_status_t st = lt7680_gfx_present_page(s_render_page);
+        if (st == LT7680_OK)
+            st = lt7680_write_reg(0x12u, 0x48u);
         if (st != LT7680_OK) {
             reading_only_abort_frame(st);
             return;
         }
+        s_display_enabled = true;
         s_visible_page = s_render_page;
         s_reading_only_frame_generation = s_raw_frame_generation;
         s_raw_frame_pending = s_raw_reading_snapshot.generation !=
@@ -2333,8 +2340,8 @@ static bool rif_find_next_tile(void)
     return false;
 }
 
-static bool ui_draw_external_digits(uint16_t x, uint16_t y, const char *text,
-                                    uint16_t color)
+static bool __attribute__((unused)) ui_draw_external_digits(
+    uint16_t x, uint16_t y, const char *text, uint16_t color)
 {
     lt7680_status_t st;
     uint16_t budget = 8u;
@@ -2654,8 +2661,12 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color)
 {
     if (text == 0 || text[0] == '\0') return true;
+#if K2000_DISABLE_RIF_DIGITS
+    return ui_draw_text(x, y, text, color);
+#else
     return s_rif_ready ? ui_draw_external_digits(x, y, text, color)
                        : ui_draw_text(x, y, text, color);
+#endif
 }
 
 static void __attribute__((unused)) rif_log_spi_registers(const char *phase)
@@ -7451,7 +7462,7 @@ int main(void)
                              s_demo_status_tick = HAL_GetTick();
 #endif
 #endif
-                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
+                            hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
                             /* Arm DWT cycle counter + TRCENA so the

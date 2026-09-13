@@ -15,9 +15,11 @@
 #define UART_BAUD 9600u
 
 /* LT7680 SPI transport: 1 = SPI1 hardware (PA4 CS, PA5 SCK, PA6 MISO,
- * PA7 MOSI), 0 = software bit-bang fallback. Hardware SPI is ~25-30x faster;
- * keep the bit-bang path for on-target diagnosis. */
-#define LT7680_SPI_HW 1u
+ * PA7 MOSI), 0 = software bit-bang fallback. Isolation experiment default
+ * is bit-bang: it bypasses any SPI1 CR1 corruption path while the hardware
+ * init/recovery code stays compiled out but preserved for re-enable.
+ * Keep the bit-bang path for on-target diagnosis. */
+#define LT7680_SPI_HW 0u
 
 #define LCD_CS_GPIO_PORT GPIOA
 #define LCD_CS_PIN GPIO_PIN_0
