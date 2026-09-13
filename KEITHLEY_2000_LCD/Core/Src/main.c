@@ -60,6 +60,10 @@
  * answered in isolation. Set to 1 to enable. */
 #define LT7680_SPI_SELFTEST 0U
 
+/* The RIF DMA visual probe is a bench diagnostic. It intentionally presents
+ * a cropped glyph on page 1 and must never run during normal boot. */
+#define K2000_RIF_DMA_PROBE 0U
+
 /* Cached-tile BTE renderer enabled after the off-screen cache write/read
  * probe and the 4x4 BTE visual block both passed hardware acceptance. */
 #ifndef RIF_BTE_RENDERER
@@ -133,9 +137,11 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * key capture. Counters keep running either way; only the print is cut. */
 #define K2000_PERF_LOG 0U
 
-/* Main readings prefer the original Flash-backed large glyphs. A failed RIF
- * transfer disables that path and lets the caller retry with internal glyphs. */
-#define K2000_DISABLE_RIF_DIGITS 0U
+/* The RIF DMA/BTE path is not accepted as a normal rendering path. Keep the
+ * internal bitmap renderer active until the staged hardware probe is enabled
+ * explicitly and passes its visual checks; otherwise every glyph can take a
+ * slow direct-flash transfer and leave partial pixels during reset/retry. */
+#define K2000_DISABLE_RIF_DIGITS 1U
 
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
@@ -1735,7 +1741,7 @@ static bool hidden_page_sync_regions(void)
 static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
-    return s_raw_rendering || (!s_trend_sweep_drawing && s_frame_rendering &&
+    return !s_raw_rendering && (!s_trend_sweep_drawing && s_frame_rendering &&
            !s_render_full_page &&
            frame_region_for_phase(s_renderer.phase) != 0u);
 }
@@ -1892,32 +1898,6 @@ static void raw_reading_only_render(void)
             (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
             return;
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
-        /* Raw frames have no scheduler regions to drive the normal hidden
-         * page sync. Copy the non-reading bands first, in short strips so a
-         * long BTE transaction cannot expose a partially copied page. */
-        {
-            static const uint16_t ranges[][2] = {{0u, 50u}, {192u, 320u}};
-            uint8_t range;
-            for (range = 0u; range < 2u; range++) {
-                uint16_t x = 0u;
-                uint16_t y = ranges[range][0];
-                uint16_t h = (uint16_t)(ranges[range][1] - y);
-                while (x < MAIN_DISPLAY_UI_WIDTH) {
-                    uint16_t w = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - x);
-                    lt7680_rect_t rect;
-
-                    if (w > 32u)
-                        w = 32u;
-                    panel_transform_ui_rect_to_fb(x, y, w, h,
-                                                  &rect.x, &rect.y,
-                                                  &rect.w, &rect.h);
-                    if (lt7680_gfx_copy_rect(s_visible_page, s_render_page,
-                                             &rect) != LT7680_OK)
-                        return;
-                    x = (uint16_t)(x + w);
-                }
-            }
-        }
         memcpy(s_raw_frame_line, s_raw_reading_snapshot.line,
                sizeof(s_raw_frame_line));
         s_raw_frame_generation = s_raw_reading_snapshot.generation;
@@ -2808,7 +2788,7 @@ static void rif_dma_snapshot_send(const char *label,
     hal_uart_send_text("\r\n");
 }
 
-static void rif_dma_probe(void)
+static void __attribute__((unused)) rif_dma_probe(void)
 {
     static const uint32_t staging_addr = 0x200000u;
     static const uint16_t probe_x = 16u;
@@ -3131,7 +3111,9 @@ static void rif_init(void)
         return;
     }
     s_rif_dma_probe_passed = false;
+#if K2000_RIF_DMA_PROBE
     rif_dma_probe();
+#endif
     /* The BTE probe currently reports command completion only; until its
      * pixels are independently accepted, do not present its diagnostic page
      * during normal boot. */
