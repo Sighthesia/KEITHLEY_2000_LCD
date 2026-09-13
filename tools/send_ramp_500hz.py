@@ -10,6 +10,7 @@ import argparse
 import time
 
 import serial
+from serial import SerialTimeoutException
 
 
 FRAME_PREFIX = b"\x0d\x01"
@@ -28,6 +29,8 @@ def main() -> int:
     parser.add_argument("--duration", type=float, default=60.0)
     parser.add_argument("--frequency", type=float, default=500.0)
     parser.add_argument("--peak-mv", type=float, default=49.5753)
+    parser.add_argument("--block", action="store_true",
+                        help="wait for the UART instead of dropping busy samples")
     args = parser.parse_args()
 
     if args.frequency <= 0.0 or args.duration <= 0.0 or args.peak_mv <= 0.0:
@@ -36,6 +39,7 @@ def main() -> int:
     period = 1.0 / args.frequency
     total = int(args.duration * args.frequency)
     sent = 0
+    dropped = 0
     started = time.monotonic()
     next_deadline = started
 
@@ -47,13 +51,17 @@ def main() -> int:
 
     try:
         with serial.Serial(args.port, args.baudrate, bytesize=8, parity="N",
-                           stopbits=1, timeout=1.0, write_timeout=2.0) as port:
+                           stopbits=1, timeout=1.0,
+                           write_timeout=None if args.block else 0.001) as port:
             for index in range(total):
                 phase = index % 2000
                 position = phase if phase <= 1000 else 2000 - phase
                 value = -args.peak_mv + (2.0 * args.peak_mv * position / 1000.0)
-                port.write(make_frame(value))
-                sent += 1
+                try:
+                    port.write(make_frame(value))
+                    sent += 1
+                except SerialTimeoutException:
+                    dropped += 1
                 next_deadline += period
                 delay = next_deadline - time.monotonic()
                 if delay > 0.0:
@@ -62,7 +70,9 @@ def main() -> int:
         print("stopped by user")
     finally:
         elapsed = max(time.monotonic() - started, 1e-9)
-        print(f"generated={sent} elapsed={elapsed:.3f}s actual={sent / elapsed:.1f} Hz")
+        generated = sent + dropped
+        print(f"generated={generated} sent={sent} dropped={dropped} "
+              f"elapsed={elapsed:.3f}s wire={sent / elapsed:.1f} Hz")
         print(f"wire_limit≈{args.baudrate / (len(make_frame(0.0)) * 10):.1f} frames/s")
 
     return 0

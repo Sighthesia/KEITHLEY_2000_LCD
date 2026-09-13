@@ -560,6 +560,7 @@ static uint32_t s_raw_frame_generation;
 static bool s_raw_frame_pending;
 static raw_reading_progress_t s_raw_reading_progress;
 static char s_raw_reading_block[RAW_READING_SNAPSHOT_MAX];
+static bool s_raw_rendering;
 /* SWD census (monotonic), repurposed from the removed gate: pass =
  * records accepted into the snapshot, drop = lines rejected by the
  * reading filter (labels, placeholders). A high drop rate during power-on
@@ -1289,6 +1290,7 @@ static void reading_only_abort_frame(lt7680_status_t error)
     s_deferred_row_pending = false;
     s_display_due_tick = HAL_GetTick();
     s_frame_rendering = false;
+    s_raw_rendering = false;
     s_renderer.phase = RENDER_PHASE_IDLE;
     /* A failed operation may have left only part of a glyph on the target
      * page. Invalidate all page-local coverage so the retry redraws every
@@ -1733,9 +1735,9 @@ static bool hidden_page_sync_regions(void)
 static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
-    return !s_trend_sweep_drawing && s_frame_rendering &&
+    return s_raw_rendering || (!s_trend_sweep_drawing && s_frame_rendering &&
            !s_render_full_page &&
-           frame_region_for_phase(s_renderer.phase) != 0u;
+           frame_region_for_phase(s_renderer.phase) != 0u);
 }
 
 /* Page invariant (Task 3, hidden-page rendering):
@@ -1890,6 +1892,32 @@ static void raw_reading_only_render(void)
             (uint32_t)(now - s_display_due_tick) < DISPLAY_FRAME_PERIOD_MS)
             return;
         s_render_page = (uint8_t)(s_visible_page ^ 1u);
+        /* Raw frames have no scheduler regions to drive the normal hidden
+         * page sync. Copy the non-reading bands first, in short strips so a
+         * long BTE transaction cannot expose a partially copied page. */
+        {
+            static const uint16_t ranges[][2] = {{0u, 50u}, {192u, 320u}};
+            uint8_t range;
+            for (range = 0u; range < 2u; range++) {
+                uint16_t x = 0u;
+                uint16_t y = ranges[range][0];
+                uint16_t h = (uint16_t)(ranges[range][1] - y);
+                while (x < MAIN_DISPLAY_UI_WIDTH) {
+                    uint16_t w = (uint16_t)(MAIN_DISPLAY_UI_WIDTH - x);
+                    lt7680_rect_t rect;
+
+                    if (w > 32u)
+                        w = 32u;
+                    panel_transform_ui_rect_to_fb(x, y, w, h,
+                                                  &rect.x, &rect.y,
+                                                  &rect.w, &rect.h);
+                    if (lt7680_gfx_copy_rect(s_visible_page, s_render_page,
+                                             &rect) != LT7680_OK)
+                        return;
+                    x = (uint16_t)(x + w);
+                }
+            }
+        }
         memcpy(s_raw_frame_line, s_raw_reading_snapshot.line,
                sizeof(s_raw_frame_line));
         s_raw_frame_generation = s_raw_reading_snapshot.generation;
@@ -1898,6 +1926,7 @@ static void raw_reading_only_render(void)
                                   s_raw_reading_snapshot.length,
                                   RAW_READING_PROGRESS_BLOCK_TOKENS);
         s_frame_rendering = true;
+        s_raw_rendering = true;
         s_bitmap_job.active = false;
         s_display_due_tick = now;
         s_reading_only_stage = READING_ONLY_CLEAR;
@@ -1963,6 +1992,7 @@ static void raw_reading_only_render(void)
         s_raw_frame_pending = s_raw_reading_snapshot.generation !=
                               s_raw_frame_generation;
         s_frame_rendering = false;
+        s_raw_rendering = false;
         s_reading_only_stage = READING_ONLY_IDLE;
         return;
     }
