@@ -117,3 +117,87 @@ RIF 资源是 LT7680 标准外部字库格式？
 ## 结论
 
 PDF 资料支持 LT7680 使用外部 Flash 和内部 SDRAM，也支持硬件 DMA、Canvas 和外部字库；但它没有提供当前 RIF `80x44` 预转置字形 tile 的直接范例。当前黑块/花屏最值得优先验证的是资源格式与 DMA/BTE 几何是否匹配，以及 DMA/BTE 完成后 Canvas/page 状态是否完整恢复。 
+
+## 代码审查结论
+
+对照本调查和 PDF 第 34--37 页进行只读代码审查后，补充以下结论。
+
+### 关键矛盾：实际目录几何尚未被代码一致接受
+
+实机启动日志给出：
+
+```text
+RIF geom0 w=80 h=44 stride=0x0100
+```
+
+但当前 `rif_reader_find_glyph()` 的允许规则仍覆盖旧的 `64x128`、`32x64`、`128x68` 和 `24x12` 形状，运行时 BTE 条件也按 `128x68` 方向判断。`80x44` 不满足这些旧规则，因此需要直接读取真实 entry 和 payload，确认：
+
+- 日志是否打印了真实资源几何；
+- `rif_reader_find_glyph()` 是否真的接受该 entry；
+- `size` 是否等于或覆盖 `stride * height`；
+- 代码是否把每行 `256` 字节正确解释为 `128` 个 RGB565 像素，还是错误地把字节数当像素数。
+
+在这个矛盾解决之前，`cache=OK` 只能表示启动流程返回成功，不能表示实际字形路径正确。
+
+### API 防护缺口
+
+代码审查另外发现：
+
+- `lt7680_flash_dma_tile_to_canvas()` 的目的范围检查没有按 `(height - 1) * canvas_stride` 计算最后一行。
+- `lt7680_gfx_blit()` 缺少源地址加完整 stride 的边界检查，也没有验证 `src_stride >= width`。
+- `rif_tile_cache_prepare()` 在多个失败分支直接返回，未统一恢复进入前保存的 Canvas base/stride。
+- DMA 后只恢复部分 Canvas/SPI 状态，没有完整恢复 DMA、BTE、Active Window 和原始 Flash 控制状态。
+
+这些问题都可能造成跨行污染、错误 Canvas 写入或后续 GE/BTE 状态异常，但目前还不能单独证明它们就是黑块的唯一根因。
+
+### 地址区域审查结果
+
+当前代码使用的主要 SDRAM 区域没有直接重叠：
+
+```text
+page 0 framebuffer: 0x000000
+page 1 framebuffer: 0x100000
+temporary/staging: 0x200000
+glyph cache:       0x300000
+```
+
+仍需注意，地址不重叠不等于资源安全。PDF 第 37 页对 `MemoryAddr` 的要求还包括不与其他功能使用的 SDRAM 区域重叠；当前自定义路径还必须满足完整 tile 高度、stride 和目标范围不越界。
+
+### 对黑块和花屏的解释
+
+当前最合理的解释链是：
+
+```text
+RIF 资源格式/几何未确认
+    -> Flash DMA/BTE 按假定的 RGB565 tile 解释
+    -> tile stride、方向或源范围错误
+    -> Canvas/page 局部内容被错误写入
+    -> 动态读数更新时出现黑块、花点或移动污染
+```
+
+另一条候选链是：
+
+```text
+DMA/cache 失败或完成后状态未完整恢复
+    -> CVSSA/Canvas stride/引擎状态残留
+    -> 后续 CLEAR 阶段进入异常等待或写错区域
+    -> 出现 phase=04 长停顿和显示异常
+```
+
+两条链都还需要固定图案和单字形实验验证，不能仅凭启动日志排除。
+
+### 审查后的操作原则
+
+在资源类型确认前，不应：
+
+- 直接把 PDF 第 34 页的 24 bpp 图片 DMA 参数移植到 RIF 字形；
+- 把标准外部字库参数套用到自定义 RGB565 tile；
+- 仅通过 `cache=OK` 或单个像素探针就确认完整字形正确；
+- 继续靠增加任意延时掩盖 stride、地址或状态恢复错误。
+
+应先完成：
+
+1. 一个真实 entry 的完整字段和 payload 解析；
+2. 一个固定 RGB565 棋盘格的 Flash/SDRAM/BTE 分段验证；
+3. DMA/BTE 源和目的范围边界测试；
+4. 失败路径后的 Canvas、MISA 和 busy 状态恢复验证。

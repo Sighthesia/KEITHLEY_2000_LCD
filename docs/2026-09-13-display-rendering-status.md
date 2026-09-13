@@ -117,3 +117,79 @@ K2000_READING_ONLY_BASELINE=1
 ## 结论
 
 当前问题尚未解决。启动复位残留已经解决，RIF 缓存构建也有启动日志证明成功，但运行期黑块和花屏仍然存在，且与字形更新同步。现阶段不应继续通过调整刷新周期、增加任意延时或切换完整 UI 框架来猜测修复；应先完成 LT7680 固定图案、BTE 几何和单字形的分层硬件验证。
+
+## 代码审查新增结论
+
+2026-09-13 对照 `docs/2026-09-13-lt7680-pdf-usage-investigation.md` 和 PDF 第 34--37 页完成只读代码审查。审查没有修改固件，但发现以下必须优先核实的实现风险。
+
+### 最高优先级：资源几何与代码解析规则矛盾
+
+实机日志记录当前目录几何为：
+
+```text
+width=80
+height=44
+stride=256
+```
+
+但 `rif_reader_find_glyph()` 仍主要接受 `64x128`、`32x64`、`128x68` 和 `24x12` 等旧几何，运行时 BTE 条件也偏向 `128x68`。因此目前不能确认日志中的 `80x44` 是否真正进入了运行字形路径，也不能确认实际 payload 是否被当作正确的 RGB565 tile 使用。
+
+这解释了为什么启动日志中的：
+
+```text
+RIF sdram glyph cache=OK
+RIF cache pixel probe=PASS
+```
+
+还不足以证明字形正确。它们只能证明部分启动操作返回成功，不能证明目录解析、完整 tile 行布局、BTE 源范围和显示方向都正确。
+
+### 当前没有使用标准外部字库路径
+
+工程没有发现 PDF 第 36--37 页的 `LT768_Select_Outside_Font_Init()` 或 `LT768_Print_Outside_Font_*()` 路径。当前实现是项目自定义的：
+
+```text
+RIF -> Flash DMA 或 SDRAM cache -> BTE -> Canvas page
+```
+
+因此必须先确认 RIF 是 LT7680 标准外部字库，还是项目自定义 packed RGB565 tile。若是标准字库，当前直接 Flash/BTE 解释方式就是错误的；若是自定义 RGB565 tile，则必须以完整 payload 验证像素格式和几何，不能引用标准外部字库的参数作为依据。
+
+### 发现的实现风险
+
+- `lt7680_flash_dma_tile_to_canvas()` 的目的地址范围检查没有按完整 Canvas stride 计算，可能低估跨行矩形的实际占用范围。
+- `lt7680_gfx_blit()` 没有检查 `src_addr + ((height - 1) * src_stride + width) * 2` 是否越过 SDRAM 边界，也没有拒绝 `src_stride < width`。
+- `rif_tile_cache_prepare()` 在 Flash 读取、Canvas 设置或写像素失败时直接返回，失败路径没有统一恢复 `CVSSA` 和 Canvas stride。
+- DMA 后恢复了部分 Canvas/SPI 状态，但没有完整保存恢复 DMA、BTE、Active Window 和原始 Flash 控制状态；这可能是 `READING_ONLY_CLEAR` 停顿和 `[CLK] lost, restored` 的候选原因，但尚未被实机时序证明。
+- `rif_tile_cache.c` 仍保留旧的 `64x128` / `32x64` 几何假设，与当前日志记录的 `80x44` 不一致。
+
+### 已确认没有直接重叠的区域
+
+当前已知地址模型本身没有发现直接重叠：
+
+```text
+page 0 framebuffer: 0x000000
+page 1 framebuffer: 0x100000
+temporary/staging: 0x200000
+glyph cache:       0x300000
+```
+
+但是地址不重叠不代表 DMA/BTE 几何正确。错误的 stride、tile 高度或 Canvas 状态仍可能写入错误行，污染显示结果。
+
+### 当前现状解释
+
+现在的问题已经从“LT7680 是否启动、外部 Flash 是否能读、缓存是否能建立”收敛到“资源格式和图形几何是否匹配”：
+
+1. 启动复位和彩条问题已解决。
+2. LT7680 能读到外部 Flash，JEDEC 为 `EF4017`。
+3. SDRAM glyph cache 建立流程返回成功，有限像素探针通过。
+4. 但代码对实际 `80x44` tile 的接受规则仍不明确，且当前路径不是 PDF 中的标准外部字库路径。
+5. 运行期仍有黑块、花屏、字体边缘花点和 `phase=04` 长停顿。
+6. 因此当前不能把问题归结为单纯刷新率不足，也不能把 `cache=OK` 当作完整字形验证结果。
+
+## 审查后的最小验证顺序
+
+1. 从 Flash 直接读取一个数字 entry，记录 `kind/code/offset/size/width/height/stride`，确认 `size` 是否覆盖 `stride * height`。
+2. 以实际 entry 几何验证 `rif_reader_find_glyph()` 是否返回成功；先解决 `80x44` 与旧 `128x68` 规则的矛盾。
+3. 不运行动态读数，使用已知 RGB565 棋盘格分别测试 Flash 到 Canvas、Flash 到 SDRAM、SDRAM 到 Canvas BTE。
+4. 给 DMA/BTE API 增加或单独测试完整源/目的范围计算，尤其是完整 stride 和最后一行地址。
+5. 人为制造 DMA/cache 中途失败，确认 `CVSSA`、Canvas stride、`MISA`、DMA busy 和 BTE busy 能恢复。
+6. 只有单字形和单页几何通过后，才重新接入动态读数、擦除、Trend 和页面提交。
