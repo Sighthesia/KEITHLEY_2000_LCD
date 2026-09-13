@@ -133,9 +133,9 @@ static rif_cell_t *rif_cell_find(uint16_t x, uint16_t y, uint32_t kind,
  * key capture. Counters keep running either way; only the print is cut. */
 #define K2000_PERF_LOG 0U
 
-/* Isolate the verified internal bitmap path while the LT7680 flash-DMA glyph
- * path is being diagnosed. External glyph failures otherwise skip digits. */
-#define K2000_DISABLE_RIF_DIGITS 1U
+/* Main readings prefer the original Flash-backed large glyphs. A failed RIF
+ * transfer disables that path and lets the caller retry with internal glyphs. */
+#define K2000_DISABLE_RIF_DIGITS 0U
 
 /* The sample clock and the display clock are deliberately independent.
  * K2000_DEMO_INPUT_HZ is the generated-field rate of the bench demo; the
@@ -1876,6 +1876,8 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
                                     uint16_t h, uint16_t color);
 static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
                          uint16_t color);
+static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
+                           uint16_t color);
 
 static void raw_reading_only_render(void)
 {
@@ -1933,8 +1935,8 @@ static void raw_reading_only_render(void)
             memcpy(s_raw_reading_block, s_raw_frame_line + start, length);
             s_raw_reading_block[length] = '\0';
         }
-        if (!ui_draw_text((uint16_t)(MAIN_DISPLAY_READING_X +
-                                     s_raw_reading_progress.column * FONT_TEXT_WIDTH),
+        if (!ui_draw_digits((uint16_t)(MAIN_DISPLAY_READING_X +
+                                      s_raw_reading_progress.column * FONT_DIGIT_WIDTH),
                           MAIN_DISPLAY_READING_VALUE_Y,
                           s_raw_reading_block, MAIN_DISPLAY_COLOR_GREEN))
         {
@@ -2477,34 +2479,11 @@ static bool __attribute__((unused)) ui_draw_external_digits(
                 {
                     s_reading_only_last_error = st;
                     s_reading_only_io_error = true;
-                    /* Never fall through to the run-length renderer here:
-                     * U5 tiles are pre-transposed and its UI-space drawing
-                     * would smear them across the reading band. Retry the
-                     * same cell on later slices; after three failures skip
-                     * the glyph so the frame can still commit. */
-                    if (s_rif_draw_job.dma_retries < 200u)
-                        s_rif_draw_job.dma_retries++;
-                    if (s_rif_draw_job.dma_retries >= 3u)
-                    {
-                        s_rif_draw_job.dma_retries = 0u;
-                        s_rif_draw_job.cx = (uint16_t)(s_rif_draw_job.cx +
-                                                       FONT_DIGIT_WIDTH);
-                        s_rif_draw_job.text += s_rif_draw_job.advance;
-                        if (*s_rif_draw_job.text == '\0')
-                        {
-                            s_rif_draw_job.active = false;
-                            return true;
-                        }
-                        if (!rif_text_code(s_rif_draw_job.text,
-                                           &s_rif_draw_job.kind,
-                                           &s_rif_draw_job.code,
-                                           &s_rif_draw_job.advance))
-                        {
-                            return rif_draw_job_next_glyph();
-                        }
-                        s_rif_draw_job.resolving = true;
-                        s_rif_draw_job.directory_index = 0u;
-                    }
+                    /* Never skip a digit and commit an apparently valid
+                     * blank frame. Fall back to the internal bitmap path on
+                     * the next scheduler call. */
+                    s_rif_draw_job.active = false;
+                    s_rif_ready = false;
                     return false;
                 }
                 s_rif_draw_job.dma_retries = 0u;
@@ -2664,8 +2643,13 @@ static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
 #if K2000_DISABLE_RIF_DIGITS
     return ui_draw_text(x, y, text, color);
 #else
-    return s_rif_ready ? ui_draw_external_digits(x, y, text, color)
-                       : ui_draw_text(x, y, text, color);
+    if (s_rif_ready) {
+        bool complete = ui_draw_external_digits(x, y, text, color);
+        if (complete || s_rif_ready)
+            return complete;
+        s_bitmap_job.active = false;
+    }
+    return ui_draw_text(x, y, text, color);
 #endif
 }
 
