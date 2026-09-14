@@ -568,8 +568,9 @@ lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
     }
     flash_end = (uint64_t)flash_address +
                 (uint32_t)width_px * height * 2u;
-    dest_end = (uint64_t)canvas_base + dy * canvas_stride * 2u +
-               dx * 2u + (uint32_t)width_px * height * 2u;
+    dest_end = (uint64_t)canvas_base +
+               ((uint64_t)dy + height - 1u) * canvas_stride * 2u +
+               ((uint64_t)dx + width_px) * 2u;
     /* Canvas pages live at 0x000000/0x100000 -- any in-range SDRAM base
      * is legal as long as the whole destination rectangle fits. */
     if (flash_end > 0x01000000u ||
@@ -1281,8 +1282,14 @@ lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
 
     if (canvas_page > 1u || s_panel.width == 0u || s_panel.height == 0u ||
         src_addr > 0x00FFFFFFu || w == 0u || h == 0u ||
+        src_stride < w ||
+        (uint64_t)src_addr +
+            (((uint64_t)(h - 1u) * src_stride + w) * 2u) > 0x01000000u ||
         (uint32_t)dst_x + w > s_panel.width ||
-        (uint32_t)dst_y + h > s_panel.height) {
+        (uint32_t)dst_y + h > s_panel.height ||
+        (uint64_t)canvas_page * LT7680_CANVAS_PAGE_BYTES +
+            ((uint64_t)dst_y + h - 1u) * s_panel.width * 2u +
+            ((uint64_t)dst_x + w) * 2u > 0x01000000u) {
         return LT7680_ERR_PARAM;
     }
     st = write_reg(LT7680_REG_BTE_CTRL1, 0xC2u);

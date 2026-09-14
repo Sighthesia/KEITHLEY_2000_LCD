@@ -61,6 +61,26 @@
 #define REG_SPIMCR2  0xB9u  /* Serial Flash SPI master control */
 #define REG_SPIMSR   0xBAu  /* Serial Flash SPI master status */
 #define REG_SPI_DIV  0xBBu  /* Serial Flash SPI clock divisor */
+#define REG_BTE_CTRL0 0x90u
+#define REG_BTE_CTRL1 0x91u
+#define REG_BTE_COLR  0x92u
+#define REG_BTE_S0_STR 0x93u
+#define REG_BTE_S0_WTH 0x97u
+#define REG_BTE_S0_X 0x99u
+#define REG_BTE_S0_Y 0x9Bu
+#define REG_BTE_DT_STR 0xA7u
+#define REG_BTE_DT_WTH 0xABu
+#define REG_BTE_DT_X 0xADu
+#define REG_BTE_DT_Y 0xAFu
+#define REG_BTE_SIZE 0xB1u
+#define REG_DMA_CTRL 0xB6u
+#define REG_DMA_SSTR 0xBCu
+#define REG_DMA_DX 0xC0u
+#define REG_DMA_DY 0xC2u
+#define REG_DMA_WTH 0xC6u
+#define REG_DMA_HIGH 0xC8u
+#define REG_DMA_SWTH 0xCAu
+#define CANVAS_PAGE_BYTES 0x00100000u
 
 /* Chip configuration bits (REG[01h]). */
 #define CCR_TFT_16BIT   (0x02u << 3)  /* bit[4:3] = 10b: 16-bit TFT output */
@@ -111,6 +131,32 @@ static lt7680_flash_header_probe_t s_flash_header_probe = {
     0u, {0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u,
          0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u}, LT7680_ERR_BUS
 };
+
+static bool validate_2d_source(uint32_t address, uint16_t stride,
+                               uint16_t width, uint16_t height)
+{
+    uint64_t end;
+
+    if (stride < width || width == 0u || height == 0u)
+        return false;
+    end = (uint64_t)address +
+          (((uint64_t)(height - 1u) * stride + width) * 2u);
+    return end <= 0x01000000u && end <= UINT32_MAX;
+}
+
+static bool validate_2d_destination(uint32_t base, uint16_t stride,
+                                    uint16_t x, uint16_t y, uint16_t width,
+                                    uint16_t height)
+{
+    uint64_t end;
+
+    if (stride < width || width == 0u || height == 0u)
+        return false;
+    end = (uint64_t)base +
+          ((uint64_t)y + height - 1u) * stride * 2u +
+          ((uint64_t)x + width) * 2u;
+    return end <= 0x01000000u && end <= UINT32_MAX;
+}
 
 /* W25Q supports modes 0 and 3. The LT768x raw-SPI reference sequence uses
  * mode 3, so first hardware bring-up follows it exactly. */
@@ -447,6 +493,13 @@ static lt7680_status_t wr32le(uint8_t reg, uint32_t val)
         }
     }
     return LT7680_OK;
+}
+
+static lt7680_status_t wr16le(uint8_t reg, uint16_t val)
+{
+    lt7680_status_t st = wr(reg, (uint8_t)val);
+    if (st != LT7680_OK) return st;
+    return wr((uint8_t)(reg + 1u), (uint8_t)(val >> 8));
 }
 
 /* Program one PLL.  FOUT = XI * (N / R) / OD  with XI = 10 MHz.
@@ -964,6 +1017,68 @@ static lt7680_status_t wait_2d_idle(void)
         }
     }
     return LT7680_ERR_TIMEOUT;
+}
+
+lt7680_status_t lt7680_flash_dma_tile_to_canvas(uint32_t flash_address,
+                                                uint32_t canvas_base,
+                                                uint16_t canvas_stride,
+                                                uint16_t dx, uint16_t dy,
+                                                uint16_t width_px,
+                                                uint16_t height)
+{
+    lt7680_status_t st;
+
+    if (flash_address > 0x00FFFFFFu ||
+        !validate_2d_destination(canvas_base, canvas_stride, dx, dy,
+                                  width_px, height) ||
+        (uint64_t)flash_address + (uint64_t)width_px * height * 2u >
+            0x01000000u) {
+        return LT7680_ERR_PARAM;
+    }
+    st = wr32le(REG_CVSSA, canvas_base);
+    if (st == LT7680_OK) st = wr13(REG_CVSIMWTH, canvas_stride);
+    if (st == LT7680_OK) st = wr32le(REG_DMA_SSTR, flash_address);
+    if (st == LT7680_OK) st = wr16le(REG_DMA_DX, dx);
+    if (st == LT7680_OK) st = wr16le(REG_DMA_DY, dy);
+    if (st == LT7680_OK) st = wr16le(REG_DMA_WTH, width_px);
+    if (st == LT7680_OK) st = wr16le(REG_DMA_HIGH, height);
+    if (st == LT7680_OK) st = wr16le(REG_DMA_SWTH, width_px);
+    if (st == LT7680_OK) st = wr(REG_DMA_CTRL, 0x01u);
+    if (st != LT7680_OK) return st;
+    return wait_2d_idle();
+}
+
+lt7680_status_t lt7680_gfx_blit(uint8_t canvas_page, uint32_t src_addr,
+                                uint16_t src_stride, uint16_t dst_x,
+                                uint16_t dst_y, uint16_t w, uint16_t h)
+{
+    lt7680_status_t st;
+
+    if (canvas_page > 1u || s_panel.width == 0u || s_panel.height == 0u ||
+        src_addr > 0x00FFFFFFu ||
+        !validate_2d_source(src_addr, src_stride, w, h) ||
+        (uint32_t)dst_x + w > s_panel.width ||
+        (uint32_t)dst_y + h > s_panel.height ||
+        !validate_2d_destination((uint32_t)canvas_page * CANVAS_PAGE_BYTES,
+                                 s_panel.width, dst_x, dst_y, w, h)) {
+        return LT7680_ERR_PARAM;
+    }
+    st = wr(REG_BTE_CTRL1, 0xC2u);
+    if (st == LT7680_OK) st = wr(REG_BTE_COLR, 0x25u);
+    if (st == LT7680_OK) st = wr32le(REG_BTE_S0_STR, src_addr);
+    if (st == LT7680_OK) st = wr13(REG_BTE_S0_WTH, src_stride);
+    if (st == LT7680_OK) st = wr13(REG_BTE_S0_X, 0u);
+    if (st == LT7680_OK) st = wr13(REG_BTE_S0_Y, 0u);
+    if (st == LT7680_OK) st = wr32le(REG_BTE_DT_STR,
+                                     (uint32_t)canvas_page * CANVAS_PAGE_BYTES);
+    if (st == LT7680_OK) st = wr13(REG_BTE_DT_WTH, s_panel.width);
+    if (st == LT7680_OK) st = wr13(REG_BTE_DT_X, dst_x);
+    if (st == LT7680_OK) st = wr13(REG_BTE_DT_Y, dst_y);
+    if (st == LT7680_OK) st = wr13(REG_BTE_SIZE, w);
+    if (st == LT7680_OK) st = wr13((uint8_t)(REG_BTE_SIZE + 2u), h);
+    if (st == LT7680_OK) st = wr(REG_BTE_CTRL0, 0x10u);
+    if (st != LT7680_OK) return st;
+    return wait_2d_idle();
 }
 
 /* Draw a line through the geometry engine (Levetop AP-Note):
