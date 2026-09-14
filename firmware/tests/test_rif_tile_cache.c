@@ -196,6 +196,32 @@ static void assert_restore_priority(int primary_failure, int base_restore_failur
     assert_last_canvas_restore();
 }
 
+static void assert_differentiated_error_priority(void)
+{
+    rif_tile_cache_entry_t entry = {0u, 0u, 0u, 0u, 0u, 0u, 1u};
+    rif_tile_t input = tile();
+
+    rif_tile_cache_init();
+    reset_mocks();
+    fail_pixels = 1;
+    fail_width_restore = 1;
+    pixels_status = LT7680_ERR_TIMEOUT;
+    width_restore_status = LT7680_ERR_PARAM;
+    assert(rif_tile_cache_prepare(1u, 5u, &input, &entry) ==
+           LT7680_ERR_TIMEOUT);
+    assert(entry.ready == 0u);
+    assert_last_canvas_restore();
+
+    entry.ready = 1u;
+    rif_tile_cache_init();
+    reset_mocks();
+    fail_width_restore = 1;
+    width_restore_status = LT7680_ERR_PARAM;
+    assert(rif_tile_cache_prepare(1u, 6u, &input, &entry) == LT7680_ERR_BUS);
+    assert(entry.ready == 0u);
+    assert_last_canvas_restore();
+}
+
 int main(void)
 {
     assert_failure(&fail_flash);
@@ -221,6 +247,7 @@ int main(void)
     assert_restore_priority(0, 1, 1, LT7680_ERR_BUS);
     assert_restore_priority(0, 0, 1, LT7680_ERR_BUS);
     assert_restore_priority(1, 0, 1, LT7680_ERR_BUS);
+    assert_differentiated_error_priority();
 
     {
         rif_tile_cache_entry_t entry = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
