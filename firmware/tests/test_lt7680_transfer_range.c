@@ -16,6 +16,10 @@ int main(void)
     /* This sample is in range under the specified SDRAM-only formula. */
     assert(lt7680_validate_2d_destination(0x00100000u, 320u, 0u, 892u,
                                           128u, 68u, limit));
+    /* The exclusive end address may land exactly on the SDRAM limit. */
+    assert(lt7680_validate_2d_destination(0x00FFFF00u, 128u, 0u, 0u,
+                                           128u, 1u, limit));
+    /* This destination really crosses the SDRAM limit. */
     assert(!lt7680_validate_2d_destination(0x00F70000u, 320u, 0u, 892u,
                                            128u, 68u, limit));
 
