@@ -8,12 +8,19 @@ static int fail_flash;
 static int fail_base;
 static int fail_width;
 static int fail_pixels;
+static int fail_base_restore;
+static int fail_width_restore;
+static lt7680_status_t pixels_status;
+static lt7680_status_t base_restore_status;
+static lt7680_status_t width_restore_status;
 static uint32_t base_calls[4];
 static uint16_t width_calls[4];
 static unsigned base_count;
 static unsigned width_count;
 static uint32_t last_base;
 static uint16_t last_width;
+static char canvas_events[8];
+static unsigned canvas_event_count;
 
 lt7680_status_t lt7680_flash_dma_read_snapshot(
     lt7680_flash_dma_snapshot_t *snapshot)
@@ -38,10 +45,16 @@ lt7680_status_t lt7680_flash_read(uint32_t address, uint8_t *data,
 
 lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address)
 {
+    if (canvas_event_count < sizeof(canvas_events))
+        canvas_events[canvas_event_count++] = 'B';
     if (base_count < 4u)
         base_calls[base_count] = address;
     last_base = address;
     base_count++;
+    if (fail_base_restore && address == 0x00123456u) {
+        fail_base_restore = 0;
+        return base_restore_status;
+    }
     if (fail_base && address != 0x00123456u) {
         fail_base = 0;
         return LT7680_ERR_BUS;
@@ -51,10 +64,16 @@ lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address)
 
 lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width)
 {
+    if (canvas_event_count < sizeof(canvas_events))
+        canvas_events[canvas_event_count++] = 'W';
     if (width_count < 4u)
         width_calls[width_count] = width;
     last_width = width;
     width_count++;
+    if (fail_width_restore && width == 320u) {
+        fail_width_restore = 0;
+        return width_restore_status;
+    }
     if (fail_width && width != 320u) {
         fail_width = 0;
         return LT7680_ERR_BUS;
@@ -71,7 +90,7 @@ lt7680_status_t lt7680_gfx_write_pixels(uint16_t x, uint16_t y,
     (void)count;
     if (fail_pixels) {
         fail_pixels = 0;
-        return LT7680_ERR_BUS;
+        return pixels_status;
     }
     return LT7680_OK;
 }
@@ -99,10 +118,40 @@ static void reset_mocks(void)
     fail_base = 0;
     fail_width = 0;
     fail_pixels = 0;
+    fail_base_restore = 0;
+    fail_width_restore = 0;
+    pixels_status = LT7680_ERR_BUS;
+    base_restore_status = LT7680_ERR_BUS;
+    width_restore_status = LT7680_ERR_BUS;
     base_count = 0u;
     width_count = 0u;
     last_base = 0u;
     last_width = 0u;
+    canvas_event_count = 0u;
+}
+
+static void assert_canvas_restore_calls(void)
+{
+    assert(base_count == 2u);
+    assert(width_count == 2u);
+    assert(canvas_event_count == 4u);
+    assert(canvas_events[0] == 'B');
+    assert(canvas_events[1] == 'W');
+    assert(canvas_events[2] == 'B');
+    assert(canvas_events[3] == 'W');
+    assert(base_calls[1] == 0x00123456u);
+    assert(width_calls[1] == 320u);
+}
+
+static void assert_last_canvas_restore(void)
+{
+    assert(base_count >= 2u);
+    assert(width_count >= 2u);
+    assert(canvas_event_count >= 4u);
+    assert(canvas_events[canvas_event_count - 2u] == 'B');
+    assert(canvas_events[canvas_event_count - 1u] == 'W');
+    assert(last_base == 0x00123456u);
+    assert(last_width == 320u);
 }
 
 static void assert_failure(int *failure)
@@ -119,6 +168,31 @@ static void assert_failure(int *failure)
     assert(entry.ready == 0u);
     assert(last_base == 0x00123456u);
     assert(last_width == 320u);
+    if (failure == &fail_pixels) {
+        assert_canvas_restore_calls();
+    }
+}
+
+static void assert_restore_priority(int primary_failure, int base_restore_failure,
+                                    int width_restore_failure,
+                                    lt7680_status_t expected)
+{
+    rif_tile_cache_entry_t entry = {0u, 0u, 0u, 0u, 0u, 0u, 1u};
+    rif_tile_t input = tile();
+
+    rif_tile_cache_init();
+    reset_mocks();
+    fail_pixels = primary_failure;
+    fail_base_restore = base_restore_failure;
+    fail_width_restore = width_restore_failure;
+    pixels_status = LT7680_ERR_BUS;
+    base_restore_status = LT7680_ERR_TIMEOUT;
+    width_restore_status = LT7680_ERR_PARAM;
+    assert(rif_tile_cache_prepare(1u, 4u, &input, &entry) == expected);
+    assert(entry.ready == 0u);
+    assert(last_base == 0x00123456u);
+    assert(last_width == 320u);
+    assert_last_canvas_restore();
 }
 
 int main(void)
@@ -138,7 +212,12 @@ int main(void)
         assert(entry.ready == 0u);
         assert(last_base == 0x00123456u);
         assert(last_width == 320u);
+        assert_last_canvas_restore();
     }
+
+    assert_restore_priority(0, 1, 0, LT7680_ERR_TIMEOUT);
+    assert_restore_priority(1, 1, 0, LT7680_ERR_BUS);
+    assert_restore_priority(0, 1, 1, LT7680_ERR_TIMEOUT);
 
     {
         rif_tile_cache_entry_t entry = {0u, 0u, 0u, 0u, 0u, 0u, 0u};

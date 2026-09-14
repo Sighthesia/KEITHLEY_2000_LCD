@@ -27,6 +27,25 @@ Each case verifies the saved base (`0x00123456`), saved stride (`320`), and
 `entry.ready == 0`. A successful build also verifies the existing cache
 metadata and first cache address.
 
+The failure-injection mock now records Canvas base/width call order. The
+pixel-write failure reaches both temporary Canvas settings before cleanup and
+asserts exactly two base calls and two width calls: one cache setup pair,
+followed by the saved CVSSA/stride restore pair. The CRC/completion failure
+asserts the final restore pair; because the implementation processes the tile
+in multiple DMA chunks, its total setup-call count is intentionally not fixed
+at two. The five failure classes remain covered; paths that fail before a
+Canvas setting is reached are checked for the saved restore values without
+claiming an operation that did not occur.
+
+Restore error precedence is also covered: a restore-only CVSSA failure is
+returned after a successful primary operation; a primary failure remains the
+returned error when CVSSA restore also fails; and simultaneous CVSSA/width
+restore failures return the CVSSA error, matching the implementation contract.
+These priority cases assert that the final Canvas base/width events are the
+cleanup restores; successful primary work may configure Canvas once per DMA
+chunk, so these cases intentionally assert the terminal restore pair rather
+than a fixed total count.
+
 ## Verification
 
 - `cd firmware && ./tests/run_tests.sh`: PASS
