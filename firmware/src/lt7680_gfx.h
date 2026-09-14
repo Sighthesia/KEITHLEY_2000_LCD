@@ -82,6 +82,23 @@ typedef struct {
     lt7680_status_t status;
 } lt7680_flash_header_probe_t;
 
+typedef struct {
+    uint8_t b6;
+    uint8_t b7;
+    uint8_t b9;
+    uint8_t ba;
+    uint8_t bb;
+    uint8_t bc_cb[16];
+    uint32_t cvssa;
+    uint16_t canvas_stride;
+    uint8_t core_status;
+    uint8_t sdram_status;
+    lt7680_status_t status;
+} lt7680_flash_dma_snapshot_t;
+
+lt7680_status_t lt7680_flash_dma_read_snapshot(
+    lt7680_flash_dma_snapshot_t *snapshot);
+
 lt7680_status_t lt7680_gfx_init(const lt7680_panel_t *panel);
 lt7680_status_t lt7680_gfx_set_canvas_base(uint32_t address);
 lt7680_status_t lt7680_gfx_set_canvas_width(uint16_t width_pixels);

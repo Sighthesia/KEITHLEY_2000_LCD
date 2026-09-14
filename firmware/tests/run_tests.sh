@@ -15,6 +15,13 @@ SRCS="src/k2000_proto.c src/host_snapshot.c src/raw_reading_snapshot.c src/ui_mo
 
 for t in tests/test_*.c; do
     name=$(basename "$t" .c)
+    if [ "$name" = "test_rif_tile_cache" ]; then
+        gcc -std=gnu11 -Wall -Wextra -Werror -I src "$t" \
+            src/rif_tile_cache.c -o "build/$name"
+        ./build/"$name"
+        echo "PASS $name"
+        continue
+    fi
     gcc -std=gnu11 -Wall -Wextra -Werror -I src "$t" $SRCS \
         -lm -o "build/$name"
     ./build/"$name"
