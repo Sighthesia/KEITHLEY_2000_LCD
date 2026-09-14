@@ -19,7 +19,7 @@ static unsigned base_count;
 static unsigned width_count;
 static uint32_t last_base;
 static uint16_t last_width;
-static char canvas_events[8];
+static char canvas_events[64];
 static unsigned canvas_event_count;
 
 lt7680_status_t lt7680_flash_dma_read_snapshot(
@@ -145,9 +145,9 @@ static void assert_canvas_restore_calls(void)
 
 static void assert_last_canvas_restore(void)
 {
-    assert(base_count >= 2u);
-    assert(width_count >= 2u);
-    assert(canvas_event_count >= 4u);
+    assert(base_count >= 1u);
+    assert(width_count >= 1u);
+    assert(canvas_event_count >= 2u);
     assert(canvas_events[canvas_event_count - 2u] == 'B');
     assert(canvas_events[canvas_event_count - 1u] == 'W');
     assert(last_base == 0x00123456u);
@@ -168,6 +168,7 @@ static void assert_failure(int *failure)
     assert(entry.ready == 0u);
     assert(last_base == 0x00123456u);
     assert(last_width == 320u);
+    assert_last_canvas_restore();
     if (failure == &fail_pixels) {
         assert_canvas_restore_calls();
     }
@@ -218,6 +219,8 @@ int main(void)
     assert_restore_priority(0, 1, 0, LT7680_ERR_TIMEOUT);
     assert_restore_priority(1, 1, 0, LT7680_ERR_BUS);
     assert_restore_priority(0, 1, 1, LT7680_ERR_TIMEOUT);
+    assert_restore_priority(0, 0, 1, LT7680_ERR_PARAM);
+    assert_restore_priority(1, 0, 1, LT7680_ERR_BUS);
 
     {
         rif_tile_cache_entry_t entry = {0u, 0u, 0u, 0u, 0u, 0u, 0u};

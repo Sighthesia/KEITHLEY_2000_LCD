@@ -46,8 +46,33 @@ cleanup restores; successful primary work may configure Canvas once per DMA
 chunk, so these cases intentionally assert the terminal restore pair rather
 than a fixed total count.
 
+The Canvas event buffer is sized for the complete operation, so all five
+failure classes now assert the terminal cleanup order (`base restore`, then
+`width restore`) instead of relying on a truncated event log. The saved restore
+arguments remain checked as `cvssa=0x00123456` and `width=320`, including when
+the base restore itself fails and the width restore is only attempted. Width
+restore precedence is covered independently: a successful primary operation
+returns the width restore error, while a primary failure still wins when only
+the width restore fails.
+
 ## Verification
 
 - `cd firmware && ./tests/run_tests.sh`: PASS
 - `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`: PASS
 - Release memory: RAM `16080 B / 20 KB` (`78.52%`), Flash `34616 B / 64 KB` (`52.82%`)
+
+## Minor Follow-up
+
+The Canvas event log was expanded to 64 entries, allowing every failure
+injection to assert the terminal cleanup order: saved Canvas base restore,
+then saved Canvas width restore. Restore arguments remain checked as
+`cvssa=0x00123456` and `width=320`; width restore is also asserted after a
+failed base restore. Added width-only restore precedence cases verify that a
+successful primary operation returns the width restore error, while a primary
+failure still takes precedence.
+
+Follow-up verification on 2026-09-14:
+
+- `cd firmware && ./tests/run_tests.sh`: PASS
+- `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`: PASS (`ninja: no work to do`)
+- `diff -q firmware/src/rif_tile_cache.c KEITHLEY_2000_LCD/Core/Src/rif_tile_cache.c`: PASS
