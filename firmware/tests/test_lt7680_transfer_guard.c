@@ -15,6 +15,7 @@ typedef struct {
     uint8_t phase;
     uint8_t register_address;
     uint8_t registers[256];
+    uint32_t spi_traffic;
     uint32_t dma_ctrl_writes;
     uint32_t bte_ctrl0_writes;
 } mock_bus_t;
@@ -47,6 +48,8 @@ static void mock_delay(uint32_t ms)
 
 static uint8_t mock_spi_xfer(uint8_t byte)
 {
+    s_bus.spi_traffic++;
+
     if (s_bus.phase == 0u) {
         s_bus.command = byte;
         s_bus.phase = 1u;
@@ -107,6 +110,7 @@ static void mock_bus_init(void)
 
 static void reset_write_counts(void)
 {
+    s_bus.spi_traffic = 0u;
     s_bus.dma_ctrl_writes = 0u;
     s_bus.bte_ctrl0_writes = 0u;
 }
@@ -135,21 +139,30 @@ int main(void)
     assert(lt7680_gfx_init(&panel) == LT7680_OK);
 
     reset_write_counts();
+    assert(lt7680_flash_dma_tile_to_canvas(0u, 0x00100000u, 320u,
+                                            0u, 892u, 128u, 68u) ==
+           LT7680_OK);
+    assert(s_bus.spi_traffic > 0u);
+
+    reset_write_counts();
     assert(lt7680_flash_dma_tile_to_canvas(0u, 0x00F80000u, 320u,
                                             0u, 892u, 128u, 68u) ==
            LT7680_ERR_PARAM);
+    assert(s_bus.spi_traffic == 0u);
     assert(s_bus.dma_ctrl_writes == 0u);
     assert(s_bus.bte_ctrl0_writes == 0u);
 
     reset_write_counts();
     assert(lt7680_gfx_blit(1u, 0x00FFF000u, 320u, 0u, 0u, 128u, 68u) ==
            LT7680_ERR_PARAM);
+    assert(s_bus.spi_traffic == 0u);
     assert(s_bus.dma_ctrl_writes == 0u);
     assert(s_bus.bte_ctrl0_writes == 0u);
 
     reset_write_counts();
     assert(lt7680_gfx_blit(1u, 0x00300000u, 79u, 0u, 0u, 80u, 44u) ==
            LT7680_ERR_PARAM);
+    assert(s_bus.spi_traffic == 0u);
     assert(s_bus.dma_ctrl_writes == 0u);
     assert(s_bus.bte_ctrl0_writes == 0u);
 
