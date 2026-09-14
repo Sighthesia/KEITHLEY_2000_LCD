@@ -122,7 +122,7 @@ PDF 资料支持 LT7680 使用外部 Flash 和内部 SDRAM，也支持硬件 DMA
 
 2026-09-14 已完成最终同步与验证。`rif_tile_cache.c` 两棵源码树逐字一致；两棵源码树的 `lt7680_gfx.c` 存在大规模差异，本次不声称已证明全部差异都是允许的硬件适配。仅确认新增 Task 2 相关范围校验在两树中的语义一致，完整共享逻辑同步仍需后续拆分和审计。
 
-范围校验已通过宿主测试，覆盖完整跨行范围和 stride 约束；RIF cache cleanup 的离线 mock 测试也已通过，覆盖失败后的 Canvas 状态清理。这些结果不等于 LT7680 实机状态恢复已验证，Flash/BTE/GE 的完整状态恢复仍是未决。
+范围校验已通过宿主测试，覆盖完整跨行范围、目的地址非零 x 横向边界和 stride 约束；RIF cache cleanup 的离线 mock 测试也已通过，覆盖失败后的 Canvas 状态清理，恢复失败统一返回 `LT7680_ERR_BUS` 且 primary error 优先。这些结果不等于 LT7680 实机状态恢复已验证，Flash/BTE/GE 的完整状态恢复仍是未决。
 
 仍明确保留为未决：RIF 的实际资源格式；LT7680A-R 16bpp DMA 宽度/单位语义；BTE 完成语义；MISA 锁存时机；长期 SDRAM refresh margin。PDF 示例和本次离线验证均不足以解决这些 LT7680A-R 本板问题。
 

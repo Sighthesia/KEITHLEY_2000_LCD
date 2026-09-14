@@ -28,7 +28,8 @@ bool lt7680_validate_2d_destination(uint32_t base, uint16_t stride_pixels,
 {
     uint64_t end;
 
-    if (stride_pixels < width_pixels || width_pixels == 0u || height == 0u)
+    if (stride_pixels < width_pixels || width_pixels == 0u || height == 0u ||
+        (uint32_t)x + width_pixels > stride_pixels)
         return false;
 
     end = (uint64_t)base +

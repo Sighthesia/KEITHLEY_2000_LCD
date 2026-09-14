@@ -175,8 +175,8 @@ cleanup:
     entry->ready = 0u;
     restore_st = lt7680_gfx_set_canvas_base(saved.cvssa);
     width_restore_st = lt7680_gfx_set_canvas_width(saved.canvas_stride);
-    if (restore_st == LT7680_OK)
-        restore_st = width_restore_st;
+    if (restore_st != LT7680_OK || width_restore_st != LT7680_OK)
+        restore_st = LT7680_ERR_BUS;
     if (st != LT7680_OK)
         return st;
     if (restore_st != LT7680_OK)

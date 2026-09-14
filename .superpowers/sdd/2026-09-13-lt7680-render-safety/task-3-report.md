@@ -37,10 +37,10 @@ at two. The five failure classes remain covered; paths that fail before a
 Canvas setting is reached are checked for the saved restore values without
 claiming an operation that did not occur.
 
-Restore error precedence is also covered: a restore-only CVSSA failure is
-returned after a successful primary operation; a primary failure remains the
-returned error when CVSSA restore also fails; and simultaneous CVSSA/width
-restore failures return the CVSSA error, matching the implementation contract.
+Restore error precedence is also covered: a restore-only CVSSA or width failure
+returns `LT7680_ERR_BUS` after a successful primary operation; a primary failure
+remains the returned error when Canvas restore also fails; and simultaneous
+restore failures still return `LT7680_ERR_BUS`.
 These priority cases assert that the final Canvas base/width events are the
 cleanup restores; successful primary work may configure Canvas once per DMA
 chunk, so these cases intentionally assert the terminal restore pair rather
@@ -74,5 +74,5 @@ failure still takes precedence.
 Follow-up verification on 2026-09-14:
 
 - `cd firmware && ./tests/run_tests.sh`: PASS
-- `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`: PASS (`ninja: no work to do`)
+- `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`: PASS (`ninja: no work to do`), meaning the Release build tree was already current rather than a fresh rebuild.
 - `diff -q firmware/src/rif_tile_cache.c KEITHLEY_2000_LCD/Core/Src/rif_tile_cache.c`: PASS

@@ -216,10 +216,10 @@ int main(void)
         assert_last_canvas_restore();
     }
 
-    assert_restore_priority(0, 1, 0, LT7680_ERR_TIMEOUT);
+    assert_restore_priority(0, 1, 0, LT7680_ERR_BUS);
     assert_restore_priority(1, 1, 0, LT7680_ERR_BUS);
-    assert_restore_priority(0, 1, 1, LT7680_ERR_TIMEOUT);
-    assert_restore_priority(0, 0, 1, LT7680_ERR_PARAM);
+    assert_restore_priority(0, 1, 1, LT7680_ERR_BUS);
+    assert_restore_priority(0, 0, 1, LT7680_ERR_BUS);
     assert_restore_priority(1, 0, 1, LT7680_ERR_BUS);
 
     {

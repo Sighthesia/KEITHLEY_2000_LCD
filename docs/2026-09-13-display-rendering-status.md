@@ -122,7 +122,7 @@ K2000_READING_ONLY_BASELINE=1
 
 2026-09-14 完成最终同步检查。`rif_tile_cache.c` 的 `firmware/src/` 与 CubeMX 树文件逐字一致。两棵源码树的 `lt7680_gfx.c` 存在大规模差异；本次不声称已证明全部差异都是允许的硬件适配。仅确认新增 Task 2 相关范围校验在两树中的语义一致，完整共享逻辑同步仍需后续拆分和审计。
 
-本任务新增的范围校验已经实现，并通过固件宿主测试覆盖：源/目的跨行最后地址、stride 小于宽度和 SDRAM 上界。RIF cache cleanup 的离线 mock 测试也已通过，覆盖 Flash 读取、Canvas 设置和像素写入失败后的 Canvas base/stride 清理与恢复错误优先级；这不等于已验证 LT7680 实机状态恢复。
+本任务新增的范围校验已经实现，并通过固件宿主测试覆盖：源/目的跨行最后地址、目的地址非零 x 横向边界、stride 小于宽度和 SDRAM 上界。RIF cache cleanup 的离线 mock 测试也已通过，覆盖 Flash 读取、Canvas 设置和像素写入失败后的 Canvas base/stride 清理；恢复失败统一返回 `LT7680_ERR_BUS`，主操作失败仍保留 primary error。这不等于已验证 LT7680 实机状态恢复。
 
 LT7680 实机状态恢复仍未验证；Flash/BTE/GE 的完整状态恢复仍是未决。以下事项同样不能由当前离线测试替代实机结论：RIF 实际资源格式；LT7680A-R 16bpp DMA 的宽度/单位语义；BTE 完成语义；MISA 锁存时机；长期 SDRAM refresh margin。
 

@@ -6,7 +6,7 @@
 
 ## 状态
 
-通过。仅更新了三份指定文档和本报告；未修改源码，未恢复或删除外部图片，现有未跟踪文件保持不变。
+本报告对应的前一轮 Task 4 已完成；本次最终修复另行更新源码、测试和文档。四个 `docs/IMG_*.jpg` 删除已存在于本计划之前的分支历史/工作区变更中，属于外部既有变更，本次未恢复、未修改，也未纳入本次安全修复提交。
 
 ## 源码同步检查
 
@@ -17,10 +17,11 @@
 ## 验证结果
 
 - `cd firmware && ./tests/run_tests.sh`：通过，全部固件宿主测试 PASS。
-  范围校验、跨行最后地址和 stride 约束测试均通过；RIF cache cleanup 的离线 mock 测试也通过，覆盖 Flash/Canvas/像素失败清理。
+范围校验、跨行最后地址、非零 x 横向边界和 stride 约束测试均通过；RIF cache cleanup 的离线 mock 测试也通过，覆盖 Flash/Canvas/像素失败清理以及恢复失败统一返回 `LT7680_ERR_BUS`。
 - `node sim/verify.js`：通过，`sim/verify.js: ALL CHECKS PASS`。
 - `tools/tests/run_tests.sh`：通过，32 个测试全部 `OK`。
-- `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`：通过，`ninja: no work to do.`
+- `cmake --build KEITHLEY_2000_LCD/build/Release --target KEITHLEY_2000_LCD.elf`：通过，输出 `ninja: no work to do`；这表示 Release 构建树已是最新，不应表述为 fresh rebuild。
+- `cd firmware && make`：源文件编译阶段通过，但最终链接仍因既有 `syscalls` 配置缺少 `_fstat`、`_isatty`、`_kill`、`_getpid` 而失败；不将其表述为全套构建通过。
 
 ## 文档状态
 
@@ -34,4 +35,4 @@
 
 ## 工作树保护
 
-任务开始时仅发现以下未跟踪文件，均未修改：`.codegraph/.gitignore`、`.embeddedskills/config.json`、`.embeddedskills/state.json`、`tools/tests/test_spi_transport.py`。
+本次未修改或提交以下外部工作区文件：`.codegraph/`、`.embeddedskills/`、`tools/tests/test_spi_transport.py`。四个 `docs/IMG_*.jpg` 删除也是本计划之前的外部既有变更，本次未恢复或提交。

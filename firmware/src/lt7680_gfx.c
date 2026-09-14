@@ -150,7 +150,8 @@ static bool validate_2d_destination(uint32_t base, uint16_t stride,
 {
     uint64_t end;
 
-    if (stride < width || width == 0u || height == 0u)
+    if (stride < width || width == 0u || height == 0u ||
+        (uint32_t)x + width > stride)
         return false;
     end = (uint64_t)base +
           ((uint64_t)y + height - 1u) * stride * 2u +

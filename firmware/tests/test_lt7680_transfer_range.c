@@ -27,9 +27,12 @@ int main(void)
     assert(lt7680_validate_2d_source(0u, 128u, 80u, 2u, 416u));
     assert(!lt7680_validate_2d_source(0u, 128u, 80u, 2u, 415u));
     assert(lt7680_validate_2d_destination(0u, 128u, 20u, 1u, 80u, 2u,
-                                          0x0300u));
+                                           0x0300u));
     assert(!lt7680_validate_2d_destination(0u, 128u, 20u, 1u, 80u, 2u,
-                                           0x02C7u));
+                                            0x02C7u));
+    /* A non-zero x must fit within each row's destination stride. */
+    assert(!lt7680_validate_2d_destination(0u, 128u, 49u, 0u, 80u, 1u,
+                                            limit));
 
     assert(!lt7680_validate_2d_source(0u, 0u, 1u, 1u, limit));
     assert(!lt7680_validate_2d_source(0u, 1u, 0u, 1u, limit));
@@ -45,7 +48,7 @@ int main(void)
     assert(!lt7680_validate_2d_source(UINT32_MAX - 1u, 2u, 2u, 2u,
                                       UINT32_MAX));
     assert(!lt7680_validate_2d_destination(UINT32_MAX - 1u, 2u, 0u, 1u,
-                                           2u, 2u, UINT32_MAX));
+                                            2u, 2u, UINT32_MAX));
 
     return 0;
 }
