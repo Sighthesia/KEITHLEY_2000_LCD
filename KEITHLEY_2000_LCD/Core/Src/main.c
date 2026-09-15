@@ -64,6 +64,11 @@
  * a cropped glyph on page 1 and must never run during normal boot. */
 #define K2000_RIF_DMA_PROBE 0U
 
+/* Diagnostic-only internal font probe; disabled in normal builds. */
+#ifndef K2000_INTERNAL_FONT_PROBE
+#define K2000_INTERNAL_FONT_PROBE 0
+#endif
+
 /* Cached-tile BTE renderer enabled after the off-screen cache write/read
  * probe and the 4x4 BTE visual block both passed hardware acceptance. */
 #ifndef RIF_BTE_RENDERER

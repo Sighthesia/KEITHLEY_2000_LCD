@@ -10,6 +10,11 @@
 #include "scene.h"
 #include "ui_model.h"
 
+/* Diagnostic-only internal font probe; disabled in normal builds. */
+#ifndef K2000_INTERNAL_FONT_PROBE
+#define K2000_INTERNAL_FONT_PROBE 0
+#endif
+
 static ui_model_t s_model;
 static k2000_event_t s_last_evt;
 static volatile uint32_t s_evt_count;
