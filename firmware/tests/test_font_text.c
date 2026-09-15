@@ -70,11 +70,31 @@ int main(void)
 
     {
         font_text_glyph_t glyph;
+        const uint8_t *eight;
         static const char three[] = "\xE2\x98\x83" "A";
         static const char four[] = "\xF0\x9F\x98\x80" "B";
         static const char invalid[] = "\xE2\x28\xA1" "C";
         char boundary[49];
         unsigned j;
+
+        assert(font_text_glyph("8", 1u, &glyph));
+        eight = glyph.bitmap;
+        assert(eight != 0);
+        assert(glyph.bytes == 1u);
+        assert(font_text_width() == 12u);
+        assert(font_text_height() == 24u);
+        assert(eight == font_text_bitmap('8'));
+        /* Rows are two bytes wide, with the first pixel in the MSB. */
+        assert(eight[0] == 0x00u && eight[1] == 0x00u); /* empty row */
+        assert(eight[6] == 0x1Fu && eight[7] == 0x80u); /* left edge */
+        assert(eight[10] == 0x30u && eight[11] == 0xE0u); /* interior run */
+        assert((eight[7] & 0x80u) != 0u); /* byte boundary bit */
+        assert((eight[7] & 0x0Fu) == 0u); /* unused width bits stay clear */
+        assert(eight[36] == 0x00u && eight[37] == 0x00u); /* empty row */
+        assert(!font_text_glyph(0, 1u, &glyph));
+        assert(!font_text_glyph("", 0u, &glyph));
+        assert(font_text_glyph("\x01", 1u, &glyph));
+        assert(glyph.bytes == 1u && glyph.bitmap == font_text_bitmap('?'));
 
         assert(font_text_glyph(three, 4u, &glyph));
         assert(glyph.bytes == 3u && glyph.bitmap == font_text_bitmap('?'));
