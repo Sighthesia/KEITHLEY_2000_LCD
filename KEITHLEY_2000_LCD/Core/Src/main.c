@@ -7530,14 +7530,33 @@ int main(void)
                                 s_frame_rendering = false;
                                 s_frame_has_trend_update = false;
                                 s_renderer.phase = RENDER_PHASE_IDLE;
-                                (void)lt7680_gfx_select_canvas_page(0u);
-                                (void)lt7680_gfx_present_page(0u);
-                                (void)lt7680_write_reg(0x12u, 0x48u);
-                                s_display_enabled = true;
+                                st = lt7680_gfx_select_canvas_page(0u);
+                                if (st == LT7680_OK)
+                                    st = lt7680_gfx_present_page(0u);
+                                if (st == LT7680_OK)
+                                    st = lt7680_write_reg(0x12u, 0x48u);
+                                if (st == LT7680_OK)
+                                    s_display_enabled = true;
 #endif
+#if K2000_INTERNAL_FONT_PROBE
+                            if (st != LT7680_OK)
+                            {
+                                s_display_enabled = false;
+                                hal_uart_send_text("FAIL static single-page probe=");
+                                hal_uart_send_hex8((uint8_t)st);
+                                hal_uart_send_text("\r\n");
+                            }
+                            else
+                            {
+                                hal_uart_send_text("PASS static single-page probe ready\r\n");
+                                s_display_ready = true;
+                                hal_uart_send_text("\r\nINIT-OK\r\n");
+                            }
+#else
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
+#endif
                             /* Arm DWT cycle counter + TRCENA so the
                              * SysTick PC sampler has live data. */
                             *((volatile uint32_t *)0xE000EDFCu) |= (1u << 24u);
