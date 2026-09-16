@@ -64,11 +64,6 @@
  * a cropped glyph on page 1 and must never run during normal boot. */
 #define K2000_RIF_DMA_PROBE 0U
 
-/* Diagnostic-only internal font probe; disabled in normal builds. */
-#ifndef K2000_INTERNAL_FONT_PROBE
-#define K2000_INTERNAL_FONT_PROBE 0
-#endif
-
 /* Cached-tile BTE renderer enabled after the off-screen cache write/read
  * probe and the 4x4 BTE visual block both passed hardware acceptance. */
 #ifndef RIF_BTE_RENDERER
@@ -256,10 +251,6 @@ static uint32_t s_display_on_tick;
 #endif
 static bool s_display_ready;
 static bool s_display_enabled;
-#if K2000_INTERNAL_FONT_PROBE
-static bool s_internal_font_probe_failed;
-static lt7680_status_t s_internal_font_probe_error = LT7680_OK;
-#endif
 static bool s_initial_page_pending;
 static bool s_frame_rendering;
 static uint8_t s_visible_page;
@@ -1641,7 +1632,7 @@ static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
 /* Map a scheduler phase to the UI band its drawing owns. Bands are the
  * unit of inter-page synchronization: a runtime frame only mutates pixels
  * inside the band(s) of its phases, so a band copy can never miss a write. */
-static uint8_t __attribute__((unused)) frame_region_for_phase(render_phase_t phase)
+static uint8_t frame_region_for_phase(render_phase_t phase)
 {
     switch (phase)
     {
@@ -1752,13 +1743,9 @@ static bool hidden_page_sync_regions(void)
 static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
-#if K2000_INTERNAL_FONT_PROBE
-    return true;
-#else
     return s_raw_rendering || (!s_trend_sweep_drawing && s_frame_rendering &&
            !s_render_full_page &&
            frame_region_for_phase(s_renderer.phase) != 0u);
-#endif
 }
 
 /* Page invariant (Task 3, hidden-page rendering):
@@ -1902,7 +1889,7 @@ static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
 static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color);
 
-static void __attribute__((unused)) raw_reading_only_render(void)
+static void raw_reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
 
@@ -2055,12 +2042,6 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     {
         s_reading_only_last_error = st;
         s_reading_only_io_error = true;
-    }
-#endif
-#if K2000_INTERNAL_FONT_PROBE
-    if (st != LT7680_OK && !s_internal_font_probe_failed)
-    {
-        s_internal_font_probe_error = st;
     }
 #endif
     return st;
@@ -2996,7 +2977,7 @@ static bool rif_cache_pixel_probe(void)
     return ok;
 }
 
-static void __attribute__((unused)) rif_init(void)
+static void rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
     uint8_t id[3] = {0u, 0u, 0u};
@@ -6544,33 +6525,6 @@ static void __attribute__((unused)) reading_only_render(void)
 
 static void reading_scene_render(void)
 {
-#if K2000_INTERNAL_FONT_PROBE
-    static bool internal_font_probe_drawn;
-
-    if (!s_display_ready || s_internal_font_probe_failed)
-        return;
-    if (!internal_font_probe_drawn)
-    {
-        if (ui_draw_text(32u, 48u, "8", MAIN_DISPLAY_COLOR_GREEN))
-        {
-            internal_font_probe_drawn = true;
-            hal_uart_send_text("PASS static font probe drawn\r\n");
-            return;
-        }
-        if (s_internal_font_probe_error == LT7680_OK)
-            return; /* The bounded bitmap job needs another scene turn. */
-
-        s_internal_font_probe_failed = true;
-        s_display_ready = false;
-        s_display_enabled = false;
-        (void)lt7680_write_reg(0x12u, 0x08u);
-        hal_uart_send_text("FAIL static font probe=");
-        hal_uart_send_hex8((uint8_t)s_internal_font_probe_error);
-        hal_uart_send_text("\r\n");
-    }
-    return;
-}
-#else
 #if K2000_READING_ONLY_BASELINE
     raw_reading_only_render();
     return;
@@ -7286,7 +7240,6 @@ static void reading_scene_render(void)
     display_enable_after_initial_frame();
 #endif
 }
-#endif
 
 static const scene_t s_reading_scene = {
     reading_scene_enter,
@@ -7463,14 +7416,6 @@ int main(void)
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */
                         s_visible_page = 0u;
-#if K2000_INTERNAL_FONT_PROBE
-                        s_render_page = 0u;
-                        st = lt7680_gfx_select_canvas_page(0u);
-                        if (st == LT7680_OK)
-                            st = lt7680_gfx_clear(0x0000u);
-                        if (st == LT7680_OK)
-                            st = lt7680_gfx_present_page(0u);
-#else
                         s_render_page = 1u;
                         st = lt7680_gfx_select_canvas_page(s_render_page);
                         if (st == LT7680_OK)
@@ -7497,7 +7442,6 @@ int main(void)
                              * the main-window renderer only. */
 #endif
                         }
-#endif
                             if (st != LT7680_OK)
                             {
                                 hal_uart_send_text("FAIL clear=");
@@ -7506,7 +7450,6 @@ int main(void)
                             }
                             else
                             {
-#if !K2000_INTERNAL_FONT_PROBE
                                 /* Validate the external RIF while the panel is still
                                  * blank. A failed probe leaves the internal font path
                                  * active; a valid header enables external glyphs. */
@@ -7541,46 +7484,13 @@ int main(void)
                              s_display_on_tick = HAL_GetTick();
 #endif
 #if K2000_DEMO_FEED
-                              s_demo_last_tick = HAL_GetTick();
-                              s_demo_status_tick = HAL_GetTick();
+                             s_demo_last_tick = HAL_GetTick();
+                             s_demo_status_tick = HAL_GetTick();
 #endif
 #endif
-#else
-                                /* Probe mode keeps one known canvas/page only. The
-                                 * normal RIF and first-frame pipeline are omitted. */
-                                s_visible_page = 0u;
-                                s_render_page = 0u;
-                                s_ready_page_mask = 1u;
-                                s_frame_rendering = false;
-                                s_frame_has_trend_update = false;
-                                s_renderer.phase = RENDER_PHASE_IDLE;
-                                st = lt7680_gfx_select_canvas_page(0u);
-                                if (st == LT7680_OK)
-                                    st = lt7680_gfx_present_page(0u);
-                                if (st == LT7680_OK)
-                                    st = lt7680_write_reg(0x12u, 0x48u);
-                                if (st == LT7680_OK)
-                                    s_display_enabled = true;
-#endif
-#if K2000_INTERNAL_FONT_PROBE
-                            if (st != LT7680_OK)
-                            {
-                                s_display_enabled = false;
-                                hal_uart_send_text("FAIL static single-page probe=");
-                                hal_uart_send_hex8((uint8_t)st);
-                                hal_uart_send_text("\r\n");
-                            }
-                            else
-                            {
-                                hal_uart_send_text("PASS static single-page probe ready\r\n");
-                                s_display_ready = true;
-                                hal_uart_send_text("\r\nINIT-OK\r\n");
-                            }
-#else
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
                             hal_uart_send_text("\r\nINIT-OK\r\n");
-#endif
                             /* Arm DWT cycle counter + TRCENA so the
                              * SysTick PC sampler has live data. */
                             *((volatile uint32_t *)0xE000EDFCu) |= (1u << 24u);
