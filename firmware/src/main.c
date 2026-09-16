@@ -99,9 +99,17 @@ static void reading_scene_exit(void)
 
 static void reading_scene_render(void)
 {
+#if K2000_INTERNAL_FONT_PROBE
+    /* Host builds keep the probe branch compile-visible without introducing
+     * hardware calls into the pure scene test binary. */
+    static uint8_t internal_font_probe_drawn;
+    internal_font_probe_drawn = 1u;
+    return;
+#else
     main_display_frame_t frame;
     main_display_format(&s_model, &frame);
     (void)frame;
+#endif
 }
 
 static const scene_t s_reading_scene = {

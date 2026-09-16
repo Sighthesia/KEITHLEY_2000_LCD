@@ -6530,6 +6530,19 @@ static void __attribute__((unused)) reading_only_render(void)
 
 static void reading_scene_render(void)
 {
+#if K2000_INTERNAL_FONT_PROBE
+    static bool internal_font_probe_drawn;
+
+    if (!s_display_ready)
+        return;
+    if (!internal_font_probe_drawn)
+    {
+        if (!ui_draw_text(32u, 48u, "8", MAIN_DISPLAY_COLOR_GREEN))
+            return;
+        internal_font_probe_drawn = true;
+    }
+    return;
+#else
 #if K2000_READING_ONLY_BASELINE
     raw_reading_only_render();
     return;
@@ -7245,6 +7258,7 @@ static void reading_scene_render(void)
     display_enable_after_initial_frame();
 #endif
 }
+#endif
 
 static const scene_t s_reading_scene = {
     reading_scene_enter,
