@@ -1748,9 +1748,13 @@ static bool hidden_page_sync_regions(void)
 static bool s_trend_sweep_drawing;
 static bool ui_runtime_single_page(void)
 {
+#if K2000_INTERNAL_FONT_PROBE
+    return true;
+#else
     return s_raw_rendering || (!s_trend_sweep_drawing && s_frame_rendering &&
            !s_render_full_page &&
            frame_region_for_phase(s_renderer.phase) != 0u);
+#endif
 }
 
 /* Page invariant (Task 3, hidden-page rendering):
@@ -7435,6 +7439,14 @@ int main(void)
                          * clear, REG[12h]=0x48 exposes stale/uninitialized canvas pixels
                          * as sparse RGB corruption. */
                         s_visible_page = 0u;
+#if K2000_INTERNAL_FONT_PROBE
+                        s_render_page = 0u;
+                        st = lt7680_gfx_select_canvas_page(0u);
+                        if (st == LT7680_OK)
+                            st = lt7680_gfx_clear(0x0000u);
+                        if (st == LT7680_OK)
+                            st = lt7680_gfx_present_page(0u);
+#else
                         s_render_page = 1u;
                         st = lt7680_gfx_select_canvas_page(s_render_page);
                         if (st == LT7680_OK)
@@ -7461,6 +7473,7 @@ int main(void)
                              * the main-window renderer only. */
 #endif
                         }
+#endif
                             if (st != LT7680_OK)
                             {
                                 hal_uart_send_text("FAIL clear=");
@@ -7469,6 +7482,7 @@ int main(void)
                             }
                             else
                             {
+#if !K2000_INTERNAL_FONT_PROBE
                                 /* Validate the external RIF while the panel is still
                                  * blank. A failed probe leaves the internal font path
                                  * active; a valid header enables external glyphs. */
@@ -7503,9 +7517,23 @@ int main(void)
                              s_display_on_tick = HAL_GetTick();
 #endif
 #if K2000_DEMO_FEED
-                             s_demo_last_tick = HAL_GetTick();
-                             s_demo_status_tick = HAL_GetTick();
+                              s_demo_last_tick = HAL_GetTick();
+                              s_demo_status_tick = HAL_GetTick();
 #endif
+#endif
+#else
+                                /* Probe mode keeps one known canvas/page only. The
+                                 * normal RIF and first-frame pipeline are omitted. */
+                                s_visible_page = 0u;
+                                s_render_page = 0u;
+                                s_ready_page_mask = 1u;
+                                s_frame_rendering = false;
+                                s_frame_has_trend_update = false;
+                                s_renderer.phase = RENDER_PHASE_IDLE;
+                                (void)lt7680_gfx_select_canvas_page(0u);
+                                (void)lt7680_gfx_present_page(0u);
+                                (void)lt7680_write_reg(0x12u, 0x48u);
+                                s_display_enabled = true;
 #endif
                             hal_uart_send_text("PASS framebuffer ready, building hidden frame\r\n");
                             s_display_ready = true;
