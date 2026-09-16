@@ -1,0 +1,17 @@
+.\obj\lt768.o: HARDWARE\LT768\LT768.c
+.\obj\lt768.o: HARDWARE\LT768\LT768.h
+.\obj\lt768.o: HARDWARE\LT768\LT768.h
+.\obj\lt768.o: .\HARDWARE\IF_PORT\if_port.h
+.\obj\lt768.o: .\SYSTEM\sys\sys.h
+.\obj\lt768.o: .\USER\stm32f10x.h
+.\obj\lt768.o: .\CORE\core_cm3.h
+.\obj\lt768.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+.\obj\lt768.o: .\USER\system_stm32f10x.h
+.\obj\lt768.o: .\USER\stm32f10x_conf.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\stm32f10x_fsmc.h
+.\obj\lt768.o: .\USER\stm32f10x.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\stm32f10x_gpio.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\stm32f10x_rcc.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\stm32f10x_spi.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\stm32f10x_usart.h
+.\obj\lt768.o: .\STM32F10x_FWLib\inc\misc.h

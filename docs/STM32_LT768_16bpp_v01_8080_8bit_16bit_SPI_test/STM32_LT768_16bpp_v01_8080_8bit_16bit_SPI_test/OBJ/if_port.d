@@ -1,0 +1,15 @@
+.\obj\if_port.o: HARDWARE\IF_PORT\if_port.c
+.\obj\if_port.o: HARDWARE\IF_PORT\if_port.h
+.\obj\if_port.o: .\SYSTEM\sys\sys.h
+.\obj\if_port.o: .\USER\stm32f10x.h
+.\obj\if_port.o: .\CORE\core_cm3.h
+.\obj\if_port.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+.\obj\if_port.o: .\USER\system_stm32f10x.h
+.\obj\if_port.o: .\USER\stm32f10x_conf.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\stm32f10x_fsmc.h
+.\obj\if_port.o: .\USER\stm32f10x.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\stm32f10x_gpio.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\stm32f10x_rcc.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\stm32f10x_spi.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\stm32f10x_usart.h
+.\obj\if_port.o: .\STM32F10x_FWLib\inc\misc.h

@@ -1,0 +1,1 @@
+.\obj\lt738.o: HARDWARE\LT738\LT738.c
