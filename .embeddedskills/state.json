@@ -1,0 +1,17 @@
+{
+  "last_serial_send": {
+    "port": "../../../../../../../../dev/ttyACM0",
+    "baudrate": 9600,
+    "bytes_sent": 17,
+    "timestamp": "2026-09-13T19:11:42+08:00"
+  },
+  "last_observe": {
+    "type": "serial_log",
+    "port": "../../../../../../../../dev/ttyACM0",
+    "baudrate": 9600,
+    "file": "../../../../../../../../tmp/k2000-diagnostic-retry.log",
+    "lines": 43,
+    "duration_sec": 30.0,
+    "timestamp": "2026-09-13T22:21:30+08:00"
+  }
+}

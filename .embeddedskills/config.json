@@ -1,0 +1,10 @@
+{
+  "serial": {
+    "port": "/dev/ttyACM0",
+    "baudrate": 9600,
+    "bytesize": 8,
+    "parity": "none",
+    "stopbits": 1,
+    "encoding": "utf-8"
+  }
+}
