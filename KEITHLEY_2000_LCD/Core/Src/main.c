@@ -256,6 +256,10 @@ static uint32_t s_display_on_tick;
 #endif
 static bool s_display_ready;
 static bool s_display_enabled;
+#if K2000_INTERNAL_FONT_PROBE
+static bool s_internal_font_probe_failed;
+static lt7680_status_t s_internal_font_probe_error = LT7680_OK;
+#endif
 static bool s_initial_page_pending;
 static bool s_frame_rendering;
 static uint8_t s_visible_page;
@@ -1637,7 +1641,7 @@ static void READING_ONLY_LEGACY display_enable_after_initial_frame(void)
 /* Map a scheduler phase to the UI band its drawing owns. Bands are the
  * unit of inter-page synchronization: a runtime frame only mutates pixels
  * inside the band(s) of its phases, so a band copy can never miss a write. */
-static uint8_t frame_region_for_phase(render_phase_t phase)
+static uint8_t __attribute__((unused)) frame_region_for_phase(render_phase_t phase)
 {
     switch (phase)
     {
@@ -1898,7 +1902,7 @@ static bool ui_draw_text(uint16_t x, uint16_t y, const char *text,
 static bool ui_draw_digits(uint16_t x, uint16_t y, const char *text,
                            uint16_t color);
 
-static void raw_reading_only_render(void)
+static void __attribute__((unused)) raw_reading_only_render(void)
 {
     uint32_t now = HAL_GetTick();
 
@@ -2051,6 +2055,12 @@ static lt7680_status_t ui_fill_rect(uint16_t x, uint16_t y, uint16_t w,
     {
         s_reading_only_last_error = st;
         s_reading_only_io_error = true;
+    }
+#endif
+#if K2000_INTERNAL_FONT_PROBE
+    if (st != LT7680_OK && !s_internal_font_probe_failed)
+    {
+        s_internal_font_probe_error = st;
     }
 #endif
     return st;
@@ -2986,7 +2996,7 @@ static bool rif_cache_pixel_probe(void)
     return ok;
 }
 
-static void rif_init(void)
+static void __attribute__((unused)) rif_init(void)
 {
     uint8_t header[RIF_READER_HEADER_SIZE];
     uint8_t id[3] = {0u, 0u, 0u};
@@ -6537,15 +6547,29 @@ static void reading_scene_render(void)
 #if K2000_INTERNAL_FONT_PROBE
     static bool internal_font_probe_drawn;
 
-    if (!s_display_ready)
+    if (!s_display_ready || s_internal_font_probe_failed)
         return;
     if (!internal_font_probe_drawn)
     {
-        if (!ui_draw_text(32u, 48u, "8", MAIN_DISPLAY_COLOR_GREEN))
+        if (ui_draw_text(32u, 48u, "8", MAIN_DISPLAY_COLOR_GREEN))
+        {
+            internal_font_probe_drawn = true;
+            hal_uart_send_text("PASS static font probe drawn\r\n");
             return;
-        internal_font_probe_drawn = true;
+        }
+        if (s_internal_font_probe_error == LT7680_OK)
+            return; /* The bounded bitmap job needs another scene turn. */
+
+        s_internal_font_probe_failed = true;
+        s_display_ready = false;
+        s_display_enabled = false;
+        (void)lt7680_write_reg(0x12u, 0x08u);
+        hal_uart_send_text("FAIL static font probe=");
+        hal_uart_send_hex8((uint8_t)s_internal_font_probe_error);
+        hal_uart_send_text("\r\n");
     }
     return;
+}
 #else
 #if K2000_READING_ONLY_BASELINE
     raw_reading_only_render();
