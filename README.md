@@ -1,14 +1,18 @@
 # KEITHLEY 2000 TFT 显示板固件（已归档）
 
+# UI展示
+![ui_showcase](ui_showcase.jpg)
+
 > **项目状态：已放弃，仅供参考。** 当前 UI 为简化调试之前的正式版本。
 > LT7680 不适合绘制本项目这种复杂 UI，实测中出现大量难以根治的显示问题，
-> 因此停止继续投入。请勿将此作为量产固件使用。
+> 因此停止继续投入。
 
 ## 来源
 
 - 本项目基于 [RM-Engineering 的开源硬件项目](https://github.com/RM-Engineering/KEITHLEY-2000-replacing-the-VFD-with-a-TFT-color-display)
   （Keithley 2000 VFD 改 TFT 彩屏，320×960 + LT7680 图形加速方案）修改而来。
   感谢 RM-Engineering 的开源工作，硬件选型与转换思路均参考该项目。
+- 协议来源于 [Pila的 OLED 前面板项目](https://gitlab.com/Pilatomic/keithley2000_oled_frontpanel)。
 - 本仓库的固件、仿真器与资源工具均为我们自行开发，
   包括读数/趋势正式 UI、浏览器仿真器与 RIF 资源镜像工具链。
 
